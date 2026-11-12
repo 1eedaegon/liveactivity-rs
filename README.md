@@ -450,8 +450,8 @@ Requirements and their test evidence are in
 
 Releases follow the subjects of the commits on `main`, which are
 [conventional commits](https://www.conventionalcommits.org/). After CI passes
-on `main`, the release workflow bumps the version, writes the changelog, tags
-the commit and publishes the crate:
+on `main`, the release workflow bumps the version, writes the changelog, waits
+for CI on that commit, tags it and publishes the crate:
 
 | Subject | Release |
 | --- | --- |

@@ -1,0 +1,18 @@
+[package]
+name = "mock-framework-plugin"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+liveactivity-core = { path = "../../crates/liveactivity-core" }
+serde_json.workspace = true
+
+[dev-dependencies]
+futures-executor.workspace = true
+
+[lints]
+workspace = true

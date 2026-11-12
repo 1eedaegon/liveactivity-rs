@@ -16,14 +16,11 @@ live.update(UpdateInput::progress(&order.id, 1, "Order 42", "On the way", 0.6))
 live.end(EndInput::new(&order.id)).await?;
 ```
 
-Status: pre-release. The contract may still change before the first published
-version.
-
 ## Install
 
 ```toml
 [dependencies]
-liveactivity = { git = "https://github.com/1eedaegon/liveactivity-rs" }
+liveactivity = "0.1"
 ```
 
 The crate uses [activitykit](https://github.com/1eedaegon/activitykit-rs) for

@@ -1,0 +1,20 @@
+[package]
+name = "mock-framework-plugin"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# The interface alone: an external backend needs none of the default engines.
+liveactivity = { path = "../../crates/liveactivity", default-features = false }
+serde_json.workspace = true
+
+[dev-dependencies]
+futures-executor.workspace = true
+liveactivity = { path = "../../crates/liveactivity", default-features = false, features = ["testkit"] }
+
+[lints]
+workspace = true

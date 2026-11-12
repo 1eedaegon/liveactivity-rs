@@ -1,0 +1,34 @@
+[package]
+name = "liveactivity"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Framework-neutral Live Activities: one interface over ActivityKit, Android Live Updates and other backends"
+keywords = ["live-activity", "activitykit", "android", "plugin"]
+categories = ["api-bindings", "os"]
+
+[features]
+# The default native backends. Without them the crate is the interface alone,
+# for an adapter that brings another backend.
+default = ["activitykit", "liveupdate"]
+activitykit = ["dep:activitykit"]
+liveupdate = ["dep:liveupdate", "liveupdate/android"]
+# The conformance suite and a reference backend, for the tests of an implementer.
+testkit = []
+
+[dependencies]
+activitykit = { workspace = true, optional = true }
+liveupdate = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+futures-executor.workspace = true
+liveactivity = { path = ".", default-features = false, features = ["testkit"] }
+
+[lints]
+workspace = true

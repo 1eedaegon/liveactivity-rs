@@ -33,7 +33,20 @@ pub(crate) fn activity_record(record: liveupdate::ActivityRecord) -> crate::Resu
     })
 }
 
-pub(crate) fn capabilities(value: liveupdate::Capabilities) -> Capabilities {
+/// The schema-v1 records of `list`; layout activities share liveupdate's list.
+pub(crate) fn v1_records(
+    records: Vec<liveupdate::ActivityRecord>,
+) -> crate::Result<Vec<ActivityRecord>> {
+    records
+        .into_iter()
+        .filter(|record| record.schema_version == 1)
+        .map(activity_record)
+        .collect()
+}
+
+/// What the engine offers. Layouts and their buttons need the files of the app, which `layouts` says the backend
+/// was given.
+pub(crate) fn capabilities(value: liveupdate::Capabilities, layouts: bool) -> Capabilities {
     let supported = FeatureSupport::Supported;
     let support = |yes: bool| {
         if yes {
@@ -50,13 +63,17 @@ pub(crate) fn capabilities(value: liveupdate::Capabilities) -> Capabilities {
         end: supported,
         progress: supported,
         timer: supported,
-        actions: support(value.presentation.actions && value.presentation.events),
+        actions: support(layouts),
         state_observation: supported,
         silent_update: supported,
-        native_live_activity: support(value.can_promote()),
+        native_live_activity: if value.can_promote() {
+            supported
+        } else {
+            FeatureSupport::Unsupported
+        },
         max_payload_bytes: 4096,
-        // The engine draws Android's system templates only.
-        layout: FeatureSupport::Unsupported,
+        layout: support(layouts),
+        push: FeatureSupport::Unsupported,
     }
 }
 
@@ -78,6 +95,7 @@ pub(crate) fn permissions(value: liveupdate::Capabilities) -> Permissions {
         } else {
             PermissionState::NotApplicable
         },
+        frequent_pushes: PermissionState::NotApplicable,
     }
 }
 
@@ -166,14 +184,14 @@ fn non_v1_record() -> Error {
     )
 }
 
-fn fallback(value: Fallback) -> liveupdate::Fallback {
+pub(crate) fn fallback(value: Fallback) -> liveupdate::Fallback {
     match value {
         Fallback::None => liveupdate::Fallback::None,
         Fallback::Notification => liveupdate::Fallback::Notification,
     }
 }
 
-fn activity_state(value: liveupdate::ActivityState) -> ActivityState {
+pub(crate) fn activity_state(value: liveupdate::ActivityState) -> ActivityState {
     match value {
         liveupdate::ActivityState::Active => ActivityState::Active,
         liveupdate::ActivityState::Stale => ActivityState::Stale,
@@ -184,7 +202,7 @@ fn activity_state(value: liveupdate::ActivityState) -> ActivityState {
     }
 }
 
-fn promotion_state(value: liveupdate::PromotionState) -> PromotionState {
+pub(crate) fn promotion_state(value: liveupdate::PromotionState) -> PromotionState {
     match value {
         liveupdate::PromotionState::Promoted => PromotionState::Promoted,
         liveupdate::PromotionState::NotPromoted => PromotionState::NotPromoted,
@@ -211,7 +229,6 @@ mod tests {
             stale_at: None,
         }
     }
-
     #[test]
     fn a_start_becomes_a_private_rust_owned_request() {
         let request = start_request(StartInput {
@@ -227,7 +244,6 @@ mod tests {
         assert_eq!(request.snapshot.progress, Some(0.25));
         assert!(request.snapshot.presentation.is_none());
     }
-
     #[test]
     fn the_android_boundary_adds_the_backend_to_liveupdate_records() {
         let record = activity_record(liveupdate::ActivityRecord {
@@ -258,7 +274,6 @@ mod tests {
         assert_eq!(record.promotion_state, PromotionState::NotPromoted);
         assert_eq!(record.snapshot.revision, 2);
     }
-
     #[test]
     fn rich_core_templates_are_not_guessed_into_the_v1_contract() {
         for template in [
@@ -270,7 +285,6 @@ mod tests {
             assert_eq!(error.code, "NATIVE_ERROR");
         }
     }
-
     #[test]
     fn a_core_snapshot_with_a_presentation_is_not_guessed_into_the_v1_contract() {
         let presentation =
@@ -297,18 +311,22 @@ mod tests {
         });
         assert_eq!(record.unwrap_err().code, "NATIVE_ERROR");
     }
-
     #[test]
     fn capabilities_and_errors_keep_stable_public_values() {
-        let converted = capabilities(liveupdate::Capabilities {
-            supported: true,
-            notifications_enabled: true,
-            promotion_enabled: false,
-            presentation: liveupdate::PresentationCapabilities::default(),
-        });
+        let converted = capabilities(
+            liveupdate::Capabilities {
+                supported: true,
+                notifications_enabled: true,
+                promotion_enabled: false,
+                presentation: liveupdate::PresentationCapabilities::default(),
+            },
+            true,
+        );
         assert_eq!(converted.backend, Backend::AndroidNotification);
         assert_eq!(converted.start, FeatureSupport::Supported);
         assert_eq!(converted.native_live_activity, FeatureSupport::Unsupported);
+        // Android takes no pushes.
+        assert_eq!(converted.push, FeatureSupport::Unsupported);
 
         let converted = error(liveupdate::Error::new(
             liveupdate::ErrorCode::StaleRevision,
@@ -321,7 +339,6 @@ mod tests {
             liveupdate::EndPolicy::After { at: 42 },
         );
     }
-
     #[test]
     fn every_liveupdate_code_is_one_of_the_contracts() {
         use liveupdate::ErrorCode::*;

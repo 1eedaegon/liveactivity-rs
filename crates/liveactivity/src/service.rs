@@ -1,7 +1,7 @@
 use crate::{
     ActivityRecord, BackendContext, Capabilities, EndInput, EventSink, LayoutActivityRecord,
     LayoutEndInput, LayoutStartInput, LayoutUpdateInput, LiveActivityBackend, PermissionKind,
-    Permissions, Result, StartInput, UpdateInput, Validate, check_image,
+    Permissions, PushTokens, Result, StartInput, UpdateInput, Validate, check_image,
 };
 use std::sync::Arc;
 
@@ -9,11 +9,11 @@ use std::sync::Arc;
 /// a framework plugin or a platform names the backend. Whatever is not named is the default.
 ///
 /// ```no_run
-/// # use liveactivity::{ActionEvent, LiveActivity};
+/// # use liveactivity::{Event, LiveActivity};
 /// # fn run(my_backend: impl liveactivity::LiveActivityBackend) -> liveactivity::Result<()> {
 /// // An application: the backend of the platform, and a closure for taps.
 /// let live = LiveActivity::builder()
-///     .event_sink(|tap: ActionEvent| println!("{}", tap.action_id))
+///     .event_sink(|event: Event| println!("{event:?}"))
 ///     .build()?;
 ///
 /// // A framework plugin or a platform: its own backend in place of the default.
@@ -30,7 +30,7 @@ pub struct Builder {
 
 impl Builder {
     /// The backend that runs the commands. Without one, the default backend of the target platform runs them:
-    /// Live Updates on Android and ActivityKit elsewhere, which off iOS answers `UNSUPPORTED_PLATFORM`.
+    /// Live Updates on Android, ActivityKit on iOS, and elsewhere [`UnsupportedBackend`](crate::UnsupportedBackend).
     pub fn backend<B: LiveActivityBackend>(self, backend: B) -> Self {
         Self {
             backend: Some(Arc::new(backend)),
@@ -59,7 +59,7 @@ impl Builder {
         };
         let sink = self
             .sink
-            .unwrap_or_else(|| BackendContext::new(|_: crate::ActionEvent| {}));
+            .unwrap_or_else(|| BackendContext::new(|_: crate::Event| {}));
         backend.attach(sink)?;
         Ok(LiveActivity { backend })
     }
@@ -148,6 +148,12 @@ impl LiveActivity {
         self.backend
             .write_image(name.to_owned(), png.to_vec())
             .await
+    }
+
+    /// The push tokens the backend holds since launch: the newest of each activity that got one, and the app's
+    /// push-to-start token. Events report each token as it comes; this is for a sink that listened late.
+    pub async fn push_tokens(&self) -> Result<PushTokens> {
+        self.backend.push_tokens().await
     }
 
     /// Sends the taps the platform queued to the event sink. Android queues them: call this

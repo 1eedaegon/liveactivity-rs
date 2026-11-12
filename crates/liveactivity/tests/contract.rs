@@ -130,13 +130,37 @@ fn req_c_003_whatever_the_builder_is_not_told_is_the_default() {
     // REQ-C-003
     // Neither side named: the backend of the platform, which a host has none of, and taps dropped.
     let unnamed = LiveActivity::builder().build().unwrap();
-    let shortest = liveactivity::connect_native(|_: ActionEvent| {}).unwrap();
+    let shortest = liveactivity::connect_native(|_: liveactivity::Event| {}).unwrap();
     for live in [unnamed, shortest] {
         let start = StartInput::progress("order:42", "Order 42", "Preparing", 0.1);
         assert_eq!(
             block_on(live.start(start)).unwrap_err().code,
             "UNSUPPORTED_PLATFORM"
         );
+        // The two queries answer: nothing is supported here, under the host's own name.
+        let capabilities = block_on(live.capabilities()).unwrap();
+        assert_eq!(capabilities.platform, std::env::consts::OS);
+        assert_eq!(capabilities.max_payload_bytes, 0);
+        assert_eq!(
+            block_on(live.permissions()).unwrap().notifications,
+            liveactivity::PermissionState::NotApplicable
+        );
+        assert_eq!(
+            block_on(live.push_tokens()).unwrap(),
+            liveactivity::PushTokens::default()
+        );
+        block_on(live.sync_events()).unwrap();
+        // Everything else is refused, after the check of the request.
+        let refused = [
+            block_on(live.update(UpdateInput::progress("id", 1, "Order 42", "Late", 0.5))).err(),
+            block_on(live.end(EndInput::new("id"))).err(),
+            block_on(live.list()).err(),
+            block_on(live.list_layout()).err(),
+            block_on(live.request_permissions(liveactivity::PermissionKind::Notifications)).err(),
+        ];
+        for error in refused {
+            assert_eq!(error.unwrap().code, "UNSUPPORTED_PLATFORM");
+        }
     }
 
     // Only the backend named: a tap has nowhere to go and is dropped without a failure.

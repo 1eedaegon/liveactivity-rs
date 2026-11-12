@@ -7,7 +7,7 @@
 //! As on iOS, an activity that ends at once leaves the system's list (here at once, the losing side of the race), and
 //! `activity(id)` finds an id through a handle that is alive in the process, else through the list.
 
-use super::{Acknowledge, Authorization, EndSpec, Handle, Kit, StartSpec, UpdateSpec};
+use super::{Acknowledge, Authorization, EndSpec, Handle, Kit, KitEvent, StartSpec, UpdateSpec};
 use crate::layout::ActionEvent;
 use activitykit::{Error, State, Values};
 use std::{
@@ -55,8 +55,8 @@ pub(crate) struct Book {
     pub(crate) authorization: Option<Authorization>,
     /// The handles alive in this process, by id; they share one token, as activitykit's share their state.
     alive: HashMap<String, Weak<()>>,
-    /// Where the taps of the kit's events go, once the backend subscribed.
-    taps: Option<mpsc::Sender<(ActionEvent, FakeAck)>>,
+    /// Where the kit's events go, once the backend subscribed.
+    events: Option<mpsc::Sender<KitEvent<FakeHandle, FakeAck>>>,
 }
 
 impl Book {
@@ -118,19 +118,34 @@ impl FakeKit {
             .for_each(|entry| entry.state = state);
     }
 
-    /// A tap as activitykit's events give it, to the subscriber of [`Kit::taps`].
+    /// A tap as activitykit's events give it, to the subscriber of [`Kit::events`].
     pub(crate) fn send_tap(&self, event: ActionEvent, acknowledgement: FakeAck) {
+        self.send_event(KitEvent::Tap(event, acknowledgement));
+    }
+
+    /// An event as activitykit gives it, to the subscriber of [`Kit::events`].
+    pub(crate) fn send_event(&self, event: KitEvent<FakeHandle, FakeAck>) {
         let book = self.book();
-        let taps = book
-            .taps
+        let events = book
+            .events
             .as_ref()
-            .expect("the backend subscribed to the taps");
-        taps.send((event, acknowledgement)).unwrap();
+            .expect("the backend subscribed to the events");
+        events.send(event).unwrap();
     }
 
     /// The end of the kit's events.
-    pub(crate) fn close_taps(&self) {
-        self.book().taps = None;
+    pub(crate) fn close_events(&self) {
+        self.book().events = None;
+    }
+
+    /// What a push does to the activity `id`: it shows `values` at `revision`, above what it had.
+    #[allow(dead_code)]
+    pub(crate) fn pushed(&self, id: &str, revision: u64, values: Values) {
+        let mut book = self.book();
+        for entry in book.entries.iter_mut().filter(|entry| entry.id == id) {
+            entry.values = values.clone();
+            entry.revision = revision;
+        }
     }
 
     /// What activitykit reports the system could not show of the activity `id`.
@@ -173,10 +188,12 @@ fn live(state: State) -> bool {
     matches!(state, State::Active | State::Stale | State::Pending)
 }
 
-/// A start's content, as a repeated keyed start compares it: everything but the timestamp.
+/// A start's content, as a repeated keyed start compares it: everything but the timestamp and the push, which the
+/// running activity has or lacks already.
 fn content(start: &StartSpec) -> StartSpec {
     StartSpec {
         timestamp: None,
+        push: None,
         ..start.clone()
     }
 }
@@ -209,11 +226,11 @@ impl Kit for FakeKit {
     type Handle = FakeHandle;
     type Ack = FakeAck;
 
-    fn taps(&self) -> Box<dyn Iterator<Item = (ActionEvent, FakeAck)> + Send> {
+    fn events(&self) -> Box<dyn Iterator<Item = KitEvent<FakeHandle, FakeAck>> + Send> {
         let (sender, receiver) = mpsc::channel();
         let mut book = self.book();
-        book.calls.push("taps".into());
-        book.taps = Some(sender);
+        book.calls.push("events".into());
+        book.events = Some(sender);
         Box::new(receiver.into_iter())
     }
 
@@ -222,6 +239,7 @@ impl Kit for FakeKit {
             supported: true,
             enabled: true,
             buttons: true,
+            frequent_pushes: true,
         })
     }
 

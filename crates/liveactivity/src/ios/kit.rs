@@ -2,11 +2,12 @@
 //! a device with Live Activities runs these calls; the logic itself is tested on a fake kit.
 
 use super::{
-    Acknowledge, Authorization, EndSpec, Handle, Kit, StartSpec, UpdateSpec, action_event,
+    Acknowledge, Authorization, EndSpec, Handle, Kit, KitEvent, StartSpec, UpdateSpec, action_event,
 };
-use crate::{layout::ActionEvent, models::EndPolicy};
+use crate::{layout::LayoutPush, models::EndPolicy};
 use activitykit::{
-    Acknowledgement, Activity, ActivityKit, End, Event, Start, State, Update, Values,
+    Acknowledgement, Activity, ActivityKit, ChannelId, End, Event, Push, Start, State, Update,
+    Values,
 };
 use std::{
     future::Future,
@@ -26,7 +27,8 @@ pub(crate) fn millis(at: SystemTime) -> Option<u64> {
     u64::try_from(at.duration_since(UNIX_EPOCH).ok()?.as_millis()).ok()
 }
 
-pub(crate) fn start_of(spec: StartSpec) -> Start {
+/// activitykit's start, or `INVALID_INPUT` for a channel that is no id, which the check of the request keeps out.
+pub(crate) fn start_of(spec: StartSpec) -> activitykit::Result<Start> {
     let start = Start::new(spec.layout, spec.values)
         .key(spec.key)
         .revision(spec.revision);
@@ -34,10 +36,15 @@ pub(crate) fn start_of(spec: StartSpec) -> Start {
         Some(at) => start.stale_at(time(at)),
         None => start,
     };
-    match spec.timestamp {
+    let start = match spec.timestamp {
         Some(at) => start.timestamp(time(at)),
         None => start,
-    }
+    };
+    Ok(match spec.push {
+        Some(LayoutPush::Token) => start.push(Push::Token),
+        Some(LayoutPush::Channel(id)) => start.push(Push::Channel(ChannelId::new(id)?)),
+        None => start,
+    })
 }
 
 pub(crate) fn update_of(spec: UpdateSpec) -> Update {
@@ -82,23 +89,42 @@ impl Acknowledge for Acknowledgement {
     }
 }
 
+/// What the backend takes of one of activitykit's events; the others pass.
+fn kit_event(event: Event) -> Option<KitEvent<Activity, Acknowledgement>> {
+    match event {
+        Event::Action {
+            activity,
+            action,
+            acknowledgement,
+            ..
+        } => Some(KitEvent::Tap(
+            action_event(&activity, action),
+            acknowledgement,
+        )),
+        Event::PushToken {
+            activity, token, ..
+        } => Some(KitEvent::PushToken {
+            activity,
+            token: token.to_string(),
+        }),
+        Event::PushToStartToken { token, .. } => Some(KitEvent::PushToStartToken {
+            token: token.to_string(),
+        }),
+        Event::Updated { activity, .. } => Some(KitEvent::Updated(activity)),
+        _ => None,
+    }
+}
+
 impl Kit for ActivityKit {
     type Handle = Activity;
     type Ack = Acknowledgement;
 
-    fn taps(&self) -> Box<dyn Iterator<Item = (ActionEvent, Acknowledgement)> + Send> {
+    fn events(&self) -> Box<dyn Iterator<Item = KitEvent<Activity, Acknowledgement>> + Send> {
         let events = self.events();
         Box::new(std::iter::from_fn(move || {
             loop {
-                match events.recv_blocking().ok()? {
-                    Event::Action {
-                        activity,
-                        action,
-                        acknowledgement,
-                        ..
-                    } => return Some((action_event(&activity, action), acknowledgement)),
-                    // The contract reports taps; `list` gives the state of an activity.
-                    _ => continue,
+                if let Some(found) = kit_event(events.recv_blocking().ok()?) {
+                    return Some(found);
                 }
             }
         }))
@@ -110,11 +136,12 @@ impl Kit for ActivityKit {
             supported: authorization.supported,
             enabled: authorization.enabled,
             buttons: authorization.buttons,
+            frequent_pushes: authorization.frequent_pushes,
         }
     }
 
-    fn start(&self, spec: StartSpec) -> impl Future<Output = activitykit::Result<Activity>> + Send {
-        self.start_with(start_of(spec))
+    async fn start(&self, spec: StartSpec) -> activitykit::Result<Activity> {
+        self.start_with(start_of(spec)?).await
     }
 
     fn activity(
@@ -184,23 +211,34 @@ mod tests {
     }
 
     #[test]
-    fn specs_reach_activitykit_with_their_revision_and_times() {
+    fn specs_reach_activitykit_with_their_revision_times_and_push() {
         let layout = activitykit::Layout::new(activitykit::layout::text("Recording"));
         let values = || Values::from([("level", 0.2)]);
-        let spec = StartSpec {
+        let spec = |push| StartSpec {
             key: "rec".into(),
             layout: layout.clone(),
             values: values(),
             revision: 5,
             stale_at: Some(1_000),
             timestamp: Some(2_000),
+            push,
         };
-        let expected = Start::new(layout, values())
+        let expected = Start::new(layout.clone(), values())
             .key("rec")
             .revision(5)
             .stale_at(time(1_000))
             .timestamp(time(2_000));
-        assert_eq!(debug(start_of(spec)), debug(expected));
+        assert_eq!(
+            debug(start_of(spec(None)).unwrap()),
+            debug(expected.clone())
+        );
+        assert_eq!(
+            debug(start_of(spec(Some(LayoutPush::Token))).unwrap()),
+            debug(expected.push(Push::Token))
+        );
+        // A channel that is no id never reaches ActivityKit.
+        let refused = start_of(spec(Some(LayoutPush::Channel("no id".into())))).unwrap_err();
+        assert_eq!(refused.code(), "INVALID_INPUT");
 
         let update = UpdateSpec {
             values: values(),

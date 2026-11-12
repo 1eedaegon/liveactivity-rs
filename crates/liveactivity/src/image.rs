@@ -80,9 +80,15 @@ fn too_large() -> Error {
     }
 }
 
-/// Writes the PNG under `name` in `folder`, replacing an earlier one. The bytes go to a hidden file
-/// first and are then renamed, so the widget reads the old image or the new one, never part of it.
+/// Checks the name and the PNG as [`check_image`] does, so that the name stays inside `folder`, then writes the
+/// PNG under `name` in `folder`, replacing an earlier one. The bytes go to a hidden file first and are then
+/// renamed, so the widget reads the old image or the new one, never part of it.
+///
+/// # Errors
+///
+/// `INVALID_INPUT` or `PAYLOAD_TOO_LARGE` from the check, `NATIVE_ERROR` when the file cannot be written.
 pub fn write(folder: &Path, name: &str, png: &[u8]) -> Result<()> {
+    check_image(name, png)?;
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let staging = folder.join(format!(
         ".{name}.{}-{}.tmp",

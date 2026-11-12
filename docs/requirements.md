@@ -65,6 +65,32 @@ the template contract, is left out of `list` and does not fail it.
 
 Evidence: `exchange::req_x_006_activities_outside_the_template_contract_do_not_break_the_list`.
 
+## REQ-X-007 Layouts on the Android default
+
+Given the folder of the app's files, the default Android backend runs layouts,
+stores images and reports taps on declared buttons with the key of their
+activity, and says so in its capabilities.
+
+Evidence: `exchange::req_x_007_with_the_apps_files_the_android_default_runs_layouts_images_and_keyed_taps`.
+
+## REQ-E-001 Events of taps and pushes
+
+A tap keeps its intent until the sink has returned. A push token is in the
+backend's record before its event goes out, and `push_tokens` answers the
+newest of each activity.
+
+Evidence: `ios::backend::tests::a_tap_keeps_its_intent_until_the_sink_returns_and_pushes_wait_for_nothing`
+and `pushes::tests::the_book_keeps_the_newest_token_of_each_of_the_last_activities`.
+
+## REQ-C-004 A platform without Live Activities
+
+Elsewhere than on iOS and Android the default backend answers the two queries
+and refuses every other call with `UNSUPPORTED_PLATFORM`. A blocking call on
+the main thread of an Apple platform answers at once instead of hanging.
+
+Evidence: `contract::req_c_003_whatever_the_builder_is_not_told_is_the_default`
+and `ios::tests::a_blocking_call_on_the_main_thread_answers_at_once`.
+
 ## REQ-N-001 No framework in the crate
 
 The crate depends on its two engines, serialization and errors only.

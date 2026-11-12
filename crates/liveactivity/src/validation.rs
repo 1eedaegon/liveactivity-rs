@@ -5,7 +5,9 @@ use serde_json::Value;
 pub(crate) const MAX_REVISION: u64 = 9_007_199_254_740_991;
 pub(crate) const MAX_TIMESTAMP: u64 = 8_640_000_000_000_000;
 
+/// A request that can be checked against the contract.
 pub trait Validate {
+    /// Checks the request, or answers `INVALID_INPUT` or `PAYLOAD_TOO_LARGE`.
     fn validate(&self) -> Result<()>;
 }
 

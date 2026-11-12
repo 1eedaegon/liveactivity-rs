@@ -6,8 +6,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "../../README.md"
+documentation = "https://docs.rs/liveactivity"
 description = "Framework-neutral Live Activities: one interface over ActivityKit, Android Live Updates and other backends"
-keywords = ["live-activity", "activitykit", "android", "plugin"]
+keywords = ["live-activity", "activitykit", "dynamic-island", "android", "ios"]
 categories = ["api-bindings", "os"]
 
 [features]
@@ -16,6 +18,10 @@ testkit = []
 
 [[example]]
 name = "usage"
+required-features = ["testkit"]
+
+[[example]]
+name = "adapter"
 required-features = ["testkit"]
 
 [dependencies]

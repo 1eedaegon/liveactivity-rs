@@ -14,6 +14,10 @@ use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use std::collections::BTreeMap;
 
 pub use activitykit::Value;
+/// What a layout activity asks ActivityKit for on iOS: a push token of its own (`"token"`), reported as a
+/// `live-activity://push-token` event once ActivityKit has it, or a broadcast channel the server made at APNs
+/// (`{"channel": "<id>"}`, iOS 18). Android ignores it.
+pub use activitykit::contract::PushWire as LayoutPush;
 pub use activitykit::contract::{
     AndroidOptions, AndroidVisibility, Island, IslandExpanded, weight,
 };
@@ -42,7 +46,9 @@ fn none<T>(member: &Option<T>) -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LayoutSnapshot {
+    /// The revision of this content: higher than the last accepted one.
     pub revision: u64,
+    /// Every value the layout binds, by key. An update sends them all again.
     pub values: BTreeMap<String, Value>,
     /// When the system may show the activity as out of date, in epoch milliseconds.
     #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
@@ -53,25 +59,38 @@ pub struct LayoutSnapshot {
     pub timestamp: Option<u64>,
 }
 
+/// The input of `start_layout`: a layout tree, its styles and its first values.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LayoutStartInput {
+    /// The application's own name of the activity: a running activity with the same key and request is the same activity.
     pub activity_key: String,
+    /// The version of the request contract: 1 for a template, 2 for a layout.
     pub schema_version: u8,
+    /// What to do when the platform cannot give the activity its native presentation.
     pub fallback: Fallback,
+    /// One tree per region and the two tints, fixed at start.
     pub layout: Layout,
     /// Styles by token; nodes name them with `style`.
     #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
     pub styles: Option<BTreeMap<String, Style>>,
+    /// The values, with their revision.
     pub snapshot: LayoutSnapshot,
+    /// Options that only Android reads.
     #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
     pub android: Option<AndroidOptions>,
+    /// Ignored on Android.
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
+    pub push: Option<LayoutPush>,
 }
 
+/// The input of `update_layout`: every value again, under a higher revision.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LayoutUpdateInput {
+    /// The handle of the activity, new for every start.
     pub id: String,
+    /// The values, with their revision.
     pub snapshot: LayoutSnapshot,
 }
 
@@ -80,8 +99,11 @@ pub struct LayoutUpdateInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LayoutEndInput {
+    /// The handle of the activity, new for every start.
     pub id: String,
+    /// When the ended activity leaves the screen.
     pub policy: EndPolicy,
+    /// The final content, checked as an update. Without it the activity ends with its last accepted values.
     #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
     pub snapshot: Option<LayoutSnapshot>,
 }
@@ -90,15 +112,25 @@ pub struct LayoutEndInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LayoutActivityRecord {
+    /// The handle of the activity, new for every start.
     pub id: String,
+    /// The application's own name of the activity: a running activity with the same key and request is the same activity.
     pub activity_key: String,
+    /// The version of the request contract: 1 for a template, 2 for a layout.
     pub schema_version: u8,
+    /// The values, with their revision.
     pub snapshot: LayoutSnapshot,
+    /// Which backend shows the activity.
     pub backend: Backend,
+    /// The lifecycle state the platform reports.
     pub state: ActivityState,
+    /// What is known of the activity being on screen.
     pub visibility: Visibility,
+    /// What the platform left out of the request, such as `nativeLiveActivity` or `layout.<node>`.
     pub degraded_features: Vec<String>,
+    /// Whether promotion to a Live Update was requested (Android).
     pub promotion_requested: bool,
+    /// What Android did with a request to promote the notification.
     pub promotion_state: PromotionState,
 }
 
@@ -106,6 +138,7 @@ pub struct LayoutActivityRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionEvent {
+    /// The id of the tapped button, as its node declares it.
     pub action_id: String,
     /// Handle of the activity that showed the button.
     pub activity_id: String,
@@ -139,6 +172,7 @@ impl LayoutStartInput {
             styles: self.styles.clone(),
             snapshot: self.snapshot.wire(),
             android: self.android.clone(),
+            push: self.push.clone(),
         }
     }
 
@@ -249,7 +283,6 @@ mod tests {
             "snapshot":{"revision":0,"values":{"status":"On time","tone":"green"},"staleAt":5,"timestamp":7},
             "android":{"visibility":"private"}})
     }
-
     #[test]
     fn a_request_reads_into_the_contracts_types_and_writes_back_the_same_json() {
         let input: LayoutStartInput = parse("start_layout", start()).unwrap();
@@ -278,7 +311,6 @@ mod tests {
             "immediate"
         );
     }
-
     #[test]
     fn parse_is_activitykits_strict_check_and_the_types_validate_the_same() {
         let mut nulled = start();
@@ -333,7 +365,6 @@ mod tests {
         };
         assert_eq!(input.validate_end(&bare), Ok(()));
     }
-
     #[test]
     fn the_template_marker_is_no_value_key_of_a_layout_request() {
         let code = |result: Result<()>| result.map_err(|error| error.code);

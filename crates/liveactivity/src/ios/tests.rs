@@ -1,5 +1,5 @@
 use super::{fake::FakeKit, *};
-use crate::layout::Value;
+use crate::layout::{LayoutPush, Value};
 use activitykit::{Error as Kit, LimitScope};
 use serde_json::{Value as Json, json};
 
@@ -56,7 +56,6 @@ fn template_update(id: &str, revision: u64, progress: f64) -> UpdateInput {
 fn code<T: std::fmt::Debug>(result: Result<T>) -> String {
     result.unwrap_err().code
 }
-
 #[test]
 fn a_layout_start_goes_to_activitykit_and_answers_a_v2_record() {
     let (apple, kit) = apple();
@@ -102,7 +101,6 @@ fn a_layout_start_goes_to_activitykit_and_answers_a_v2_record() {
     let listed = block_on(apple.list_layout()).unwrap();
     assert_eq!(listed[0].degraded_features, ["alertSound", "relevance"]);
 }
-
 #[test]
 fn the_same_start_returns_the_running_activity_also_after_a_relaunch() {
     let (apple, kit) = apple();
@@ -128,7 +126,6 @@ fn the_same_start_returns_the_running_activity_also_after_a_relaunch() {
     assert_ne!(fresh.id, first.id);
     assert_eq!(kit.book().starts.len(), 2);
 }
-
 #[test]
 fn an_update_goes_out_at_the_requests_revision_under_activitykits_rules() {
     let (apple, kit) = apple();
@@ -176,7 +173,6 @@ fn an_update_goes_out_at_the_requests_revision_under_activitykits_rules() {
     );
     assert_eq!(kit.book().updates[2].timestamp, None);
 }
-
 #[test]
 fn an_unknown_or_ended_activity_is_not_found_and_a_relaunch_finds_it_by_its_id() {
     let (apple, kit) = apple();
@@ -217,7 +213,6 @@ fn an_unknown_or_ended_activity_is_not_found_and_a_relaunch_finds_it_by_its_id()
     );
     assert!(kit.calls().contains(&format!("activity {id}")));
 }
-
 #[test]
 fn an_end_sends_its_policy_and_its_final_content_at_its_revision_and_ending_again_answers() {
     let (apple, kit) = apple();
@@ -291,7 +286,6 @@ fn an_end_sends_its_policy_and_its_final_content_at_its_revision_and_ending_agai
         (7, Value::Text("red".into()))
     );
 }
-
 #[test]
 fn an_activity_that_ended_at_once_answers_a_second_end_after_the_system_drops_it() {
     let (apple, kit) = apple();
@@ -317,7 +311,6 @@ fn an_activity_that_ended_at_once_answers_a_second_end_after_the_system_drops_it
         "NOT_FOUND"
     );
 }
-
 #[test]
 fn the_last_64_activities_that_ended_answer_again_each_counted_once() {
     let (apple, kit) = apple();
@@ -353,7 +346,6 @@ fn the_last_64_activities_that_ended_answer_again_each_counted_once() {
         ("NOT_FOUND".into(), "ok".into())
     );
 }
-
 #[test]
 fn a_broken_request_never_reaches_activitykit_and_activitykit_errors_keep_their_codes() {
     let (apple, kit) = apple();
@@ -401,15 +393,14 @@ fn a_broken_request_never_reaches_activitykit_and_activitykit_errors_keep_their_
         "NATIVE_ERROR"
     );
 }
-
 #[test]
 fn capabilities_and_permissions_follow_activitykits_authorization() {
     let (apple, kit) = apple();
-    // Every feature, as JavaScript reads it: each follows the authorization, and `actions` also the buttons.
+    // Every feature, as a caller reads it: each follows the authorization, and `actions` also the buttons.
     let features = |backend: &str, all: &str, actions: &str| {
         json!({"platform":"ios","backend":backend,"start":all,"update":all,"end":all,"progress":all,"timer":all,
             "actions":actions,"stateObservation":all,"silentUpdate":all,"nativeLiveActivity":all,
-            "maxPayloadBytes":4096,"layout":all})
+            "maxPayloadBytes":4096,"layout":all,"push":all})
     };
     let reported = |apple: &Apple<FakeKit>| serde_json::to_value(apple.capabilities()).unwrap();
     assert_eq!(
@@ -424,6 +415,7 @@ fn capabilities_and_permissions_follow_activitykits_authorization() {
         supported: true,
         enabled: false,
         buttons: false,
+        frequent_pushes: false,
     });
     assert_eq!(
         reported(&apple),
@@ -456,6 +448,7 @@ fn capabilities_and_permissions_follow_activitykits_authorization() {
         supported: false,
         enabled: false,
         buttons: false,
+        frequent_pushes: false,
     });
     assert_eq!(
         reported(&apple),
@@ -471,7 +464,6 @@ fn capabilities_and_permissions_follow_activitykits_authorization() {
         "UNSUPPORTED_PLATFORM"
     );
 }
-
 #[test]
 fn an_image_is_checked_and_then_written_by_activitykit() {
     let (apple, kit) = apple();
@@ -494,7 +486,6 @@ fn an_image_is_checked_and_then_written_by_activitykit() {
     );
     assert_eq!(kit.calls(), ["image badge.png", "image badge.png"]);
 }
-
 #[test]
 fn a_template_activity_starts_updates_ends_and_lists_as_contract_v1() {
     let (apple, kit) = apple();
@@ -567,7 +558,6 @@ fn a_template_activity_starts_updates_ends_and_lists_as_contract_v1() {
         Some(&Value::Text("progress".into()))
     );
 }
-
 #[test]
 fn the_two_contract_versions_do_not_see_each_others_activities() {
     let (apple, kit) = apple();
@@ -621,7 +611,73 @@ fn the_two_contract_versions_do_not_see_each_others_activities() {
         ["dynamicIsland"]
     );
 }
-
+#[test]
+fn a_start_with_a_push_reaches_the_kit_as_it_is() {
+    let (apple, kit) = apple();
+    let mut channel = start("demo:1", "green");
+    channel.push = Some(LayoutPush::Channel("dGVzdA==".into()));
+    let first = block_on(apple.start_layout(channel)).unwrap();
+    let mut token = start("demo:2", "green");
+    token.push = Some(LayoutPush::Token);
+    block_on(apple.start_layout(token)).unwrap();
+    block_on(apple.start_layout(start("demo:3", "green"))).unwrap();
+    let pushes: Vec<_> = kit
+        .book()
+        .starts
+        .iter()
+        .map(|start| start.push.clone())
+        .collect();
+    assert_eq!(
+        pushes,
+        [
+            Some(LayoutPush::Channel("dGVzdA==".into())),
+            Some(LayoutPush::Token),
+            None
+        ]
+    );
+    // The push is no content: the same start again, asking for a token instead, is the running activity.
+    let mut again = start("demo:1", "green");
+    again.push = Some(LayoutPush::Token);
+    assert_eq!(block_on(apple.start_layout(again)).unwrap().id, first.id);
+    // A token is not in the record: ActivityKit makes it later and reports it as an event.
+    assert_eq!(kit.book().starts.len(), 3);
+}
+#[test]
+fn permissions_and_capabilities_report_pushes() {
+    let (apple, kit) = apple();
+    assert_eq!(apple.capabilities().push, FeatureSupport::Supported);
+    assert_eq!(
+        apple.permissions(false).frequent_pushes,
+        PermissionState::Granted
+    );
+    kit.book().authorization = Some(Authorization {
+        supported: true,
+        enabled: true,
+        buttons: true,
+        frequent_pushes: false,
+    });
+    // A switch in Settings, which the app offers with NSSupportsLiveActivitiesFrequentUpdates: a request changes
+    // nothing about it.
+    assert_eq!(
+        apple.permissions(false).frequent_pushes,
+        PermissionState::Denied
+    );
+    assert_eq!(
+        apple.permissions(true).frequent_pushes,
+        PermissionState::Denied
+    );
+    kit.book().authorization = Some(Authorization {
+        supported: false,
+        enabled: false,
+        buttons: false,
+        frequent_pushes: false,
+    });
+    assert_eq!(apple.capabilities().push, FeatureSupport::Unsupported);
+    assert_eq!(
+        apple.permissions(false).frequent_pushes,
+        PermissionState::NotApplicable
+    );
+}
 #[test]
 fn a_tap_names_the_action_the_activity_and_its_key() {
     let kit = FakeKit::default();
@@ -642,7 +698,6 @@ fn a_tap_names_the_action_the_activity_and_its_key() {
         None
     );
 }
-
 #[test]
 fn block_on_drives_a_future_that_another_thread_completes() {
     let (sender, receiver) = activitykit::async_channel::bounded(1);
@@ -652,4 +707,17 @@ fn block_on_drives_a_future_that_another_thread_completes() {
     });
     assert_eq!(block_on(async { receiver.recv().await.unwrap() }), 42);
     answer.join().unwrap();
+}
+
+#[test]
+fn a_blocking_call_on_the_main_thread_answers_at_once() {
+    // REQ-C-004
+    let call = || async { Ok::<_, Error>(7) };
+    assert_eq!(super::wait_on(false, call()), Ok(7));
+    assert_eq!(
+        super::wait_on(true, call()).unwrap_err().code,
+        "NATIVE_ERROR"
+    );
+    // A test runs off the main thread.
+    assert_eq!(crate::wait(call()), Ok(7));
 }

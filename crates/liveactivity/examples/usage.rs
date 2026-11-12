@@ -1,7 +1,7 @@
 //! One activity from start to end. `main` names the backend of the testkit, so the example runs anywhere; an
 //! application leaves `.backend(..)` out and gets the backend of its platform.
 
-use liveactivity::{ActionEvent, EndInput, LiveActivity, Result, StartInput, UpdateInput};
+use liveactivity::{EndInput, Event, LiveActivity, Result, StartInput, UpdateInput};
 
 async fn deliver(live: &LiveActivity) -> Result<()> {
     // The key is the application's own name of the activity. Starting again with the same key and content answers
@@ -35,8 +35,13 @@ async fn deliver(live: &LiveActivity) -> Result<()> {
 fn main() -> Result<()> {
     use liveactivity::testkit::MemoryBackend;
 
-    // The sink gets the taps on an activity's buttons. Any closure is one.
-    let sink = |tap: ActionEvent| println!("{} tapped {}", tap.activity_id, tap.action_id);
+    // The sink gets what the platform reports: taps on an activity's buttons, and on iOS what pushes bring. Any
+    // closure is one.
+    let sink = |event: Event| {
+        if let Event::Action(tap) = event {
+            println!("{} tapped {}", tap.activity_id, tap.action_id);
+        }
+    };
     let live = LiveActivity::builder()
         .backend(MemoryBackend::new())
         .event_sink(sink)

@@ -1,0 +1,463 @@
+//! A layout activity on Android: the projection of its lock screen tree and values onto a liveupdate schema-v2
+//! request, which liveupdate's renderer draws with Android's notification styles. Only the lock screen is walked,
+//! depth first in document order; a node shows when its `if` value is truthy and its `unless` value is not.
+
+use crate::layout::{Element, ImageSource, Layout, LayoutSnapshot, Node, Value};
+use std::collections::BTreeMap;
+
+/// The progress style's one segment: a layout progress is a fraction, liveupdate's an integer up to the segments'
+/// sum.
+const PROGRESS_SCALE: u32 = 1000;
+const MAX_TITLE: usize = 120;
+const MAX_STATUS: usize = 240;
+const MAX_ACTION_TITLE: usize = 64;
+const MAX_ACTIONS: usize = liveupdate::MAX_ACTIONS;
+
+/// What the projection needs from the app around it.
+pub(crate) struct Environment<'a> {
+    /// The title of a layout without a text.
+    pub(crate) app_name: &'a str,
+    /// The Samsung Now Bar option.
+    pub(crate) samsung_now_bar: bool,
+    /// The app-file path of a picture that `write_image` wrote, when it exists and liveupdate can draw it.
+    pub(crate) image: &'a dyn Fn(&str) -> Option<String>,
+}
+
+/// One layout snapshot as liveupdate takes it, and what the projection left out.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Projection {
+    pub(crate) snapshot: liveupdate::Snapshot,
+    /// `layout.<type>` for the shown nodes left out, then the parts of the request Android does not draw.
+    pub(crate) degraded: Vec<String>,
+}
+
+/// The template of a generation: the first progress gives Progress, else the first timer Timer, else two texts
+/// BigText, else Standard. Conditions do not count, so that every update keeps it.
+pub(crate) fn template(layout: &Layout) -> liveupdate::Template {
+    let mut texts = 0;
+    let mut timer = false;
+    let mut progress = false;
+    visit_all(
+        &layout.lock_screen,
+        false,
+        &mut |node, in_button| match &node.element {
+            Element::Progress { .. } => progress = true,
+            Element::TimerText { .. } => timer = true,
+            Element::Text { .. } if !in_button => texts += 1,
+            _ => {}
+        },
+    );
+    if progress {
+        liveupdate::Template::Progress
+    } else if timer {
+        liveupdate::Template::Timer
+    } else if texts >= 2 {
+        liveupdate::Template::BigText
+    } else {
+        liveupdate::Template::Standard
+    }
+}
+
+/// The liveupdate snapshot of `snapshot` under the generation's `template`.
+pub(crate) fn project(
+    layout: &Layout,
+    styled: bool,
+    snapshot: &LayoutSnapshot,
+    template: liveupdate::Template,
+    environment: &Environment<'_>,
+) -> Projection {
+    let values = &snapshot.values;
+    let mut shown = Shown::default();
+    walk(&layout.lock_screen, values, &mut shown);
+
+    let chip = match (shown.progress, shown.timer) {
+        (Some(fraction), None) => Some(format!("{}%", (fraction * 100.0).round() as u32)),
+        _ => None,
+    };
+    let body = shown.texts.get(1).filter(|text| !blank(text)).cloned();
+    let title = shown.texts.first().filter(|text| !blank(text)).map_or_else(
+        || cut(app_name(environment.app_name), MAX_TITLE),
+        |text| cut(text, MAX_TITLE),
+    );
+    let status = body
+        .clone()
+        .or_else(|| chip.clone())
+        .map_or_else(|| title.clone(), |text| cut(&text, MAX_STATUS));
+
+    let style = match template {
+        liveupdate::Template::Progress => {
+            liveupdate::PresentationStyle::Progress(progress_style(shown.progress))
+        }
+        liveupdate::Template::Timer => liveupdate::PresentationStyle::Timer(timer_style(
+            shown
+                .timer
+                .or_else(|| first_timer(&layout.lock_screen, values)),
+        )),
+        liveupdate::Template::BigText => {
+            liveupdate::PresentationStyle::BigText(liveupdate::BigTextStyle {
+                text: status.clone(),
+                summary: None,
+            })
+        }
+        _ => liveupdate::PresentationStyle::Standard,
+    };
+    // A timer that a Progress template does not draw is left out; a second progress or timer is left out by `walk`.
+    let mut degraded = shown.degraded;
+    if shown.timer.is_some() && !matches!(template, liveupdate::Template::Timer) {
+        note(&mut degraded, "timerText");
+    }
+
+    let large_icon = shown
+        .files
+        .first()
+        .and_then(|file| (environment.image)(file));
+    if shown.files.len() > 1 || (!shown.files.is_empty() && large_icon.is_none()) {
+        note(&mut degraded, "image");
+    }
+    let samsung_now_bar = environment
+        .samsung_now_bar
+        .then(|| liveupdate::SamsungNowBar {
+            primary: Some(title.clone()),
+            secondary: body
+                .clone()
+                .or_else(|| chip.clone())
+                .map(|text| cut(&text, MAX_STATUS)),
+        });
+    for part in [
+        (layout.island.is_some(), "layout.island"),
+        (styled, "layout.styles"),
+        (layout.background.is_some(), "layout.background"),
+        (layout.keyline.is_some(), "layout.keyline"),
+    ] {
+        if part.0 {
+            degraded.push(part.1.to_owned());
+        }
+    }
+    Projection {
+        snapshot: liveupdate::Snapshot {
+            revision: snapshot.revision,
+            title,
+            status,
+            progress: None,
+            timer: None,
+            stale_at: snapshot.stale_at,
+            presentation: Some(liveupdate::AndroidPresentation {
+                style,
+                short_critical_text: chip,
+                large_icon: large_icon.map(liveupdate::IconSource::AppFile),
+                actions: shown.actions,
+                samsung_now_bar,
+            }),
+        },
+        degraded,
+    }
+}
+
+/// The shown nodes of a lock screen, as the projection takes them.
+#[derive(Default)]
+struct Shown {
+    texts: Vec<String>,
+    actions: Vec<liveupdate::NotificationAction>,
+    files: Vec<String>,
+    /// The first shown progress, clamped to 0..1.
+    progress: Option<f64>,
+    /// The first shown timer: its start, its end and whether it counts down.
+    timer: Option<(f64, f64, bool)>,
+    degraded: Vec<String>,
+}
+
+fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
+    if !visible(node, values) {
+        return;
+    }
+    match &node.element {
+        Element::Vstack { children, .. }
+        | Element::Hstack { children, .. }
+        | Element::Zstack { children, .. } => {
+            children.iter().for_each(|child| walk(child, values, shown));
+        }
+        Element::Text { .. } => match shown.texts.len() {
+            0 | 1 => shown.texts.push(text(node, values).unwrap_or_default()),
+            _ => note(&mut shown.degraded, "text"),
+        },
+        Element::Progress { bind, .. } if shown.progress.is_none() => {
+            shown.progress = Some(number(values.get(bind)).clamp(0.0, 1.0));
+        }
+        Element::TimerText {
+            start,
+            end,
+            counts_down,
+        } if shown.timer.is_none() => {
+            shown.timer = Some((
+                number(values.get(start)),
+                number(values.get(end)),
+                counts_down.unwrap_or(true),
+            ));
+        }
+        Element::Image {
+            source: ImageSource::File { file },
+            ..
+        } => shown.files.push(file.clone()),
+        Element::Button { action_id, child } => {
+            let mut inside = Vec::new();
+            let label = button_label(child, values, &mut inside);
+            // liveupdate takes each action id once.
+            let fresh = !shown.actions.iter().any(|action| &action.id == action_id);
+            match label {
+                Some(label) if fresh && shown.actions.len() < MAX_ACTIONS => {
+                    shown.actions.push(liveupdate::NotificationAction {
+                        id: action_id.clone(),
+                        title: cut(&label, MAX_ACTION_TITLE),
+                        icon: None,
+                        authentication_required: false,
+                    });
+                    inside
+                        .iter()
+                        .for_each(|kind| note(&mut shown.degraded, kind));
+                }
+                _ => note(&mut shown.degraded, "button"),
+            }
+        }
+        element => note(&mut shown.degraded, kind(element)),
+    }
+}
+
+/// The first shown text inside a button, which labels its action; every other shown node inside is left out.
+fn button_label(
+    node: &Node,
+    values: &BTreeMap<String, Value>,
+    inside: &mut Vec<&'static str>,
+) -> Option<String> {
+    let mut label = None;
+    let mut first = true;
+    visit_shown(node, values, &mut |node| match &node.element {
+        Element::Vstack { .. } | Element::Hstack { .. } | Element::Zstack { .. } => {}
+        Element::Text { .. } if first => {
+            first = false;
+            label = text(node, values).filter(|text| !blank(text));
+        }
+        element => inside.push(kind(element)),
+    });
+    label
+}
+
+/// The timer of a Timer template when none shows: the first in the tree, with its keys' current values.
+fn first_timer(node: &Node, values: &BTreeMap<String, Value>) -> Option<(f64, f64, bool)> {
+    let mut found = None;
+    visit_all(node, false, &mut |node, _| {
+        if let (
+            None,
+            Element::TimerText {
+                start,
+                end,
+                counts_down,
+            },
+        ) = (&found, &node.element)
+        {
+            found = Some((
+                number(values.get(start)),
+                number(values.get(end)),
+                counts_down.unwrap_or(true),
+            ));
+        }
+    });
+    found
+}
+
+fn progress_style(fraction: Option<f64>) -> liveupdate::ProgressStyle {
+    let fraction = fraction.unwrap_or(0.0);
+    liveupdate::ProgressStyle {
+        progress: (fraction * f64::from(PROGRESS_SCALE)).round() as u32,
+        indeterminate: false,
+        styled_by_progress: false,
+        segments: vec![liveupdate::ProgressSegment {
+            length: PROGRESS_SCALE,
+            id: None,
+            color: None,
+            semantic_style: None,
+        }],
+        points: Vec::new(),
+        start_icon: None,
+        end_icon: None,
+        tracker_icon: None,
+    }
+}
+
+/// A timer whose end is not after its start ends a millisecond after it, as liveupdate needs.
+fn timer_style(timer: Option<(f64, f64, bool)>) -> liveupdate::TimerStyle {
+    let (start, end, counts_down) = timer.unwrap_or((0.0, 0.0, true));
+    let started_at = millis(start);
+    let ends_at = millis(end)
+        .max(started_at.saturating_add(1))
+        .min(liveupdate::MAX_TIMESTAMP);
+    liveupdate::TimerStyle {
+        timer: liveupdate::Timer {
+            started_at: started_at.min(ends_at - 1),
+            ends_at,
+        },
+        counts_down,
+    }
+}
+
+fn millis(value: f64) -> u64 {
+    if value.is_finite() && value > 0.0 {
+        (value.floor() as u64).min(liveupdate::MAX_TIMESTAMP)
+    } else {
+        0
+    }
+}
+
+fn visible(node: &Node, values: &BTreeMap<String, Value>) -> bool {
+    node.r#if.as_ref().is_none_or(|key| truthy(values.get(key)))
+        && node
+            .unless
+            .as_ref()
+            .is_none_or(|key| !truthy(values.get(key)))
+}
+
+/// `true`, a number other than 0, or text that is not empty.
+fn truthy(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(value)) => *value,
+        Some(Value::Number(value)) => *value != 0.0 && !value.is_nan(),
+        Some(Value::Text(value)) => !value.is_empty(),
+        None => false,
+    }
+}
+
+fn number(value: Option<&Value>) -> f64 {
+    match value {
+        Some(Value::Number(value)) => *value,
+        _ => 0.0,
+    }
+}
+
+fn text(node: &Node, values: &BTreeMap<String, Value>) -> Option<String> {
+    match &node.element {
+        Element::Text {
+            value: Some(value), ..
+        } => Some(value.clone()),
+        Element::Text {
+            bind: Some(key), ..
+        } => values.get(key).map(display),
+        _ => None,
+    }
+}
+
+/// A value as ECMAScript's `String` prints it, which the other platforms' renderers follow.
+pub(crate) fn display(value: &Value) -> String {
+    match value {
+        Value::Text(text) => text.clone(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => js_number(*value),
+    }
+}
+
+fn js_number(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_owned();
+    }
+    let magnitude = value.abs();
+    if (1e-6..1e21).contains(&magnitude) {
+        return value.to_string();
+    }
+    // ECMAScript writes the exponent with a sign: 1e+21, 1.5e-7.
+    let written = format!("{value:e}");
+    match written.split_once('e') {
+        Some((mantissa, exponent)) if !exponent.starts_with('-') => {
+            format!("{mantissa}e+{exponent}")
+        }
+        _ => written,
+    }
+}
+
+/// Empty or whitespace only, by liveupdate's rule, which refuses such a text.
+fn blank(text: &str) -> bool {
+    text.chars().all(|character| {
+        matches!(
+            character as u32,
+            0x0009..=0x000D | 0x2000..=0x200A | 0x0020 | 0x00A0 | 0x1680 | 0x2028 | 0x2029 | 0x202F | 0x205F | 0x3000 | 0xFEFF
+        )
+    })
+}
+
+/// `text` cut to `maximum` code points, ending with `…` when it was longer.
+fn cut(text: &str, maximum: usize) -> String {
+    if text.chars().count() <= maximum {
+        return text.to_owned();
+    }
+    let mut cut: String = text.chars().take(maximum - 1).collect();
+    cut.push('…');
+    cut
+}
+
+/// The app's name, or a word when the app has none a notification can show.
+fn app_name(name: &str) -> &str {
+    if blank(name) { "Live activity" } else { name }
+}
+
+fn note(degraded: &mut Vec<String>, kind: &str) {
+    let feature = format!("layout.{kind}");
+    if !degraded.contains(&feature) {
+        degraded.push(feature);
+    }
+}
+
+/// The JSON `type` of an element.
+fn kind(element: &Element) -> &'static str {
+    match element {
+        Element::Vstack { .. } => "vstack",
+        Element::Hstack { .. } => "hstack",
+        Element::Zstack { .. } => "zstack",
+        Element::Spacer { .. } => "spacer",
+        Element::Divider { .. } => "divider",
+        Element::Text { .. } => "text",
+        Element::Symbol { .. } => "symbol",
+        Element::Image { .. } => "image",
+        Element::Path { .. } => "path",
+        Element::Progress { .. } => "progress",
+        Element::Gauge { .. } => "gauge",
+        Element::TimerText { .. } => "timerText",
+        Element::Button { .. } => "button",
+        Element::Custom { .. } => "custom",
+    }
+}
+
+/// Every node in document order, shown or not; `in_button` says whether a button holds it.
+fn visit_all(node: &Node, in_button: bool, visit: &mut impl FnMut(&Node, bool)) {
+    visit(node, in_button);
+    match &node.element {
+        Element::Vstack { children, .. }
+        | Element::Hstack { children, .. }
+        | Element::Zstack { children, .. } => {
+            children
+                .iter()
+                .for_each(|child| visit_all(child, in_button, visit));
+        }
+        Element::Button { child, .. } => visit_all(child, true, visit),
+        _ => {}
+    }
+}
+
+/// The shown nodes under `node`, `node` included, in document order.
+fn visit_shown(node: &Node, values: &BTreeMap<String, Value>, visit: &mut impl FnMut(&Node)) {
+    if !visible(node, values) {
+        return;
+    }
+    visit(node);
+    match &node.element {
+        Element::Vstack { children, .. }
+        | Element::Hstack { children, .. }
+        | Element::Zstack { children, .. } => {
+            children
+                .iter()
+                .for_each(|child| visit_shown(child, values, visit));
+        }
+        Element::Button { child, .. } => visit_shown(child, values, visit),
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+#[path = "layout_tests.rs"]
+mod tests;

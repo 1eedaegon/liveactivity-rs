@@ -168,6 +168,7 @@ pub(crate) fn start(input: &StartInput) -> LayoutStartInput {
         styles: Some(styles),
         snapshot: layout_snapshot(&input.snapshot).1,
         android: None,
+        push: None,
     }
 }
 
@@ -248,7 +249,6 @@ mod tests {
             },
         }
     }
-
     #[test]
     fn a_template_start_becomes_a_layout_start_with_the_fields_as_values() {
         let start = start(&input(Template::Progress, "Delivery", "On the way"));
@@ -297,7 +297,6 @@ mod tests {
     fn start_timer() -> LayoutStartInput {
         start(&input(Template::Timer, "Nap", "Dozing"))
     }
-
     #[test]
     fn the_values_read_back_as_the_template_snapshot() {
         for template in [Template::Progress, Template::Timer] {
@@ -318,7 +317,6 @@ mod tests {
         );
         assert_eq!(of(&BTreeMap::new()), None);
     }
-
     #[test]
     fn the_largest_template_snapshot_fits_the_weight_with_its_layout() {
         for template in [Template::Progress, Template::Timer] {

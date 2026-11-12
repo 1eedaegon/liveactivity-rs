@@ -56,11 +56,10 @@ fn req_c_001_the_contract_has_stable_json() {
         json!({"actionId": "track", "activityId": "id"})
     );
 
-    let live = LiveActivity::connect(
-        |_: ActionEvent| {},
-        |context| Ok(MemoryBackend::new(context)),
-    )
-    .unwrap();
+    let live = LiveActivity::builder()
+        .backend(MemoryBackend::new())
+        .build()
+        .unwrap();
     let record = block_on(
         live.start(StartInput::timer("tea:1", "Tea", "Brewing", 1_000, 61_000).without_fallback()),
     );
@@ -81,11 +80,10 @@ fn req_c_001_the_contract_has_stable_json() {
 #[test]
 fn req_c_002_invalid_requests_reach_no_backend() {
     // REQ-C-002
-    let live = LiveActivity::connect(
-        |_: ActionEvent| {},
-        |context| Ok(MemoryBackend::new(context)),
-    )
-    .unwrap();
+    let live = LiveActivity::builder()
+        .backend(MemoryBackend::new())
+        .build()
+        .unwrap();
     let invalid = |input: StartInput| block_on(live.start(input)).unwrap_err().code;
 
     for input in [
@@ -125,6 +123,38 @@ fn req_c_002_invalid_requests_reach_no_backend() {
     let refused =
         liveactivity::parse_request::<liveactivity::LayoutUpdateInput>("update_layout", layout);
     assert_eq!(refused.unwrap_err().code, "INVALID_INPUT");
+}
+
+#[test]
+fn req_c_003_whatever_the_builder_is_not_told_is_the_default() {
+    // REQ-C-003
+    // Neither side named: the backend of the platform, which a host has none of, and taps dropped.
+    let unnamed = LiveActivity::builder().build().unwrap();
+    let shortest = liveactivity::connect_native(|_: ActionEvent| {}).unwrap();
+    for live in [unnamed, shortest] {
+        let start = StartInput::progress("order:42", "Order 42", "Preparing", 0.1);
+        assert_eq!(
+            block_on(live.start(start)).unwrap_err().code,
+            "UNSUPPORTED_PLATFORM"
+        );
+    }
+
+    // Only the backend named: a tap has nowhere to go and is dropped without a failure.
+    let backend = std::sync::Arc::new(MemoryBackend::new());
+    let live = LiveActivity::builder()
+        .backend(backend.clone())
+        .build()
+        .unwrap();
+    let order = block_on(live.start(StartInput::progress(
+        "order:42",
+        "Order 42",
+        "Preparing",
+        0.1,
+    )))
+    .unwrap();
+    backend.tap(&order.id, "track").unwrap();
+    // A backend that is connected to nothing yet keeps working, too.
+    MemoryBackend::new().tap("unknown", "track").unwrap_err();
 }
 
 #[test]

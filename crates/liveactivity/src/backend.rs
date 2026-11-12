@@ -1,7 +1,7 @@
 use crate::{
-    ActivityRecord, Capabilities, EndInput, Error, LayoutActivityRecord, LayoutEndInput,
-    LayoutStartInput, LayoutUpdateInput, PermissionKind, Permissions, Result, StartInput,
-    UpdateInput,
+    ActivityRecord, BackendContext, Capabilities, EndInput, Error, LayoutActivityRecord,
+    LayoutEndInput, LayoutStartInput, LayoutUpdateInput, PermissionKind, Permissions, Result,
+    StartInput, UpdateInput,
 };
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -18,6 +18,12 @@ fn unsupported<'a, T: 'a>(message: &'static str) -> BackendFuture<'a, T> {
 /// images and queued events have defaults, so a backend that draws templates only is complete.
 /// The requests are validated before they reach a backend.
 pub trait LiveActivityBackend: Send + Sync + 'static {
+    /// Takes where to send taps. The builder calls this once, before any command. The default has no taps to send.
+    fn attach(&self, events: BackendContext) -> Result<()> {
+        let _ = events;
+        Ok(())
+    }
+
     /// What the backend can do on this device.
     fn capabilities(&self) -> BackendFuture<'_, Capabilities>;
 
@@ -79,6 +85,10 @@ pub trait LiveActivityBackend: Send + Sync + 'static {
 }
 
 impl<T: LiveActivityBackend + ?Sized> LiveActivityBackend for Arc<T> {
+    fn attach(&self, events: BackendContext) -> Result<()> {
+        (**self).attach(events)
+    }
+
     fn capabilities(&self) -> BackendFuture<'_, Capabilities> {
         (**self).capabilities()
     }

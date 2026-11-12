@@ -16,6 +16,14 @@ A request outside the contract is `INVALID_INPUT` and reaches no backend.
 
 Evidence: `contract::req_c_002_invalid_requests_reach_no_backend`.
 
+## REQ-C-003 One builder for both sides
+
+`LiveActivity::builder()` takes an event sink from the using side and a backend
+from the supporting side. Without a backend it connects the default one of the
+platform; without a sink taps are dropped.
+
+Evidence: `contract::req_c_003_whatever_the_builder_is_not_told_is_the_default`.
+
 ## REQ-X-001 Conformance of every backend
 
 The default Android backend, over a driver and over a string bridge, and a

@@ -4,14 +4,15 @@ use crate::{
     PermissionKind, PermissionState, Permissions, PromotionState, Result, StartInput, UpdateInput,
     Visibility,
 };
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 /// A backend that keeps its activities in memory and shows nothing.
 ///
 /// It runs the progress and timer templates under the rules that [`conformance`](super::conformance) checks, stores
 /// the names of written images and reports a tap to the event sink when asked to.
+#[derive(Default)]
 pub struct MemoryBackend {
-    context: BackendContext,
+    events: OnceLock<BackendContext>,
     state: Mutex<State>,
 }
 
@@ -40,12 +41,9 @@ fn terminal(record: &ActivityRecord) -> bool {
 }
 
 impl MemoryBackend {
-    /// Creates the backend from the context supplied by `LiveActivity::connect`.
-    pub fn new(context: BackendContext) -> Self {
-        Self {
-            context,
-            state: Mutex::default(),
-        }
+    /// A backend with no activity.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Reports a tap on `action_id` of the activity `id` to the event sink, as a platform would.
@@ -61,11 +59,13 @@ impl MemoryBackend {
             .find(|activity| activity.record.id == id)
             .map(|activity| activity.record.activity_key.clone())
             .ok_or_else(not_found)?;
-        self.context.emit(ActionEvent {
-            action_id: action_id.into(),
-            activity_id: id.into(),
-            activity_key: Some(activity_key),
-        });
+        if let Some(events) = self.events.get() {
+            events.emit(ActionEvent {
+                action_id: action_id.into(),
+                activity_id: id.into(),
+                activity_key: Some(activity_key),
+            });
+        }
         Ok(())
     }
 
@@ -163,6 +163,11 @@ impl MemoryBackend {
 }
 
 impl LiveActivityBackend for MemoryBackend {
+    fn attach(&self, events: BackendContext) -> Result<()> {
+        let _ = self.events.set(events);
+        Ok(())
+    }
+
     fn capabilities(&self) -> BackendFuture<'_, Capabilities> {
         let (yes, no) = (FeatureSupport::Supported, FeatureSupport::Unsupported);
         Box::pin(async move {

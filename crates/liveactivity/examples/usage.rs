@@ -1,5 +1,5 @@
-//! One activity from start to end. `main` runs on the backend of the testkit, so the example runs anywhere; an
-//! application calls `liveactivity::connect_native` instead.
+//! One activity from start to end. `main` names the backend of the testkit, so the example runs anywhere; an
+//! application leaves `.backend(..)` out and gets the backend of its platform.
 
 use liveactivity::{ActionEvent, EndInput, LiveActivity, Result, StartInput, UpdateInput};
 
@@ -37,7 +37,10 @@ fn main() -> Result<()> {
 
     // The sink gets the taps on an activity's buttons. Any closure is one.
     let sink = |tap: ActionEvent| println!("{} tapped {}", tap.activity_id, tap.action_id);
-    let live = LiveActivity::connect(sink, |context| Ok(MemoryBackend::new(context)))?;
+    let live = LiveActivity::builder()
+        .backend(MemoryBackend::new())
+        .event_sink(sink)
+        .build()?;
 
     liveactivity::block_on(deliver(&live))?;
     println!("{:?}", liveactivity::block_on(live.list())?[0].state);

@@ -14,7 +14,7 @@ use crate::{
     LiveActivityBackend, Permissions, Result, StartInput, UpdateInput,
 };
 use liveupdate::{Bridge, Driver, EventKind, JsonDriver, LiveUpdate};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 /// `LiveActivityBackend` over the liveupdate engine.
 ///
@@ -22,17 +22,18 @@ use std::sync::{Mutex, PoisonError};
 /// native call on the polling thread.
 pub struct LiveUpdateBackend<D> {
     engine: LiveUpdate<D>,
-    context: BackendContext,
+    /// Where taps go, once the backend is connected.
+    events: OnceLock<BackendContext>,
     /// Held for one whole drain, so that taps reach the sink in order.
     pump: Mutex<()>,
 }
 
 impl<D: Driver + 'static> LiveUpdateBackend<D> {
-    /// Creates the backend from the context supplied by `LiveActivity::connect`.
-    pub fn new(context: BackendContext, driver: D) -> Self {
+    /// The backend on `driver`, which is the Android side.
+    pub fn new(driver: D) -> Self {
         Self {
             engine: LiveUpdate::new(driver),
-            context,
+            events: OnceLock::new(),
             pump: Mutex::new(()),
         }
     }
@@ -49,6 +50,10 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
     ///
     /// Fails when the drain fails.
     pub fn pump_events(&self) -> Result<usize> {
+        // Not connected yet: the taps stay queued for the sink that comes.
+        let Some(events) = self.events.get() else {
+            return Ok(0);
+        };
         let _pump = self.pump.lock().unwrap_or_else(PoisonError::into_inner);
         let batch = self.engine.events().map_err(convert::error)?;
         let taps: Vec<_> = batch
@@ -70,7 +75,7 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
                 .iter()
                 .find(|record| &record.id == activity_id)
                 .map(|record| record.activity_key.clone());
-            self.context.emit(ActionEvent {
+            events.emit(ActionEvent {
                 action_id: action_id.clone(),
                 activity_id: activity_id.clone(),
                 activity_key,
@@ -81,27 +86,33 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
 }
 
 impl<B: Bridge + 'static> LiveUpdateBackend<JsonDriver<B>> {
-    /// Creates the backend over a framework's string transport to the Android side.
-    pub fn over_bridge(context: BackendContext, bridge: B) -> Self {
-        Self::new(context, JsonDriver::new(bridge))
+    /// The backend over a framework's string transport to the Android side.
+    pub fn over_bridge(bridge: B) -> Self {
+        Self::new(JsonDriver::new(bridge))
     }
 }
 
 #[cfg(target_os = "android")]
 impl LiveUpdateBackend<liveupdate::AndroidDriver> {
-    /// Creates the backend on the JNI transport of liveupdate's own AAR. The host must have
-    /// initialized `ndk-context` and package the AAR.
+    /// The backend on the JNI transport of liveupdate's own AAR. The host must have initialized `ndk-context` and
+    /// package the AAR.
     ///
     /// # Errors
     ///
     /// Fails when the Android context or the AAR's bridge class is not available.
-    pub fn android(context: BackendContext) -> Result<Self> {
+    pub fn android() -> Result<Self> {
         let bridge = liveupdate::AndroidBridge::new().map_err(convert::error)?;
-        Ok(Self::over_bridge(context, bridge))
+        Ok(Self::over_bridge(bridge))
     }
 }
 
 impl<D: Driver + 'static> LiveActivityBackend for LiveUpdateBackend<D> {
+    fn attach(&self, events: BackendContext) -> Result<()> {
+        // The first sink stays: a backend is connected once.
+        let _ = self.events.set(events);
+        Ok(())
+    }
+
     fn capabilities(&self) -> BackendFuture<'_, Capabilities> {
         Box::pin(async move {
             self.engine

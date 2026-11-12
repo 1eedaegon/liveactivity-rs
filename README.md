@@ -4,11 +4,9 @@ Live Activities for Rust applications, behind one interface: iOS ActivityKit and
 Android Live Updates by default, and any other backend in their place.
 
 ```rust
-use liveactivity::{EndInput, StartInput, UpdateInput};
+use liveactivity::{EndInput, LiveActivity, StartInput, UpdateInput};
 
-let live = liveactivity::connect_native(|tap: liveactivity::ActionEvent| {
-    println!("{} tapped {}", tap.activity_id, tap.action_id);
-})?;
+let live = LiveActivity::builder().build()?;
 
 let order = live
     .start(StartInput::progress("order:42", "Order 42", "Preparing", 0.1))
@@ -33,12 +31,38 @@ iOS and [liveupdate](https://github.com/1eedaegon/liveupdate-rs) for Android as
 they are. It compiles on every target; where there is no platform, every call
 answers `UNSUPPORTED_PLATFORM`.
 
-## Use
+## The two sides
 
-`connect_native` connects the backend of the target and takes a sink for taps
-on an activity's buttons: any closure, or a type that implements `EventSink`.
-Keep the `LiveActivity` in application state; it is cheap to clone and safe to
-use from any thread.
+Everything goes through one builder. An application says where taps go; a
+framework plugin or a platform says which backend runs the commands. Whatever
+is not said is the default.
+
+```rust
+let live = LiveActivity::builder()
+    .backend(backend)      // the supporting side; without it, the platform's default
+    .event_sink(sink)      // the using side; without it, taps are dropped
+    .build()?;
+```
+
+| You are | You write |
+| --- | --- |
+| an application | `.event_sink(..)`, then the calls below |
+| a framework plugin | an `EventSink` that forwards taps to the framework's events, commands that call `LiveActivity`, and a backend only when the framework has a native side of its own |
+| a platform | a `LiveActivityBackend` |
+
+## Using it
+
+```rust
+use liveactivity::{ActionEvent, EndInput, LiveActivity, StartInput, UpdateInput};
+
+let live = LiveActivity::builder()
+    .event_sink(|tap: ActionEvent| println!("{} tapped {}", tap.activity_id, tap.action_id))
+    .build()?;
+```
+
+`liveactivity::connect_native(sink)` is the same in one call. Keep the
+`LiveActivity` in application state; it is cheap to clone and safe to use from
+any thread.
 
 | Call | Does |
 | --- | --- |
@@ -64,8 +88,7 @@ The rules are the same on every backend:
   and a message.
 
 Requests are checked against the contract before a backend sees them, so an
-invalid one is `INVALID_INPUT` everywhere. The requests and records are plain
-serde types, with camelCase JSON, for a framework that carries them over IPC.
+invalid one is `INVALID_INPUT` everywhere.
 
 Calls are futures for any executor; `liveactivity::block_on` drives one where
 there is none. On iOS the answer comes from the main thread, so do not block
@@ -76,6 +99,69 @@ the main thread on a call. On Android a call runs on the thread that polls it.
 ```sh
 cargo run -p liveactivity --example usage --features testkit
 ```
+
+## Supporting it
+
+### A framework plugin
+
+A plugin carries the contract over its framework and adds nothing to it.
+
+1. **Types.** Re-export `liveactivity::contract::*`: the requests and records
+   are serde types with camelCase JSON, ready for the framework's IPC.
+2. **Commands.** Each command parses its input and awaits the call of the same
+   name: `live.start(parse_request("start", json)?).await`.
+3. **Taps.** Give the builder a sink that forwards a tap to the framework's own
+   event API. On iOS a tap keeps the app awake until the sink returns.
+4. **Backend.** Name one only when the framework has a native side of its own:
+
+```rust
+// The framework reaches Android through its own call: only the transport differs.
+LiveActivity::builder()
+    .backend(LiveUpdateBackend::over_bridge(my_bridge)) // my_bridge: liveupdate::Bridge
+    .event_sink(my_sink)
+    .build()?;
+
+// The framework draws more than the default: its backend answers that part and hands the rest on.
+struct MyBackend {
+    templates: LiveUpdateBackend<JsonDriver<MyBridge>>,
+    // the framework's native handle
+}
+
+impl LiveActivityBackend for MyBackend {
+    fn attach(&self, events: BackendContext) -> Result<()> {
+        self.templates.attach(events)
+    }
+    fn start(&self, input: StartInput) -> BackendFuture<'_, ActivityRecord> {
+        self.templates.start(input)
+    }
+    fn start_layout(&self, input: LayoutStartInput) -> BackendFuture<'_, LayoutActivityRecord> {
+        Box::pin(async move { /* the framework's own native side */ })
+    }
+    // ...
+}
+```
+
+`liveupdate::Bridge` is one call that carries a command name and a JSON payload
+to the Android side.
+
+### A platform
+
+Implement `LiveActivityBackend`, one method per call of the table above. Only
+the template calls and the two queries are required; layouts, permission
+requests, images and queued events default to `UNSUPPORTED_FEATURE`, and
+`capabilities` says what the backend has. `attach` hands the backend the sink
+once, before any command; the backend sends taps with `events.emit(..)`.
+
+The `testkit` feature checks that a backend keeps the rules above, which is what
+makes it exchangeable with the default ones:
+
+```rust
+let live = LiveActivity::builder().backend(MyBackend::new()).build()?;
+liveactivity::testkit::conformance(&live).await.assert_passed();
+```
+
+`testkit::MemoryBackend` is a backend without a platform, for an application's
+own tests and as the smallest example of an implementation.
 
 ## Platform setup
 
@@ -93,43 +179,11 @@ standard library to the app, as its
 must initialize `ndk-context`, which common Rust Android runtimes do, and
 request the notification permission on Android 13 and later. The default
 Android backend draws progress and timer activities; layouts, images and the
-permission dialog need a native side of the host's own (see below).
+permission dialog need a native side of the host's own (see "Supporting it").
 
 A library linked with an NDK before r28 is aligned to 4 KB pages, which Android
 warns about on devices with 16 KB pages. Use NDK r28 or later, or pass the
 linker `-Wl,-z,max-page-size=16384` from the application's build script.
-
-## Bringing a backend
-
-A platform implements `LiveActivityBackend`, one method per call above, and is
-connected in place of the default:
-
-```rust
-let live = LiveActivity::connect(sink, |context| Ok(MyBackend::new(context)))?;
-```
-
-Only the template calls and the two queries are required; the rest default to
-`UNSUPPORTED_FEATURE`. A backend hands taps to `context.emit(..)`.
-
-A host with a native side of its own, such as a framework plugin, usually
-composes a default backend instead of replacing it:
-
-- **Android transport only.** Implement `liveupdate::Bridge`, one call that
-  carries a command name and a JSON payload to the Android side, and connect
-  `android::LiveUpdateBackend::over_bridge(context, bridge)`.
-- **More than the default draws.** Implement `LiveActivityBackend`, hand the
-  template calls to a `LiveUpdateBackend` field, and answer layouts, images and
-  permission requests from the host's own native code.
-
-The `testkit` feature checks that a backend keeps the rules above, which is what
-makes it exchangeable with the default ones:
-
-```rust
-liveactivity::testkit::conformance(&live).await.assert_passed();
-```
-
-`testkit::MemoryBackend` is a backend without a platform, for an application's
-own tests and as the smallest example of an implementation.
 
 ## Develop
 

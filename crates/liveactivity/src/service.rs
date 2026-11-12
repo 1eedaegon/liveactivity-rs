@@ -5,6 +5,66 @@ use crate::{
 };
 use std::sync::Arc;
 
+/// Connects a [`LiveActivity`]. Both sides of the interface meet here: an application names where its taps go, and
+/// a framework plugin or a platform names the backend. Whatever is not named is the default.
+///
+/// ```no_run
+/// # use liveactivity::{ActionEvent, LiveActivity};
+/// # fn run(my_backend: impl liveactivity::LiveActivityBackend) -> liveactivity::Result<()> {
+/// // An application: the backend of the platform, and a closure for taps.
+/// let live = LiveActivity::builder()
+///     .event_sink(|tap: ActionEvent| println!("{}", tap.action_id))
+///     .build()?;
+///
+/// // A framework plugin or a platform: its own backend in place of the default.
+/// let live = LiveActivity::builder().backend(my_backend).build()?;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Default)]
+#[must_use = "a builder connects nothing until `build` is called"]
+pub struct Builder {
+    backend: Option<Arc<dyn LiveActivityBackend>>,
+    sink: Option<BackendContext>,
+}
+
+impl Builder {
+    /// The backend that runs the commands. Without one, the default backend of the target platform runs them:
+    /// Live Updates on Android and ActivityKit elsewhere, which off iOS answers `UNSUPPORTED_PLATFORM`.
+    pub fn backend<B: LiveActivityBackend>(self, backend: B) -> Self {
+        Self {
+            backend: Some(Arc::new(backend)),
+            ..self
+        }
+    }
+
+    /// Where taps on an activity's buttons go: any closure, or a type that implements [`EventSink`]. Without one,
+    /// taps are dropped.
+    pub fn event_sink<S: EventSink>(self, sink: S) -> Self {
+        Self {
+            sink: Some(BackendContext::new(sink)),
+            ..self
+        }
+    }
+
+    /// Connects the backend to the sink.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the default backend cannot start, or the backend cannot take the sink.
+    pub fn build(self) -> Result<LiveActivity> {
+        let backend = match self.backend {
+            Some(backend) => backend,
+            None => crate::native::default_backend()?,
+        };
+        let sink = self
+            .sink
+            .unwrap_or_else(|| BackendContext::new(|_: crate::ActionEvent| {}));
+        backend.attach(sink)?;
+        Ok(LiveActivity { backend })
+    }
+}
+
 /// Live Activities of one application, on whichever backend it was connected to.
 ///
 /// Cheap to clone and safe to use from any thread. Every request is checked against the
@@ -15,22 +75,9 @@ pub struct LiveActivity {
 }
 
 impl LiveActivity {
-    /// Connects `sink` to the backend that `backend` makes. This is the one place that names a
-    /// backend: everything after it is the same for all of them.
-    ///
-    /// # Errors
-    ///
-    /// Fails when the backend cannot be made.
-    pub fn connect<S, B, F>(sink: S, backend: F) -> Result<Self>
-    where
-        S: EventSink,
-        B: LiveActivityBackend,
-        F: FnOnce(BackendContext) -> Result<B>,
-    {
-        let backend = backend(BackendContext::new(sink))?;
-        Ok(Self {
-            backend: Arc::new(backend),
-        })
+    /// Starts a connection: name a backend, an event sink, both or neither, then [`build`](Builder::build).
+    pub fn builder() -> Builder {
+        Builder::default()
     }
 
     /// What the backend can do on this device.

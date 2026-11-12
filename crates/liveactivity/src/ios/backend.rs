@@ -15,32 +15,28 @@ use std::thread;
 /// `UNSUPPORTED_PLATFORM`.
 pub struct ActivityKitBackend {
     apple: Apple<ActivityKit>,
+    /// The same kit, for the taps.
+    kit: ActivityKit,
 }
 
 impl ActivityKitBackend {
-    /// Creates the backend from the context supplied by `LiveActivity::connect`, on
-    /// activitykit's default settings.
-    ///
-    /// # Errors
-    ///
-    /// Fails when the thread that forwards taps cannot start.
-    pub fn new(context: BackendContext) -> Result<Self> {
-        Self::with_kit(context, ActivityKit::new())
+    /// The backend on activitykit's default settings.
+    pub fn new() -> Self {
+        Self::with_kit(ActivityKit::new())
     }
 
-    /// Creates the backend on a kit that the caller built, for example with redacted receipts.
-    ///
-    /// # Errors
-    ///
-    /// Fails when the thread that forwards taps cannot start.
-    pub fn with_kit(context: BackendContext, kit: ActivityKit) -> Result<Self> {
-        // Elsewhere activitykit reports no event, so no thread waits for one.
-        if Kit::authorization(&kit).supported {
-            forward_taps(&kit, context)?;
+    /// The backend on a kit that the caller built, for example with redacted receipts.
+    pub fn with_kit(kit: ActivityKit) -> Self {
+        Self {
+            apple: Apple::new(kit.clone()),
+            kit,
         }
-        Ok(Self {
-            apple: Apple::new(kit),
-        })
+    }
+}
+
+impl Default for ActivityKitBackend {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -62,6 +58,15 @@ fn forward_taps<K: Kit>(kit: &K, context: BackendContext) -> Result<()> {
 }
 
 impl LiveActivityBackend for ActivityKitBackend {
+    /// Starts the thread that forwards taps. Elsewhere than on a device with Live Activities activitykit reports no
+    /// event, so no thread waits for one.
+    fn attach(&self, events: BackendContext) -> Result<()> {
+        if Kit::authorization(&self.kit).supported {
+            forward_taps(&self.kit, events)?;
+        }
+        Ok(())
+    }
+
     fn capabilities(&self) -> BackendFuture<'_, Capabilities> {
         Box::pin(async move { Ok(self.apple.capabilities()) })
     }
@@ -155,11 +160,11 @@ mod tests {
 
     #[test]
     fn off_ios_the_backend_reports_nothing_and_answers_unsupported_platform() {
-        let live = LiveActivity::connect(
-            |_: ActionEvent| unreachable!("no taps off iOS"),
-            ActivityKitBackend::new,
-        )
-        .unwrap();
+        let live = LiveActivity::builder()
+            .backend(ActivityKitBackend::new())
+            .event_sink(|_: ActionEvent| unreachable!("no taps off iOS"))
+            .build()
+            .unwrap();
 
         let capabilities = block_on(live.capabilities()).unwrap();
         assert_eq!(capabilities.backend, crate::Backend::Unsupported);

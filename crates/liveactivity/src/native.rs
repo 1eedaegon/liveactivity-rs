@@ -1,17 +1,22 @@
-use crate::{EventSink, LiveActivity, Result};
+use crate::{EventSink, LiveActivity, LiveActivityBackend, Result};
+use std::sync::Arc;
 
-/// Connects `sink` to the default backend of the target platform: Live Updates on Android,
-/// ActivityKit elsewhere, which off iOS reports no capability and answers
-/// `UNSUPPORTED_PLATFORM`.
+/// The default backend of the target platform.
+pub(crate) fn default_backend() -> Result<Arc<dyn LiveActivityBackend>> {
+    #[cfg(target_os = "android")]
+    let backend = Arc::new(crate::android::LiveUpdateBackend::android()?);
+    #[cfg(not(target_os = "android"))]
+    let backend = Arc::new(crate::ios::ActivityKitBackend::new());
+    Ok(backend)
+}
+
+/// The shortest connection: the default backend of the target platform, with `sink` for taps. The same as
+/// `LiveActivity::builder().event_sink(sink).build()`.
 ///
 /// # Errors
 ///
-/// Fails when the backend cannot start: on Android when the host has not initialized
-/// `ndk-context` or does not package liveupdate's AAR.
+/// Fails when the backend cannot start: on Android when the host has not initialized `ndk-context` or does not
+/// package liveupdate's AAR.
 pub fn connect_native<S: EventSink>(sink: S) -> Result<LiveActivity> {
-    #[cfg(target_os = "android")]
-    let live = LiveActivity::connect(sink, crate::android::LiveUpdateBackend::android);
-    #[cfg(not(target_os = "android"))]
-    let live = LiveActivity::connect(sink, crate::ios::ActivityKitBackend::new);
-    live
+    LiveActivity::builder().event_sink(sink).build()
 }

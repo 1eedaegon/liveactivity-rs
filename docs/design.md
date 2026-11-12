@@ -28,9 +28,11 @@ application or framework plugin
 
 ## Decisions
 
-1. **One interface, injected.** The backend is chosen where the service is
-   connected, not by Cargo features, so several backends can be compiled
-   together and a caller never names one after the connection.
+1. **One interface, injected through one builder.** `LiveActivity::builder()`
+   is where the two sides meet: the using side names its event sink, the
+   supporting side its backend, and whatever is not named is the default. The
+   backend is chosen there, not by Cargo features, so several backends can be
+   compiled together and a caller never names one after the connection.
 2. **The engines are dependencies.** activitykit and liveupdate keep their
    lifecycle, revisions and receipts. This crate maps the contract onto them
    and adds only what neither has: templates on iOS, the split between

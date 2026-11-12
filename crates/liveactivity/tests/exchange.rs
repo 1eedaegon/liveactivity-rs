@@ -22,28 +22,29 @@ use std::sync::{
 /// A connected service and the taps its sink received.
 type Connected = (LiveActivity, Receiver<ActionEvent>);
 
-fn connect<B: LiveActivityBackend>(
-    backend: impl FnOnce(liveactivity::BackendContext) -> B,
-) -> Connected {
+/// What an adapter does: it names the backend. The sink is any closure.
+fn connect(backend: impl LiveActivityBackend) -> Connected {
     let (sender, taps) = mpsc::channel();
-    // The sink is any closure.
-    let sink = move |tap: ActionEvent| sender.send(tap).unwrap();
-    let live = LiveActivity::connect(sink, |context| Ok(backend(context))).unwrap();
+    let live = LiveActivity::builder()
+        .backend(backend)
+        .event_sink(move |tap: ActionEvent| sender.send(tap).unwrap())
+        .build()
+        .unwrap();
     (live, taps)
 }
 
 fn android_default() -> Connected {
-    connect(|context| LiveUpdateBackend::new(context, MemoryDriver::default()))
+    connect(LiveUpdateBackend::new(MemoryDriver::default()))
 }
 
 fn android_over_a_framework_bridge() -> Connected {
-    connect(|context| {
-        LiveUpdateBackend::over_bridge(context, StringBridge(MemoryDriver::default()))
-    })
+    connect(LiveUpdateBackend::over_bridge(StringBridge(
+        MemoryDriver::default(),
+    )))
 }
 
 fn substitute() -> Connected {
-    connect(MemoryBackend::new)
+    connect(MemoryBackend::new())
 }
 
 /// The one line of an application that names a backend.
@@ -167,7 +168,7 @@ fn req_x_004_taps_of_any_backend_reach_the_same_sink() {
     // REQ-X-004
     // Android queues its taps: the caller asks for them, for example on resume.
     let driver = MemoryDriver::default();
-    let (android, taps) = connect(|context| LiveUpdateBackend::new(context, driver.clone()));
+    let (android, taps) = connect(LiveUpdateBackend::new(driver.clone()));
     let order = block_on(android.start(StartInput::progress(
         "order:42",
         "Order 42",
@@ -191,18 +192,9 @@ fn req_x_004_taps_of_any_backend_reach_the_same_sink() {
     block_on(android.sync_events()).unwrap();
     assert!(taps.try_recv().is_err());
 
-    // A backend that calls back reaches the same sink.
-    let (sender, taps) = mpsc::channel();
-    let mut kept = None;
-    let live = LiveActivity::connect(
-        move |tap: ActionEvent| sender.send(tap).unwrap(),
-        |context| {
-            let backend = Arc::new(MemoryBackend::new(context));
-            kept = Some(backend.clone());
-            Ok(backend)
-        },
-    )
-    .unwrap();
+    // A backend that calls back reaches the same sink. An adapter that needs its backend later shares it.
+    let backend = Arc::new(MemoryBackend::new());
+    let (live, taps) = connect(backend.clone());
     let order = block_on(live.start(StartInput::progress(
         "order:42",
         "Order 42",
@@ -210,7 +202,6 @@ fn req_x_004_taps_of_any_backend_reach_the_same_sink() {
         0.1,
     )))
     .unwrap();
-    let backend = kept.unwrap();
     backend.tap(&order.id, "track").unwrap();
     assert_eq!(taps.try_recv().unwrap().action_id, "track");
     assert_eq!(
@@ -223,7 +214,7 @@ fn req_x_004_taps_of_any_backend_reach_the_same_sink() {
 fn req_x_006_activities_outside_the_template_contract_do_not_break_the_list() {
     // REQ-X-006
     let driver = MemoryDriver::default();
-    let (android, _taps) = connect(|context| LiveUpdateBackend::new(context, driver.clone()));
+    let (android, _taps) = connect(LiveUpdateBackend::new(driver.clone()));
     let order = block_on(android.start(StartInput::progress(
         "order:42",
         "Order 42",
@@ -269,6 +260,10 @@ struct HostBackend {
 }
 
 impl LiveActivityBackend for HostBackend {
+    fn attach(&self, events: liveactivity::BackendContext) -> liveactivity::Result<()> {
+        self.templates.attach(events)
+    }
+
     fn capabilities(&self) -> BackendFuture<'_, Capabilities> {
         Box::pin(async move {
             let capabilities = self.templates.capabilities().await?;
@@ -318,8 +313,8 @@ impl LiveActivityBackend for HostBackend {
 #[test]
 fn req_x_005_a_host_backend_composes_a_default_one_and_stays_exchangeable() {
     // REQ-X-005
-    let (live, _taps) = connect(|context| HostBackend {
-        templates: LiveUpdateBackend::new(context, MemoryDriver::default()),
+    let (live, _taps) = connect(HostBackend {
+        templates: LiveUpdateBackend::new(MemoryDriver::default()),
     });
 
     block_on(conformance(&live)).assert_passed();

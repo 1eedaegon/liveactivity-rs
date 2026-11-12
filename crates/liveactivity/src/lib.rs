@@ -2,8 +2,9 @@
 //!
 //! An application or a framework plugin talks to [`LiveActivity`]; a platform implements
 //! [`LiveActivityBackend`]. The default backends are the `activitykit` crate on iOS and the
-//! `liveupdate` crate on Android, used as they are: [`connect_native`] picks the one of the
-//! target, and [`LiveActivity::connect`] takes any other.
+//! `liveupdate` crate on Android, used as they are. [`LiveActivity::builder`] connects the two
+//! sides: an application names its event sink, a platform or a framework plugin its backend,
+//! and whatever is not named is the default.
 //!
 //! ```no_run
 //! use liveactivity::{EndInput, StartInput, UpdateInput};
@@ -68,5 +69,5 @@ pub use ios::block_on;
 pub use layout::*;
 pub use models::*;
 pub use native::connect_native;
-pub use service::LiveActivity;
+pub use service::{Builder, LiveActivity};
 pub use validation::{Validate, parse_request, validate_request};

@@ -10,9 +10,9 @@
 //! use liveactivity::{EndInput, StartInput, UpdateInput};
 //!
 //! # async fn run() -> liveactivity::Result<()> {
-//! let live = liveactivity::connect_native(|tap: liveactivity::ActionEvent| {
-//!     println!("{} tapped {}", tap.activity_id, tap.action_id);
-//! })?;
+//! let live = liveactivity::LiveActivity::builder()
+//!     .event_sink(|event: liveactivity::Event| println!("{event:?}"))
+//!     .build()?;
 //!
 //! let order = live
 //!     .start(StartInput::progress("order:42", "Order 42", "Preparing", 0.1))
@@ -24,7 +24,8 @@
 //! # }
 //! ```
 
-#![forbid(unsafe_code)]
+// The one exception is the main-thread check of `wait`.
+#![deny(unsafe_code)]
 
 pub mod android;
 mod backend;
@@ -38,6 +39,9 @@ pub mod contract {
     };
     pub use crate::layout::*;
     pub use crate::models::*;
+    pub use crate::pushes::{
+        PushToStartTokenEvent, PushTokenEvent, PushTokens, TOKENS_KEPT, UpdatedEvent,
+    };
     pub use crate::validation::{Validate, parse_request, validate_request};
 }
 
@@ -48,6 +52,7 @@ pub mod ios;
 mod layout;
 mod models;
 mod native;
+mod pushes;
 mod service;
 #[cfg(feature = "testkit")]
 pub mod testkit;
@@ -61,13 +66,14 @@ pub use ::activitykit;
 pub use ::liveupdate;
 pub use backend::{BackendFuture, LiveActivityBackend};
 pub use error::{ERROR_CODES, Error, Result};
-pub use event::{BackendContext, EventSink};
+pub use event::{BackendContext, Event, EventSink};
 pub use image::{
     ImageInput, MAX_IMAGE_BYTES, MAX_IMAGE_HEIGHT, MAX_IMAGE_WIDTH, check_image, write as write_png,
 };
-pub use ios::block_on;
+pub use ios::{block_on, wait};
 pub use layout::*;
 pub use models::*;
-pub use native::connect_native;
+pub use native::{UnsupportedBackend, connect_native};
+pub use pushes::{PushToStartTokenEvent, PushTokenEvent, PushTokens, TOKENS_KEPT, UpdatedEvent};
 pub use service::{Builder, LiveActivity};
 pub use validation::{Validate, parse_request, validate_request};

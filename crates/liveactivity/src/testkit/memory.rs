@@ -1,6 +1,6 @@
 use crate::{
     ActionEvent, ActivityRecord, ActivityState, Backend, BackendContext, BackendFuture,
-    Capabilities, EndInput, EndPolicy, Error, Fallback, FeatureSupport, LiveActivityBackend,
+    Capabilities, EndInput, EndPolicy, Error, Event, Fallback, FeatureSupport, LiveActivityBackend,
     PermissionKind, PermissionState, Permissions, PromotionState, Result, StartInput, UpdateInput,
     Visibility,
 };
@@ -60,11 +60,11 @@ impl MemoryBackend {
             .map(|activity| activity.record.activity_key.clone())
             .ok_or_else(not_found)?;
         if let Some(events) = self.events.get() {
-            events.emit(ActionEvent {
+            events.emit(Event::Action(ActionEvent {
                 action_id: action_id.into(),
                 activity_id: id.into(),
                 activity_key: Some(activity_key),
-            });
+            }));
         }
         Ok(())
     }
@@ -185,6 +185,7 @@ impl LiveActivityBackend for MemoryBackend {
                 native_live_activity: no,
                 max_payload_bytes: 4096,
                 layout: no,
+                push: no,
             })
         })
     }
@@ -195,6 +196,7 @@ impl LiveActivityBackend for MemoryBackend {
                 notifications: PermissionState::Granted,
                 live_activities: PermissionState::Granted,
                 promotion: PermissionState::NotApplicable,
+                frequent_pushes: PermissionState::NotApplicable,
             })
         })
     }

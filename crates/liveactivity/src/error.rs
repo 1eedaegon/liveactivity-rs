@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+/// The result of every call of the contract.
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Every code of the contract, on every platform and backend.
-pub const ERROR_CODES: [&str; 12] = [
+pub const ERROR_CODES: &[&str] = &[
     "UNSUPPORTED_PLATFORM",
     "UNSUPPORTED_FEATURE",
     "PERMISSION_DENIED",
@@ -22,11 +23,14 @@ pub const ERROR_CODES: [&str; 12] = [
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[error("{code}: {message}")]
 pub struct Error {
+    /// One of [`ERROR_CODES`].
     pub code: String,
+    /// What went wrong, for a developer.
     pub message: String,
 }
 
 impl Error {
+    /// `INVALID_INPUT`: the request does not match the contract.
     pub fn invalid() -> Self {
         Self::new(
             "INVALID_INPUT",
@@ -34,6 +38,7 @@ impl Error {
         )
     }
 
+    /// `PAYLOAD_TOO_LARGE`: the layout, styles and values exceed the limit.
     pub fn payload_too_large() -> Self {
         Self::new(
             "PAYLOAD_TOO_LARGE",
@@ -41,6 +46,7 @@ impl Error {
         )
     }
 
+    /// `UNSUPPORTED_PLATFORM`: the platform has no Live Activities.
     pub fn unsupported() -> Self {
         Self::new(
             "UNSUPPORTED_PLATFORM",
@@ -53,6 +59,7 @@ impl Error {
         Self::new("UNSUPPORTED_FEATURE", message)
     }
 
+    /// `NATIVE_ERROR`: the platform or its bridge failed.
     pub fn native() -> Self {
         Self::new(
             "NATIVE_ERROR",
@@ -88,7 +95,6 @@ impl From<activitykit::Error> for Error {
 mod tests {
     use super::*;
     use activitykit::{Error as Kit, LimitScope};
-
     #[test]
     fn activitykit_errors_keep_their_codes_and_their_details() {
         let cases = [

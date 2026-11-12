@@ -1,7 +1,7 @@
 use crate::{
     ActivityRecord, BackendContext, Capabilities, EndInput, Error, LayoutActivityRecord,
-    LayoutEndInput, LayoutStartInput, LayoutUpdateInput, PermissionKind, Permissions, Result,
-    StartInput, UpdateInput,
+    LayoutEndInput, LayoutStartInput, LayoutUpdateInput, PermissionKind, Permissions, PushTokens,
+    Result, StartInput, UpdateInput,
 };
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -77,6 +77,11 @@ pub trait LiveActivityBackend: Send + Sync + 'static {
         unsupported("This backend stores no images.")
     }
 
+    /// The push tokens the backend holds since launch. The default has no pushes and holds none.
+    fn push_tokens(&self) -> BackendFuture<'_, PushTokens> {
+        Box::pin(async { Ok(PushTokens::default()) })
+    }
+
     /// Sends the taps the platform queued to the event sink. A platform that calls back needs
     /// nothing here, which is the default.
     fn sync_events(&self) -> BackendFuture<'_, ()> {
@@ -135,6 +140,10 @@ impl<T: LiveActivityBackend + ?Sized> LiveActivityBackend for Arc<T> {
 
     fn write_image(&self, name: String, png: Vec<u8>) -> BackendFuture<'_, ()> {
         (**self).write_image(name, png)
+    }
+
+    fn push_tokens(&self) -> BackendFuture<'_, PushTokens> {
+        (**self).push_tokens()
     }
 
     fn sync_events(&self) -> BackendFuture<'_, ()> {

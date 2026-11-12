@@ -18,10 +18,11 @@ mod tests;
 use crate::{
     Error, Result,
     layout::{
-        ActionEvent, LayoutActivityRecord, LayoutEndInput, LayoutSnapshot, LayoutStartInput,
-        LayoutUpdateInput,
+        ActionEvent, LayoutActivityRecord, LayoutEndInput, LayoutPush, LayoutSnapshot,
+        LayoutStartInput, LayoutUpdateInput,
     },
     models::*,
+    pushes::{PushTokenEvent, UpdatedEvent},
     validation::Validate,
 };
 use activitykit::{State, Values};
@@ -39,12 +40,29 @@ pub(crate) trait Acknowledge: Send + 'static {
     fn acknowledge(&self);
 }
 
+/// What the backend takes from a kit's events: the taps with what holds their intent, and what the pushes bring.
+pub(crate) enum KitEvent<H, A> {
+    Tap(ActionEvent, A),
+    /// A push token of the activity, new or changed, in lowercase hex.
+    PushToken {
+        activity: H,
+        token: String,
+    },
+    /// The app's push-to-start token, new or changed, in lowercase hex.
+    PushToStartToken {
+        token: String,
+    },
+    /// A push delivered content to the activity, which its handle holds now.
+    Updated(H),
+}
+
 /// What the backend needs of activitykit's `ActivityKit`.
 pub(crate) trait Kit: Send + Sync + 'static {
     type Handle: Handle;
     type Ack: Acknowledge;
-    /// Every tap of a button from now on, with what holds its intent, until the kit ends.
-    fn taps(&self) -> Box<dyn Iterator<Item = (ActionEvent, Self::Ack)> + Send>;
+    /// Every event of the kit from now on, until the kit ends: each tap of a button with what holds its intent, and
+    /// what the pushes bring.
+    fn events(&self) -> Box<dyn Iterator<Item = KitEvent<Self::Handle, Self::Ack>> + Send>;
     fn authorization(&self) -> Authorization;
     fn start(
         &self,
@@ -79,9 +97,11 @@ pub(crate) struct Authorization {
     pub(crate) supported: bool,
     pub(crate) enabled: bool,
     pub(crate) buttons: bool,
+    /// Supported, and frequent pushes are allowed for the app in Settings.
+    pub(crate) frequent_pushes: bool,
 }
 
-/// A start: activitykit's `Start` with a key, a revision, a stale date and a timestamp.
+/// A start: activitykit's `Start` with a key, a revision, a stale date, a timestamp and what it asks for of the pushes.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StartSpec {
     pub(crate) key: String,
@@ -90,6 +110,7 @@ pub(crate) struct StartSpec {
     pub(crate) revision: u64,
     pub(crate) stale_at: Option<u64>,
     pub(crate) timestamp: Option<u64>,
+    pub(crate) push: Option<LayoutPush>,
 }
 
 /// An update: activitykit's `Update` at the caller's revision, with a stale date and a timestamp.
@@ -168,6 +189,24 @@ pub(crate) fn action_event<H: Handle>(handle: &H, action: String) -> ActionEvent
     }
 }
 
+/// A push token of `handle` as the event sink gets it.
+pub(crate) fn push_token_event<H: Handle>(handle: &H, token: String) -> PushTokenEvent {
+    let key = handle.key();
+    PushTokenEvent {
+        activity_id: handle.id().to_owned(),
+        activity_key: (!key.is_empty()).then(|| key.to_owned()),
+        token,
+    }
+}
+
+/// Content a push delivered to `handle` as the event sink gets it: the record of a layout activity. An activity of
+/// contract v1 asks for no push, and nothing is reported of it.
+pub(crate) fn updated_event<H: Handle>(handle: &H) -> Option<UpdatedEvent> {
+    kind(handle).is_layout().then(|| UpdatedEvent {
+        record: layout_record(handle),
+    })
+}
+
 fn layout_record<H: Handle>(handle: &H) -> LayoutActivityRecord {
     LayoutActivityRecord {
         id: handle.id().to_owned(),
@@ -222,6 +261,7 @@ pub(crate) fn start_spec(request: LayoutStartInput) -> StartSpec {
         revision: request.snapshot.revision,
         stale_at: request.snapshot.stale_at,
         timestamp: request.snapshot.timestamp,
+        push: request.push,
     }
 }
 
@@ -289,6 +329,7 @@ impl<K: Kit> Apple<K> {
             native_live_activity: supported,
             max_payload_bytes: 4096,
             layout: supported,
+            push: supported,
         }
     }
 
@@ -301,10 +342,16 @@ impl<K: Kit> Apple<K> {
             (true, false, true) => PermissionState::SettingsRequired,
             (true, false, false) => PermissionState::Denied,
         };
+        let frequent_pushes = match (authorization.supported, authorization.frequent_pushes) {
+            (false, _) => PermissionState::NotApplicable,
+            (true, true) => PermissionState::Granted,
+            (true, false) => PermissionState::Denied,
+        };
         Permissions {
             notifications: PermissionState::NotApplicable,
             live_activities,
             promotion: PermissionState::NotApplicable,
+            frequent_pushes,
         }
     }
 
@@ -415,6 +462,44 @@ impl<K: Kit> Apple<K> {
     }
 }
 
+/// Whether the calling thread is the process's main thread, where activitykit answers.
+#[cfg(target_os = "ios")]
+#[allow(unsafe_code)]
+fn on_main_thread() -> bool {
+    unsafe extern "C" {
+        fn pthread_main_np() -> std::ffi::c_int;
+    }
+    // SAFETY: pthread_main_np takes no argument and only reads which thread calls it.
+    unsafe { pthread_main_np() != 0 }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn on_main_thread() -> bool {
+    false
+}
+
+/// The answer of a call, for code that cannot await: [`block_on`] with a guard. On the main thread of an iOS app
+/// the answer would never come, because activitykit answers there, so the call answers `NATIVE_ERROR` at once
+/// instead of hanging.
+///
+/// # Errors
+///
+/// The error of the call, or `NATIVE_ERROR` on the main thread of an iOS app.
+pub fn wait<T>(future: impl Future<Output = Result<T>>) -> Result<T> {
+    wait_on(on_main_thread(), future)
+}
+
+fn wait_on<T>(main: bool, future: impl Future<Output = Result<T>>) -> Result<T> {
+    if main {
+        return Err(Error::new(
+            "NATIVE_ERROR",
+            "A blocking call on the main thread, where activitykit answers, would never end: call it on another \
+             thread, or await it.",
+        ));
+    }
+    block_on(future)
+}
+
 /// Drives `future` to its end on this thread.
 pub fn block_on<F: Future>(future: F) -> F::Output {
     struct Unpark(thread::Thread);
@@ -435,3 +520,4 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
 }
 
 pub use backend::ActivityKitBackend;
+pub(crate) use backend::already_connected;

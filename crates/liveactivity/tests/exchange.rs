@@ -1,99 +1,96 @@
-//! The default backends and a substitute, behind one caller: the backend is exchanged at the
-//! single point of construction and nothing else of the caller changes.
-#![cfg(all(feature = "liveupdate", feature = "testkit"))]
+//! One caller on exchanged backends: the default Android backend (over a driver and over a framework's string
+//! bridge) and a backend that is neither default engine. The backend is named in one place, the connection, and
+//! nothing else of the caller changes.
+#![cfg(feature = "testkit")]
 
 mod common;
 
-use common::{ChannelSink, MemoryDriver, StringBridge};
+use common::{MemoryDriver, StringBridge};
 use liveactivity::{
-    ActivityState, DismissalPolicy, EndRequest, ErrorCode, EventSink, LiveActivity,
-    LiveActivityBackend, LiveActivityEvent, LiveActivityEventPayload, PermissionState,
-    StartRequest, Template, UpdateRequest,
+    ActionEvent, ActivityRecord, ActivityState, Backend, BackendFuture, Capabilities, EndInput,
+    Error, FeatureSupport, LiveActivity, LiveActivityBackend, PermissionKind, PermissionState,
+    Permissions, StartInput, UpdateInput,
     android::LiveUpdateBackend,
-    testkit::{MemoryBackend, block_on, conformance},
+    block_on,
+    testkit::{MemoryBackend, conformance},
 };
 use std::sync::{
-    Arc, Mutex,
+    Arc,
     mpsc::{self, Receiver},
 };
 
-/// A connected service and the events its sink received.
-type Connected = (LiveActivity, Receiver<LiveActivityEvent>);
-
-/// The one line of an application that names a backend.
-type Connect = fn() -> Connected;
+/// A connected service and the taps its sink received.
+type Connected = (LiveActivity, Receiver<ActionEvent>);
 
 fn connect<B: LiveActivityBackend>(
-    factory: impl FnOnce(liveactivity::BackendContext) -> B,
+    backend: impl FnOnce(liveactivity::BackendContext) -> B,
 ) -> Connected {
-    let (sender, events) = mpsc::channel();
-    let service = LiveActivity::connect(ChannelSink(sender), |context| Ok(factory(context)));
-    (service.unwrap(), events)
+    let (sender, taps) = mpsc::channel();
+    // The sink is any closure.
+    let sink = move |tap: ActionEvent| sender.send(tap).unwrap();
+    let live = LiveActivity::connect(sink, |context| Ok(backend(context))).unwrap();
+    (live, taps)
 }
 
-/// The default Android backend, on an in-memory driver in place of the device.
 fn android_default() -> Connected {
     connect(|context| LiveUpdateBackend::new(context, MemoryDriver::default()))
 }
 
-/// The same engine over a framework's string bridge, as a framework plugin connects it.
 fn android_over_a_framework_bridge() -> Connected {
     connect(|context| {
-        let bridge = StringBridge {
-            driver: MemoryDriver::default(),
-            commands: Arc::new(Mutex::new(Vec::new())),
-        };
-        LiveUpdateBackend::over_bridge(context, bridge)
+        LiveUpdateBackend::over_bridge(context, StringBridge(MemoryDriver::default()))
     })
 }
 
-/// A backend that is neither default engine.
 fn substitute() -> Connected {
     connect(MemoryBackend::new)
 }
 
+/// The one line of an application that names a backend.
+type Connect = fn() -> Connected;
+
 const BACKENDS: [(&str, Connect); 3] = [
-    ("android-liveupdate", android_default),
-    ("android-liveupdate", android_over_a_framework_bridge),
+    ("android", android_default),
+    ("android", android_over_a_framework_bridge),
     ("memory", substitute),
 ];
 
-/// An application's use of the interface, written once. It names no backend and reads only
-/// the neutral members of what it gets.
-fn deliver(service: &LiveActivity) -> Vec<(u64, ActivityState, Option<Template>)> {
-    let seen =
-        |record: liveactivity::ActivityRecord| (record.revision, record.state, record.template);
-    let started = block_on(service.start(StartRequest::template(
+/// An application's use of the interface, written once. It names no backend.
+fn deliver(live: &LiveActivity) -> Vec<(u64, String, ActivityState)> {
+    let seen = |record: ActivityRecord| {
+        (
+            record.snapshot.revision,
+            record.snapshot.status,
+            record.state,
+        )
+    };
+    let order = block_on(live.start(StartInput::progress(
         "order:42",
-        Template::progress("Order 42", "Preparing", 0.1),
+        "Order 42",
+        "Preparing",
+        0.1,
     )))
     .unwrap();
-    let updated = block_on(service.update(UpdateRequest::new(
-        &started.id,
+    let updated = block_on(live.update(UpdateInput::progress(
+        &order.id,
         1,
-        Template::progress("Order 42", "On the way", 0.6),
+        "Order 42",
+        "On the way",
+        0.6,
     )))
     .unwrap();
-    let listed = block_on(service.list()).unwrap();
-    let ended = block_on(service.end(EndRequest::new(
-        &started.id,
-        2,
-        None,
-        DismissalPolicy::Immediate,
-    )))
-    .unwrap();
-    assert_eq!(listed.len(), 1);
-    vec![seen(started), seen(updated), seen(ended)]
+    assert_eq!(block_on(live.list()).unwrap().len(), 1);
+    let ended = block_on(live.end(EndInput::immediate(&order.id))).unwrap();
+    vec![seen(order), seen(updated), seen(ended)]
 }
 
 #[test]
 fn req_x_001_every_backend_keeps_the_rules_of_the_interface() {
     // REQ-X-001
-    for (name, connect) in BACKENDS {
-        let (service, _events) = connect();
-        let report = block_on(conformance(&service));
-        assert_eq!(report.backend, name);
-        assert!(report.checks.len() >= 18, "{}", report.checks.len());
+    for (platform, connect) in BACKENDS {
+        let (live, _taps) = connect();
+        let report = block_on(conformance(&live));
+        assert_eq!(report.platform, platform);
         report.assert_passed();
     }
 }
@@ -109,117 +106,238 @@ fn req_x_002_one_caller_gets_the_same_answers_from_exchanged_backends() {
     assert_eq!(
         answers[0],
         [
-            (
-                0,
-                ActivityState::Active,
-                Some(Template::progress("Order 42", "Preparing", 0.1))
-            ),
-            (
-                1,
-                ActivityState::Active,
-                Some(Template::progress("Order 42", "On the way", 0.6))
-            ),
-            (
-                1,
-                ActivityState::Ended,
-                Some(Template::progress("Order 42", "On the way", 0.6))
-            ),
+            (0, "Preparing".into(), ActivityState::Active),
+            (1, "On the way".into(), ActivityState::Active),
+            (1, "On the way".into(), ActivityState::Ended),
         ]
     );
-    for exchanged in &answers[1..] {
-        assert_eq!(exchanged, &answers[0]);
+    assert!(answers.iter().all(|answer| answer == &answers[0]));
+}
+
+#[test]
+fn req_x_003_what_a_backend_lacks_is_reported_and_refused() {
+    // REQ-X-003
+    let (android, _taps) = android_default();
+    let capabilities = block_on(android.capabilities()).unwrap();
+    assert_eq!(capabilities.platform, "android");
+    assert_eq!(capabilities.backend, Backend::AndroidNotification);
+    assert_eq!(capabilities.progress, FeatureSupport::Supported);
+    // The default Android backend draws templates: layouts, images and the permission dialog are a host's part.
+    assert_eq!(capabilities.layout, FeatureSupport::Unsupported);
+    assert_eq!(
+        capabilities.native_live_activity,
+        FeatureSupport::Unsupported
+    );
+    assert!(block_on(android.list_layout()).unwrap().is_empty());
+    let png = one_pixel();
+    assert_eq!(
+        block_on(android.write_image("cover", &png))
+            .unwrap_err()
+            .code,
+        "UNSUPPORTED_FEATURE"
+    );
+    assert_eq!(
+        block_on(android.request_permissions(PermissionKind::Notifications))
+            .unwrap_err()
+            .code,
+        "UNSUPPORTED_FEATURE"
+    );
+    assert_eq!(
+        block_on(android.permissions()).unwrap(),
+        Permissions {
+            notifications: PermissionState::Granted,
+            live_activities: PermissionState::NotApplicable,
+            promotion: PermissionState::Denied,
+        }
+    );
+    // The image is checked before any backend sees it.
+    assert_eq!(
+        block_on(android.write_image("cover", b"not a png"))
+            .unwrap_err()
+            .code,
+        "INVALID_INPUT"
+    );
+
+    let (memory, _taps) = substitute();
+    block_on(memory.write_image("cover", &png)).unwrap();
+}
+
+#[test]
+fn req_x_004_taps_of_any_backend_reach_the_same_sink() {
+    // REQ-X-004
+    // Android queues its taps: the caller asks for them, for example on resume.
+    let driver = MemoryDriver::default();
+    let (android, taps) = connect(|context| LiveUpdateBackend::new(context, driver.clone()));
+    let order = block_on(android.start(StartInput::progress(
+        "order:42",
+        "Order 42",
+        "Preparing",
+        0.1,
+    )))
+    .unwrap();
+    driver.tap(&order.id, 1, "track");
+    driver.tap("gone", 2, "track");
+    block_on(android.sync_events()).unwrap();
+    assert_eq!(
+        taps.try_recv().unwrap(),
+        ActionEvent {
+            action_id: "track".into(),
+            activity_id: order.id.clone(),
+            activity_key: Some("order:42".into()),
+        }
+    );
+    // A tap of an activity the backend no longer knows has no key.
+    assert_eq!(taps.try_recv().unwrap().activity_key, None);
+    block_on(android.sync_events()).unwrap();
+    assert!(taps.try_recv().is_err());
+
+    // A backend that calls back reaches the same sink.
+    let (sender, taps) = mpsc::channel();
+    let mut kept = None;
+    let live = LiveActivity::connect(
+        move |tap: ActionEvent| sender.send(tap).unwrap(),
+        |context| {
+            let backend = Arc::new(MemoryBackend::new(context));
+            kept = Some(backend.clone());
+            Ok(backend)
+        },
+    )
+    .unwrap();
+    let order = block_on(live.start(StartInput::progress(
+        "order:42",
+        "Order 42",
+        "Preparing",
+        0.1,
+    )))
+    .unwrap();
+    let backend = kept.unwrap();
+    backend.tap(&order.id, "track").unwrap();
+    assert_eq!(taps.try_recv().unwrap().action_id, "track");
+    assert_eq!(
+        backend.tap("unknown", "track").unwrap_err().code,
+        "NOT_FOUND"
+    );
+}
+
+#[test]
+fn req_x_006_activities_outside_the_template_contract_do_not_break_the_list() {
+    // REQ-X-006
+    let driver = MemoryDriver::default();
+    let (android, _taps) = connect(|context| LiveUpdateBackend::new(context, driver.clone()));
+    let order = block_on(android.start(StartInput::progress(
+        "order:42",
+        "Order 42",
+        "Preparing",
+        0.1,
+    )))
+    .unwrap();
+
+    // An ended activity that the application started on the engine itself, with a rich presentation.
+    let mut rich = serde_json::to_value(&driver.lock().records[0]).unwrap();
+    rich["id"] = "rich".into();
+    rich["state"] = "ended".into();
+    for snapshot in ["/origin/snapshot", "/snapshot"] {
+        let snapshot = rich.pointer_mut(snapshot).unwrap().as_object_mut().unwrap();
+        snapshot.remove("progress");
+        snapshot.insert(
+            "presentation".into(),
+            serde_json::json!({"style": {"kind": "standard"}}),
+        );
+    }
+    rich["origin"]["activityKey"] = "rich:1".into();
+    rich["origin"]["schemaVersion"] = 2.into();
+    rich["origin"]["template"] = "standard".into();
+    driver
+        .lock()
+        .records
+        .push(serde_json::from_value(rich).unwrap());
+
+    let listed = block_on(android.list()).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, order.id);
+    assert_eq!(android_engine_records(&driver), 2);
+}
+
+fn android_engine_records(driver: &MemoryDriver) -> usize {
+    driver.lock().records.len()
+}
+
+/// A host's own backend: it hands the templates to a default backend and answers the rest itself, which is how a
+/// framework plugin with its own native side fits the interface.
+struct HostBackend {
+    templates: LiveUpdateBackend<MemoryDriver>,
+}
+
+impl LiveActivityBackend for HostBackend {
+    fn capabilities(&self) -> BackendFuture<'_, Capabilities> {
+        Box::pin(async move {
+            let capabilities = self.templates.capabilities().await?;
+            Ok(Capabilities {
+                layout: FeatureSupport::Supported,
+                ..capabilities
+            })
+        })
+    }
+
+    fn permissions(&self) -> BackendFuture<'_, Permissions> {
+        self.templates.permissions()
+    }
+
+    fn request_permissions(&self, _kind: PermissionKind) -> BackendFuture<'_, Permissions> {
+        // The host shows the dialog on its own native side.
+        self.templates.permissions()
+    }
+
+    fn start(&self, input: StartInput) -> BackendFuture<'_, ActivityRecord> {
+        self.templates.start(input)
+    }
+
+    fn update(&self, input: UpdateInput) -> BackendFuture<'_, ActivityRecord> {
+        self.templates.update(input)
+    }
+
+    fn end(&self, input: EndInput) -> BackendFuture<'_, ActivityRecord> {
+        self.templates.end(input)
+    }
+
+    fn list(&self) -> BackendFuture<'_, Vec<ActivityRecord>> {
+        self.templates.list()
+    }
+
+    fn write_image(&self, name: String, _png: Vec<u8>) -> BackendFuture<'_, ()> {
+        Box::pin(async move {
+            if name == "cover" {
+                Ok(())
+            } else {
+                Err(Error::native())
+            }
+        })
     }
 }
 
 #[test]
-fn req_x_003_what_backends_differ_in_is_reported_and_never_guessed() {
-    // REQ-X-003
-    let (android, _events) = android_default();
-    let (memory, _events) = substitute();
+fn req_x_005_a_host_backend_composes_a_default_one_and_stays_exchangeable() {
+    // REQ-X-005
+    let (live, _taps) = connect(|context| HostBackend {
+        templates: LiveUpdateBackend::new(context, MemoryDriver::default()),
+    });
 
-    // Images: one backend stores them, the other says it does not.
-    let android_capabilities = block_on(android.capabilities()).unwrap();
-    assert!(!android_capabilities.images.is_supported());
+    block_on(conformance(&live)).assert_passed();
     assert_eq!(
-        block_on(android.write_image("cover", vec![1]))
-            .unwrap_err()
-            .code,
-        ErrorCode::Unsupported
+        block_on(live.capabilities()).unwrap().layout,
+        FeatureSupport::Supported
     );
-    assert!(
-        block_on(memory.capabilities())
-            .unwrap()
-            .images
-            .is_supported()
-    );
-    block_on(memory.write_image("cover", vec![1])).unwrap();
-    assert_eq!(
-        block_on(memory.write_image(" ", vec![1])).unwrap_err().code,
-        ErrorCode::InvalidRequest
-    );
-
-    // Permissions: each backend answers the same question in the same terms.
-    assert_eq!(
-        block_on(android.permissions()).unwrap().notifications,
-        PermissionState::Granted
-    );
-    assert_eq!(
-        block_on(memory.permissions()).unwrap().live_activities,
-        PermissionState::Granted
-    );
-
-    // Native content belongs to one backend: another refuses it instead of drawing something.
-    let liveupdate_content = common::progress_content(0.25);
-    block_on(android.start(StartRequest::new("native:1", 1, liveupdate_content.clone()))).unwrap();
-    assert_eq!(
-        block_on(memory.start(StartRequest::new("native:1", 1, liveupdate_content)))
-            .unwrap_err()
-            .code,
-        ErrorCode::Unsupported
-    );
+    block_on(live.write_image("cover", &one_pixel())).unwrap();
+    block_on(live.request_permissions(PermissionKind::Notifications)).unwrap();
 }
 
-#[test]
-fn req_x_004_events_of_an_exchanged_backend_reach_the_same_sink() {
-    // REQ-X-004
-    struct Shared(Arc<MemoryBackend>);
-    let (sender, events) = mpsc::channel();
-    let mut kept = None;
-    let service = LiveActivity::connect(ChannelSink(sender), |context| {
-        let backend = Arc::new(MemoryBackend::new(context));
-        kept = Some(Shared(backend.clone()));
-        Ok(backend)
-    })
-    .unwrap();
-    let Shared(backend) = kept.unwrap();
-
-    let started = block_on(service.start(StartRequest::template(
-        "order:42",
-        Template::progress("Order 42", "Preparing", 0.1),
-    )))
-    .unwrap();
-    backend.tap(&started.id, "track").unwrap();
-    block_on(service.end(EndRequest::new(
-        &started.id,
-        1,
-        None,
-        DismissalPolicy::Default,
-    )))
-    .unwrap();
-
-    assert_eq!(
-        events.recv().unwrap(),
-        LiveActivityEvent::keyed_action(&started.id, "order:42", "track")
-    );
-    let LiveActivityEventPayload::StateChanged { activity } = events.recv().unwrap().payload else {
-        panic!("an end is a state change");
-    };
-    assert_eq!(activity.state, ActivityState::Ended);
-    assert_eq!(
-        backend.tap("unknown", "track").unwrap_err().code,
-        ErrorCode::NotFound
-    );
-
-    fn assert_sink<S: EventSink>() {}
-    assert_sink::<ChannelSink>();
+/// The smallest PNG: one transparent pixel.
+fn one_pixel() -> Vec<u8> {
+    vec![
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00,
+        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ]
 }

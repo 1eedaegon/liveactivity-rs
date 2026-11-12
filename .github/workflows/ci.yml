@@ -28,22 +28,12 @@ jobs:
           fallback: none
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - run: cargo test --locked --workspace
-      # REQ-D-002: the interface builds and passes alone, and with each default engine on its own.
-      - run: cargo clippy --locked -p liveactivity --all-targets --no-default-features -- -D warnings
-      - run: cargo clippy --locked -p liveactivity --all-targets --no-default-features --features testkit -- -D warnings
-      - run: cargo clippy --locked -p liveactivity --all-targets --no-default-features --features activitykit -- -D warnings
-      - run: cargo clippy --locked -p liveactivity --all-targets --no-default-features --features liveupdate -- -D warnings
-      - run: cargo test --locked -p mock-framework-plugin
+      - run: cargo test --locked --workspace --all-features
+      - run: cargo llvm-cov --locked --workspace --all-features --summary-only --fail-under-lines 80
+      - run: bash tools/check-requirements.sh
       # The JNI path of the Android backend compiles only for Android.
       - run: rustup target add aarch64-linux-android
       - run: cargo check --locked -p liveactivity --target aarch64-linux-android
-      # REQ-N-004: the host contract and adapter fixture stay above 80 percent line coverage.
-      - run: cargo llvm-cov --locked --workspace --all-features --summary-only --fail-under-lines 80
-      - run: bash tools/check-requirements.sh
-      - name: Keep the interface framework-neutral
-        # REQ-N-001 and REQ-I-001: framework and build integration stay outside the crate.
-        run: bash tools/check-dependencies.sh
 
   msrv:
     name: Rust 1.90

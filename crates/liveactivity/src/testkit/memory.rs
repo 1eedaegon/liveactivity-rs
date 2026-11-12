@@ -1,16 +1,15 @@
 use crate::{
-    ActivityRecord, ActivityState, BackendContext, BackendFuture, CONTRACT_VERSION, Capabilities,
-    Content, EndRequest, Error, ErrorCode, Fallback, FeatureSupport, LiveActivityBackend,
-    LiveActivityEvent, PermissionKind, PermissionState, Permissions, Result, StartRequest,
-    Template, UpdateRequest,
+    ActionEvent, ActivityRecord, ActivityState, Backend, BackendContext, BackendFuture,
+    Capabilities, EndInput, EndPolicy, Error, Fallback, FeatureSupport, LiveActivityBackend,
+    PermissionKind, PermissionState, Permissions, PromotionState, Result, StartInput, UpdateInput,
+    Visibility,
 };
-use serde_json::json;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-/// A reference backend that keeps its activities in memory and shows nothing.
+/// A backend that keeps its activities in memory and shows nothing.
 ///
-/// It draws portable templates only, keeps the lifecycle rules that [`conformance`](super::conformance)
-/// checks, and reports an end and a tap to the event sink.
+/// It runs the progress and timer templates under the rules that [`conformance`](super::conformance) checks, stores
+/// the names of written images and reports a tap to the event sink when asked to.
 pub struct MemoryBackend {
     context: BackendContext,
     state: Mutex<State>,
@@ -25,27 +24,12 @@ struct State {
 
 struct Activity {
     record: ActivityRecord,
-    template: Template,
     /// The start as it was asked: a repeated start is compared with it, whatever came since.
-    origin: (Template, u64, Fallback),
-}
-
-fn refusal(code: ErrorCode, message: &'static str) -> Error {
-    Error::new(code, message)
+    origin: StartInput,
 }
 
 fn not_found() -> Error {
-    refusal(ErrorCode::NotFound, "Unknown activity.")
-}
-
-fn template(content: Content) -> Result<Template> {
-    match content {
-        Content::Template(template) => Ok(template),
-        _ => Err(refusal(
-            ErrorCode::Unsupported,
-            "the memory backend draws templates only",
-        )),
-    }
+    Error::new("NOT_FOUND", "Unknown activity.")
 }
 
 fn terminal(record: &ActivityRecord) -> bool {
@@ -56,9 +40,6 @@ fn terminal(record: &ActivityRecord) -> bool {
 }
 
 impl MemoryBackend {
-    /// Stable identifier this backend reports in capabilities and records.
-    pub const NAME: &'static str = "memory";
-
     /// Creates the backend from the context supplied by `LiveActivity::connect`.
     pub fn new(context: BackendContext) -> Self {
         Self {
@@ -67,21 +48,25 @@ impl MemoryBackend {
         }
     }
 
-    /// Reports a tap on `action` of the activity `id` to the event sink, as a platform would.
+    /// Reports a tap on `action_id` of the activity `id` to the event sink, as a platform would.
     ///
     /// # Errors
     ///
-    /// Fails when no activity has `id` or the sink rejects the event.
-    pub fn tap(&self, id: &str, action: &str) -> Result<()> {
-        let key = self
+    /// Fails when no activity has `id`.
+    pub fn tap(&self, id: &str, action_id: &str) -> Result<()> {
+        let activity_key = self
             .lock()
             .activities
             .iter()
             .find(|activity| activity.record.id == id)
             .map(|activity| activity.record.activity_key.clone())
             .ok_or_else(not_found)?;
-        self.context
-            .emit(LiveActivityEvent::keyed_action(id, key, action))
+        self.context.emit(ActionEvent {
+            action_id: action_id.into(),
+            activity_id: id.into(),
+            activity_key: Some(activity_key),
+        });
+        Ok(())
     }
 
     /// The names of the images written so far, oldest first.
@@ -93,133 +78,136 @@ impl MemoryBackend {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn started(&self, request: StartRequest) -> Result<ActivityRecord> {
-        let template = template(request.content)?;
+    fn started(&self, input: StartInput) -> Result<ActivityRecord> {
         // This backend has no native presentation to promote to.
-        if request.fallback == Fallback::None {
-            return Err(refusal(
-                ErrorCode::Unsupported,
+        if input.fallback == Fallback::None {
+            return Err(Error::unsupported_feature(
                 "The native presentation is unavailable and fallback was not allowed.",
             ));
         }
-        let origin = (template.clone(), request.revision, request.fallback);
         let mut state = self.lock();
         let running = state.activities.iter().find(|activity| {
-            !terminal(&activity.record) && activity.record.activity_key == request.activity_key
+            !terminal(&activity.record) && activity.record.activity_key == input.activity_key
         });
         if let Some(running) = running {
-            return if running.origin == origin {
+            return if running.origin == input {
                 Ok(running.record.clone())
             } else {
-                Err(refusal(
-                    ErrorCode::Conflict,
+                Err(Error::new(
+                    "CONFLICT",
                     "An activity with this key already exists.",
                 ))
             };
         }
         state.started += 1;
         let record = ActivityRecord {
-            contract_version: CONTRACT_VERSION,
             id: format!("memory-{}", state.started),
-            activity_key: request.activity_key,
-            revision: request.revision,
+            activity_key: input.activity_key.clone(),
+            schema_version: input.schema_version,
+            template: input.template,
+            snapshot: input.snapshot.clone(),
+            backend: Backend::Unsupported,
             state: ActivityState::Active,
-            content: json!({}),
-            template: Some(template.clone()),
-            backend: Self::NAME.into(),
+            visibility: Visibility::Unknown,
+            degraded_features: vec!["nativeLiveActivity".into()],
+            promotion_requested: false,
+            promotion_state: PromotionState::NotApplicable,
         };
         state.activities.push(Activity {
             record: record.clone(),
-            template,
-            origin,
+            origin: input,
         });
         Ok(record)
     }
 
-    fn updated(&self, request: UpdateRequest) -> Result<ActivityRecord> {
-        let template = template(request.content)?;
+    fn updated(&self, input: UpdateInput) -> Result<ActivityRecord> {
         let mut state = self.lock();
         let activity = state
             .activities
             .iter_mut()
-            .find(|activity| activity.record.id == request.id && !terminal(&activity.record))
+            .find(|activity| activity.record.id == input.id && !terminal(&activity.record))
             .ok_or_else(not_found)?;
-        accept(activity, request.revision, template)?;
+        let current = &activity.record.snapshot;
+        // An update keeps the template of the start: its fields are what the presentation shows.
+        if input.snapshot.progress.is_some() != current.progress.is_some() {
+            return Err(Error::invalid());
+        }
+        if input.snapshot.revision < current.revision {
+            return Err(Error::new("STALE_REVISION", "Activity revision is stale."));
+        }
+        if input.snapshot.revision == current.revision && input.snapshot != *current {
+            return Err(Error::new(
+                "CONFLICT",
+                "Revision already contains different content.",
+            ));
+        }
+        activity.record.snapshot = input.snapshot;
         Ok(activity.record.clone())
     }
 
-    fn ended(&self, request: EndRequest) -> Result<ActivityRecord> {
-        let record = {
-            let mut state = self.lock();
-            let activity = state
-                .activities
-                .iter_mut()
-                .find(|activity| activity.record.id == request.id)
-                .ok_or_else(not_found)?;
-            if terminal(&activity.record) {
-                return Ok(activity.record.clone());
-            }
-            if let Some(content) = request.content {
-                accept(activity, request.revision, template(content)?)?;
-            }
-            activity.record.state = ActivityState::Ended;
-            activity.record.clone()
-        };
-        // The sink owns its failures: the activity has ended either way.
-        let _ = self
-            .context
-            .emit(LiveActivityEvent::state_changed(record.clone()));
-        Ok(record)
+    fn ended(&self, input: EndInput) -> Result<ActivityRecord> {
+        if matches!(input.policy, EndPolicy::After { .. }) {
+            return Err(Error::unsupported_feature(
+                "This backend does not keep an ended activity on screen.",
+            ));
+        }
+        let mut state = self.lock();
+        let activity = state
+            .activities
+            .iter_mut()
+            .find(|activity| activity.record.id == input.id)
+            .ok_or_else(not_found)?;
+        activity.record.state = ActivityState::Ended;
+        Ok(activity.record.clone())
     }
-}
-
-/// New content under the revision rules every backend keeps.
-fn accept(activity: &mut Activity, revision: u64, template: Template) -> Result<()> {
-    if template.kind()? != activity.template.kind()? {
-        return Err(refusal(
-            ErrorCode::InvalidRequest,
-            "an update keeps the template of the start",
-        ));
-    }
-    if revision < activity.record.revision {
-        return Err(refusal(
-            ErrorCode::StaleRevision,
-            "Activity revision is stale.",
-        ));
-    }
-    if revision == activity.record.revision && template != activity.template {
-        return Err(refusal(
-            ErrorCode::Conflict,
-            "Revision already contains different content.",
-        ));
-    }
-    activity.record.revision = revision;
-    activity.record.template = Some(template.clone());
-    activity.template = template;
-    Ok(())
 }
 
 impl LiveActivityBackend for MemoryBackend {
     fn capabilities(&self) -> BackendFuture<'_, Capabilities> {
-        Box::pin(async {
+        let (yes, no) = (FeatureSupport::Supported, FeatureSupport::Unsupported);
+        Box::pin(async move {
             Ok(Capabilities {
-                layouts: FeatureSupport::Unsupported,
-                native_presentation: FeatureSupport::Unsupported,
-                ..Capabilities::all(Self::NAME, FeatureSupport::Supported)
+                platform: "memory".into(),
+                backend: Backend::Unsupported,
+                start: yes,
+                update: yes,
+                end: yes,
+                progress: yes,
+                timer: yes,
+                actions: yes,
+                state_observation: no,
+                silent_update: yes,
+                native_live_activity: no,
+                max_payload_bytes: 4096,
+                layout: no,
             })
         })
     }
 
-    fn start(&self, request: StartRequest) -> BackendFuture<'_, ActivityRecord> {
-        Box::pin(async move { self.started(request) })
+    fn permissions(&self) -> BackendFuture<'_, Permissions> {
+        Box::pin(async {
+            Ok(Permissions {
+                notifications: PermissionState::Granted,
+                live_activities: PermissionState::Granted,
+                promotion: PermissionState::NotApplicable,
+            })
+        })
     }
 
-    fn update(&self, request: UpdateRequest) -> BackendFuture<'_, ActivityRecord> {
-        Box::pin(async move { self.updated(request) })
+    fn request_permissions(&self, _kind: PermissionKind) -> BackendFuture<'_, Permissions> {
+        self.permissions()
     }
 
-    fn end(&self, request: EndRequest) -> BackendFuture<'_, ActivityRecord> {
-        Box::pin(async move { self.ended(request) })
+    fn start(&self, input: StartInput) -> BackendFuture<'_, ActivityRecord> {
+        Box::pin(async move { self.started(input) })
+    }
+
+    fn update(&self, input: UpdateInput) -> BackendFuture<'_, ActivityRecord> {
+        Box::pin(async move { self.updated(input) })
+    }
+
+    fn end(&self, input: EndInput) -> BackendFuture<'_, ActivityRecord> {
+        Box::pin(async move { self.ended(input) })
     }
 
     fn list(&self) -> BackendFuture<'_, Vec<ActivityRecord>> {
@@ -231,14 +219,6 @@ impl LiveActivityBackend for MemoryBackend {
                 .map(|activity| activity.record.clone())
                 .collect())
         })
-    }
-
-    fn permissions(&self) -> BackendFuture<'_, Permissions> {
-        Box::pin(async { Ok(Permissions::all(PermissionState::Granted)) })
-    }
-
-    fn request_permission(&self, _kind: PermissionKind) -> BackendFuture<'_, Permissions> {
-        self.permissions()
     }
 
     fn write_image(&self, name: String, _png: Vec<u8>) -> BackendFuture<'_, ()> {

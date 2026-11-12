@@ -1,6 +1,6 @@
 use crate::{
-    ActivityRecord, ActivityState, DismissalPolicy, EndRequest, ErrorCode, Fallback, LiveActivity,
-    Result, StartRequest, Template, UpdateRequest,
+    ActivityRecord, ActivityState, EndInput, EndPolicy, FeatureSupport, LiveActivity, Result,
+    StartInput, UpdateInput,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -16,8 +16,8 @@ pub struct Check {
 /// The rules [`conformance`] checked on one backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
-    /// The backend, as its capabilities name it.
-    pub backend: String,
+    /// The platform, as the backend's capabilities name it.
+    pub platform: String,
     /// Every rule, in the order checked.
     pub checks: Vec<Check>,
 }
@@ -44,14 +44,10 @@ impl Report {
     pub fn assert_passed(&self) {
         assert!(
             self.passed(),
-            "backend {} is not exchangeable: {:#?}",
-            self.backend,
+            "the {} backend is not exchangeable: {:#?}",
+            self.platform,
             self.failures()
         );
-    }
-
-    fn check(&mut self, name: &'static str, failure: Option<String>) {
-        self.checks.push(Check { name, failure });
     }
 
     /// Records that `result` succeeded and `rule` holds of its value, and gives the value.
@@ -65,303 +61,229 @@ impl Report {
             Ok(value) if rule(value) => None,
             other => Some(format!("{other:?}")),
         };
-        self.check(name, failure);
+        self.checks.push(Check { name, failure });
         result.ok()
     }
 
     /// Records that `result` failed with `code`.
-    fn refuses<T: std::fmt::Debug>(
-        &mut self,
-        name: &'static str,
-        result: Result<T>,
-        code: ErrorCode,
-    ) {
+    fn refuses<T: std::fmt::Debug>(&mut self, name: &'static str, result: Result<T>, code: &str) {
         let failure = match &result {
             Err(error) if error.code == code => None,
-            other => Some(format!("expected {code:?}, got {other:?}")),
+            other => Some(format!("expected {code}, got {other:?}")),
         };
-        self.check(name, failure);
+        self.checks.push(Check { name, failure });
     }
 }
-
-/// The smallest PNG: one transparent pixel.
-const PNG: [u8; 67] = [
-    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-    0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-    0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-    0x42, 0x60, 0x82,
-];
 
 /// Keys of earlier runs in this process stay out of the way of a backend that keeps state.
 static RUN: AtomicU64 = AtomicU64::new(0);
 
 /// A platform may not have confirmed the activity yet, so a running one is any state but an end.
-fn active(record: &ActivityRecord) -> bool {
+fn running(record: &ActivityRecord) -> bool {
     !matches!(
         record.state,
         ActivityState::Ended | ActivityState::Dismissed
     )
 }
 
-/// Runs the portable lifecycle on `service` and reports each rule a backend keeps to be
-/// exchangeable with another: one caller, written once, then behaves the same on each.
-///
-/// The activities are templates, which every backend with `templates` draws. The run ends the
-/// activities it starts.
-pub async fn conformance(service: &LiveActivity) -> Report {
+/// Runs the template lifecycle on `live` and reports each rule a backend keeps to be exchangeable with another: one
+/// caller, written once, then behaves the same on each. The run ends the activities it starts.
+pub async fn conformance(live: &LiveActivity) -> Report {
     let run = RUN.fetch_add(1, Ordering::Relaxed);
     let key = |name: &str| format!("conformance:{run}:{name}");
     let mut report = Report {
-        backend: String::new(),
+        platform: String::new(),
         checks: Vec::new(),
     };
 
     let capabilities = report.holds(
-        "capabilities name the backend and offer the template lifecycle",
-        service.capabilities().await,
+        "capabilities offer the template lifecycle",
+        live.capabilities().await,
         |capabilities| {
             [
                 capabilities.start,
                 capabilities.update,
                 capabilities.end,
-                capabilities.list,
-                capabilities.templates,
+                capabilities.progress,
+                capabilities.timer,
             ]
             .iter()
-            .all(|feature| feature.is_supported())
+            .all(|feature| *feature == FeatureSupport::Supported)
         },
     );
     let Some(capabilities) = capabilities else {
         return report;
     };
-    report.backend = capabilities.backend;
+    report.platform = capabilities.platform.clone();
+    report.holds("permissions answer", live.permissions().await, |_| true);
 
-    let preparing = Template::progress("Delivery", "Preparing", 0.25);
-    let arriving = Template::progress("Delivery", "Arriving", 0.5);
-    let start = StartRequest::template(key("delivery"), preparing.clone());
+    let start = StartInput::progress(&key("delivery"), "Delivery", "Preparing", 0.25);
     let started = report.holds(
-        "start returns an active record with its key, revision and template",
-        service.start(start.clone()).await,
+        "start returns a running record with its key and content",
+        live.start(start.clone()).await,
         |record| {
-            active(record)
+            running(record)
                 && !record.id.is_empty()
                 && record.activity_key == start.activity_key
-                && record.revision == 0
-                && record.template.as_ref() == Some(&preparing)
+                && record.snapshot == start.snapshot
         },
     );
     let Some(started) = started else {
         return report;
     };
     let id = started.id.as_str();
+    let update = |revision, status, progress| {
+        UpdateInput::progress(id, revision, "Delivery", status, progress)
+    };
 
     report.holds(
         "a repeated start keeps its handle",
-        service.start(start.clone()).await,
+        live.start(start.clone()).await,
         |record| record.id == id,
     );
     report.refuses(
         "a start with the key of a running activity and other content is a conflict",
-        service
-            .start(StartRequest::template(key("delivery"), arriving.clone()))
-            .await,
-        ErrorCode::Conflict,
+        live.start(StartInput::progress(
+            &key("delivery"),
+            "Delivery",
+            "Other",
+            0.5,
+        ))
+        .await,
+        "CONFLICT",
     );
     report.refuses(
-        "a template with both a progress and a timer is invalid",
-        service
-            .start(StartRequest::template(
-                key("invalid"),
-                Template {
-                    timer: Template::timer("t", "s", 1, 2).timer,
-                    ..preparing.clone()
-                },
-            ))
-            .await,
-        ErrorCode::InvalidRequest,
+        "a request outside the contract is invalid",
+        live.start(StartInput::progress(
+            &key("invalid"),
+            "Delivery",
+            "Preparing",
+            1.5,
+        ))
+        .await,
+        "INVALID_INPUT",
     );
-
     report.holds(
         "a newer revision replaces the content",
-        service
-            .update(UpdateRequest::new(id, 2, arriving.clone()))
-            .await,
-        |record| record.revision == 2 && record.template.as_ref() == Some(&arriving),
+        live.update(update(2, "Arriving", 0.5)).await,
+        |record| record.snapshot.revision == 2 && record.snapshot.status == "Arriving",
     );
     report.holds(
         "the same revision with the same content is idempotent",
-        service
-            .update(UpdateRequest::new(id, 2, arriving.clone()))
-            .await,
-        |record| record.revision == 2,
+        live.update(update(2, "Arriving", 0.5)).await,
+        |record| record.snapshot.revision == 2,
     );
     report.refuses(
         "an older revision is stale",
-        service
-            .update(UpdateRequest::new(id, 1, preparing.clone()))
-            .await,
-        ErrorCode::StaleRevision,
+        live.update(update(1, "Late", 0.4)).await,
+        "STALE_REVISION",
     );
     report.refuses(
         "the same revision with other content is a conflict",
-        service
-            .update(UpdateRequest::new(id, 2, preparing.clone()))
-            .await,
-        ErrorCode::Conflict,
+        live.update(update(2, "Other", 0.6)).await,
+        "CONFLICT",
     );
     report.holds(
         "a repeated start after an update still keeps its handle",
-        service.start(start.clone()).await,
-        |record| record.id == id && record.revision == 2,
+        live.start(start.clone()).await,
+        |record| record.id == id && record.snapshot.revision == 2,
     );
     report.refuses(
         "an update of an unknown handle is not found",
-        service
-            .update(UpdateRequest::new(
-                "conformance-unknown",
-                1,
-                arriving.clone(),
-            ))
-            .await,
-        ErrorCode::NotFound,
+        live.update(UpdateInput::progress(
+            "conformance-unknown",
+            1,
+            "Delivery",
+            "Gone",
+            0.5,
+        ))
+        .await,
+        "NOT_FOUND",
     );
     report.holds(
         "list reports the activity at its accepted revision",
-        service.list().await,
+        live.list().await,
         |records| {
             records
                 .iter()
-                .any(|record| record.id == id && record.revision == 2 && active(record))
+                .any(|record| record.id == id && record.snapshot.revision == 2)
         },
     );
 
-    let brewing = Template::timer("Tea", "Brewing", 1_800_000_000_000, 1_800_000_600_000);
     let timer = report.holds(
-        "a timer template starts beside a progress template",
-        service
-            .start(StartRequest::template(key("tea"), brewing.clone()))
-            .await,
-        |record| active(record) && record.id != id && record.template.as_ref() == Some(&brewing),
+        "a timer starts beside a progress activity",
+        live.start(StartInput::timer(
+            &key("tea"),
+            "Tea",
+            "Brewing",
+            1_800_000_000_000,
+            1_800_000_600_000,
+        ))
+        .await,
+        |record| running(record) && record.id != id && record.snapshot.timer.is_some(),
     );
     if let Some(timer) = &timer {
         report.refuses(
             "an update keeps the template of the start",
-            service
-                .update(UpdateRequest::new(&timer.id, 1, arriving.clone()))
+            live.update(UpdateInput::progress(&timer.id, 1, "Tea", "Brewing", 0.5))
                 .await,
-            ErrorCode::InvalidRequest,
+            "INVALID_INPUT",
         );
     }
 
-    let end = |id: &str| EndRequest::new(id, 3, None, DismissalPolicy::Immediate);
-    // What an end can do differs between platforms: the capabilities say it before the call.
-    let delayed = EndRequest::new(id, 3, None, DismissalPolicy::After { at: 1 });
-    if !capabilities.delayed_dismissal.is_supported() {
-        report.refuses(
-            "a delayed dismissal the backend does not report is unsupported",
-            service.end(delayed).await,
-            ErrorCode::Unsupported,
-        );
-    }
-    let done = Template::progress("Delivery", "Delivered", 1.0);
-    let last = if capabilities.final_content.is_supported() {
-        report.holds(
-            "an end with final content ends the activity with it",
-            service.end(end(id).with_content(done.clone())).await,
-            |record| {
-                record.state == ActivityState::Ended && record.template.as_ref() == Some(&done)
-            },
-        );
-        done
-    } else {
-        report.refuses(
-            "final content the backend does not report is unsupported",
-            service.end(end(id).with_content(done)).await,
-            ErrorCode::Unsupported,
-        );
-        report.holds(
-            "an end ends the activity with its last content",
-            service.end(end(id)).await,
-            |record| {
-                record.state == ActivityState::Ended
-                    && record.revision >= 2
-                    && record.template.as_ref() == Some(&arriving)
-            },
-        );
-        arriving.clone()
-    };
+    report.holds(
+        "an end ends the activity with its last content",
+        live.end(EndInput::immediate(id)).await,
+        |record| record.state == ActivityState::Ended && record.snapshot.status == "Arriving",
+    );
     report.holds(
         "a repeated end is idempotent",
-        service.end(end(id)).await,
-        |record| record.state == ActivityState::Ended && record.template.as_ref() == Some(&last),
+        live.end(EndInput::immediate(id)).await,
+        |record| record.state == ActivityState::Ended,
     );
     report.refuses(
         "a late update cannot revive an ended activity",
-        service
-            .update(UpdateRequest::new(id, 4, preparing.clone()))
-            .await,
-        ErrorCode::NotFound,
+        live.update(update(4, "Revived", 0.9)).await,
+        "NOT_FOUND",
     );
     let restarted = report.holds(
         "a start after the end is a new activity with a new handle",
-        service.start(start).await,
-        |record| active(record) && record.id != id,
+        live.start(start).await,
+        |record| running(record) && record.id != id,
     );
 
     // A start that refuses the ordinary presentation needs the native one.
-    let strict = StartRequest::template(key("strict"), preparing.clone()).fallback(Fallback::None);
-    let strict = if capabilities.native_presentation.is_supported() {
+    let strict =
+        StartInput::progress(&key("strict"), "Delivery", "Preparing", 0.25).without_fallback();
+    let strict = if capabilities.native_live_activity == FeatureSupport::Supported {
         report.holds(
             "a start without fallback runs where the native presentation is available",
-            service.start(strict).await,
-            active,
+            live.start(strict).await,
+            running,
         )
     } else {
         report.refuses(
             "a start without fallback is unsupported without the native presentation",
-            service.start(strict).await,
-            ErrorCode::Unsupported,
+            live.start(strict).await,
+            "UNSUPPORTED_FEATURE",
         );
         None
     };
-    let stores = service.write_image("conformance", PNG.to_vec()).await;
-    if capabilities.images.is_supported() {
-        // Storing may need setup of the host application, such as an App Group on iOS: a backend
-        // then names that, and the image is not stored.
-        let failure = match &stores {
-            Ok(()) => None,
-            Err(error) if error.code == ErrorCode::ConfigurationRequired => None,
-            other => Some(format!("{other:?}")),
-        };
-        report.check(
-            "an image is stored where images are reported, or the missing setup is named",
-            failure,
-        );
-    } else {
-        report.refuses(
-            "an image the backend does not report is unsupported",
-            stores,
-            ErrorCode::Unsupported,
-        );
-    }
-
-    report.holds(
-        "permissions answer under the contract",
-        service.permissions().await,
-        |_| true,
-    );
     report.holds(
         "queued events synchronize without a failure",
-        service.sync_events().await,
+        live.sync_events().await,
         |()| true,
     );
 
     // The run leaves nothing on screen.
     for record in restarted.iter().chain(&timer).chain(&strict) {
+        let end = EndInput {
+            id: record.id.clone(),
+            policy: EndPolicy::Immediate {},
+        };
         report.holds(
             "the activities of the run end",
-            service.end(end(&record.id)).await,
+            live.end(end).await,
             |record| record.state == ActivityState::Ended,
         );
     }

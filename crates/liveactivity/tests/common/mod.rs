@@ -1,24 +1,16 @@
-//! An in-memory Android driver, a string bridge over it and a channel sink.
-//!
-//! The driver behaves like the managed adapter: `post` makes a notification observable,
-//! `cancel` removes it, and storage keeps exactly what `write` received.
+//! An in-memory Android driver and a string bridge over it. The driver behaves like the Android side: `post` makes
+//! a notification observable, `cancel` removes it, and storage keeps exactly what `write` received.
 #![allow(dead_code)]
 
-use liveactivity::android::LiveUpdateBackend;
-use liveactivity::{
-    Error, ErrorCode, EventSink, LiveActivity, LiveActivityEvent, Result, StartRequest,
-};
-use liveupdate::{
-    ActivityEvent, ActivityState, Bridge, Capabilities, Driver, DriverRecord, EventBatch,
+use liveactivity::liveupdate::{
+    self, ActivityEvent, ActivityState, Bridge, Capabilities, Driver, DriverRecord, EventBatch,
     Observation, PresentationCapabilities, PromotionState,
 };
+use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
-    sync::{
-        Arc, Mutex, MutexGuard,
-        mpsc::{self, Receiver, Sender},
-    },
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 pub struct MemoryState {
@@ -26,9 +18,7 @@ pub struct MemoryState {
     pub records: Vec<DriverRecord>,
     pub observed: BTreeMap<String, Observation>,
     pub events: EventBatch,
-    /// Every driver call in order, by method name.
-    pub calls: Vec<&'static str>,
-    pub fail_next_observe: bool,
+    pub posts: usize,
 }
 
 #[derive(Clone)]
@@ -53,8 +43,7 @@ impl Default for MemoryDriver {
                 records: Vec::new(),
                 observed: BTreeMap::new(),
                 events: EventBatch::default(),
-                calls: Vec::new(),
-                fail_next_observe: false,
+                posts: 0,
             })),
         }
     }
@@ -65,71 +54,40 @@ impl MemoryDriver {
         self.state.lock().unwrap()
     }
 
-    /// Removes the notification as a swipe would and queues the dismissal event.
-    pub fn dismiss(&self, id: &str, sequence: u64) {
-        let mut state = self.lock();
-        state.observed.remove(id);
-        state
-            .events
-            .events
-            .push(event(id, sequence, json!({"kind": "dismissed"})));
-    }
-
-    /// Queues a tap on a notification action.
+    /// Queues a tap on a notification action, as the Android side does.
     pub fn tap(&self, id: &str, sequence: u64, action: &str) {
-        self.lock().events.events.push(event(
-            id,
-            sequence,
-            json!({"kind": "action", "actionId": action}),
-        ));
+        let event: ActivityEvent = serde_json::from_value(json!({
+            "sequence": sequence,
+            "activityId": id,
+            "occurredAt": 1_800_000_000_000_u64,
+            "kind": {"kind": "action", "actionId": action},
+        }))
+        .unwrap();
+        self.lock().events.events.push(event);
     }
-}
-
-fn event(id: &str, sequence: u64, kind: Value) -> ActivityEvent {
-    serde_json::from_value(json!({
-        "sequence": sequence,
-        "activityId": id,
-        "occurredAt": 1_800_000_000_000_u64,
-        "kind": kind,
-    }))
-    .unwrap()
 }
 
 impl Driver for MemoryDriver {
     fn capabilities(&self) -> liveupdate::Result<Capabilities> {
-        let mut state = self.lock();
-        state.calls.push("capabilities");
-        Ok(state.capabilities)
+        Ok(self.lock().capabilities)
     }
 
     fn read(&self) -> liveupdate::Result<Vec<DriverRecord>> {
-        let mut state = self.lock();
-        state.calls.push("read");
-        Ok(state.records.clone())
+        Ok(self.lock().records.clone())
     }
 
     fn write(&self, records: &[DriverRecord]) -> liveupdate::Result<()> {
-        let mut state = self.lock();
-        state.calls.push("write");
-        state.records = records.to_vec();
+        self.lock().records = records.to_vec();
         Ok(())
     }
 
     fn observe(&self) -> liveupdate::Result<Vec<Observation>> {
-        let mut state = self.lock();
-        state.calls.push("observe");
-        if std::mem::take(&mut state.fail_next_observe) {
-            return Err(liveupdate::Error::new(
-                liveupdate::ErrorCode::NativeError,
-                "Observing failed.",
-            ));
-        }
-        Ok(state.observed.values().cloned().collect())
+        Ok(self.lock().observed.values().cloned().collect())
     }
 
     fn post(&self, record: &DriverRecord) -> liveupdate::Result<()> {
         let mut state = self.lock();
-        state.calls.push("post");
+        state.posts += 1;
         let promotion_state = if record.promotion_requested {
             PromotionState::Promoted
         } else {
@@ -149,49 +107,41 @@ impl Driver for MemoryDriver {
     }
 
     fn cancel(&self, id: &str) -> liveupdate::Result<()> {
-        let mut state = self.lock();
-        state.calls.push("cancel");
-        state.observed.remove(id);
+        self.lock().observed.remove(id);
         Ok(())
     }
 
     fn drain_events(&self) -> liveupdate::Result<EventBatch> {
-        let mut state = self.lock();
-        state.calls.push("events");
-        Ok(std::mem::take(&mut state.events))
+        Ok(std::mem::take(&mut self.lock().events))
     }
 }
 
-/// The managed adapter's side of liveupdate's JSON bridge protocol, as a framework transport
-/// of a mobile plugin reaches it: a command name and a JSON payload in, a
-/// response envelope out.
-pub struct StringBridge {
-    pub driver: MemoryDriver,
-    /// Every command in order.
-    pub commands: Arc<Mutex<Vec<String>>>,
+/// The Android side of liveupdate's JSON bridge protocol, as a framework's native call reaches it: a command name
+/// and a JSON payload in, a response envelope out.
+pub struct StringBridge(pub MemoryDriver);
+
+fn member<T: DeserializeOwned>(payload: &Value, name: &str) -> T {
+    serde_json::from_value(payload[name].clone()).unwrap()
 }
 
 impl Bridge for StringBridge {
     fn invoke(&self, command: &str, payload: &str) -> liveupdate::Result<String> {
-        self.commands.lock().unwrap().push(command.to_owned());
         let payload: Value = serde_json::from_str(payload).unwrap();
+        let driver = &self.0;
         let data = match command {
-            "capabilities" => self.driver.capabilities().map(|data| json!(data)),
-            "read" => self.driver.read().map(|data| json!(data)),
-            "write" => self
-                .driver
+            "capabilities" => driver.capabilities().map(|data| json!(data)),
+            "read" => driver.read().map(|data| json!(data)),
+            "write" => driver
                 .write(&member::<Vec<DriverRecord>>(&payload, "records"))
                 .map(|()| Value::Null),
-            "observe" => self.driver.observe().map(|data| json!(data)),
-            "post" => self
-                .driver
+            "observe" => driver.observe().map(|data| json!(data)),
+            "post" => driver
                 .post(&member::<DriverRecord>(&payload, "record"))
                 .map(|()| Value::Null),
-            "cancel" => self
-                .driver
+            "cancel" => driver
                 .cancel(&member::<String>(&payload, "id"))
                 .map(|()| Value::Null),
-            "events" => self.driver.drain_events().map(|data| json!(data)),
+            "events" => driver.drain_events().map(|data| json!(data)),
             other => panic!("unknown bridge command {other}"),
         };
         let envelope = match data {
@@ -200,67 +150,4 @@ impl Bridge for StringBridge {
         };
         Ok(envelope.to_string())
     }
-}
-
-fn member<T: serde::de::DeserializeOwned>(payload: &Value, name: &str) -> T {
-    serde_json::from_value(payload[name].clone()).unwrap()
-}
-
-/// Framework-side reverse bridge backed by a standard channel.
-pub struct ChannelSink(pub Sender<LiveActivityEvent>);
-
-impl EventSink for ChannelSink {
-    fn emit(&self, event: LiveActivityEvent) -> Result<()> {
-        self.0
-            .send(event)
-            .map_err(|_| Error::new(ErrorCode::EventDelivery, "the event receiver is closed"))
-    }
-}
-
-/// The neutral service, the backend it runs on and both observation points.
-pub struct Harness {
-    pub service: LiveActivity,
-    pub backend: Arc<LiveUpdateBackend<MemoryDriver>>,
-    pub driver: MemoryDriver,
-    pub events: Receiver<LiveActivityEvent>,
-}
-
-/// Connects the backend the way a framework adapter does: it keeps the backend in an `Arc`
-/// for `pump_events` and hands the same one to the neutral service.
-pub fn connect() -> Harness {
-    let driver = MemoryDriver::default();
-    let (sender, events) = mpsc::channel();
-    let mut kept = None;
-    let service = LiveActivity::connect(ChannelSink(sender), |context| {
-        let backend = Arc::new(LiveUpdateBackend::new(context, driver.clone()));
-        kept = Some(backend.clone());
-        Ok(backend)
-    })
-    .unwrap();
-    Harness {
-        service,
-        backend: kept.unwrap(),
-        driver,
-        events,
-    }
-}
-
-/// Start content of the v1 progress template: a liveupdate start request without its key
-/// and schema version.
-pub fn progress_content(progress: f64) -> Value {
-    json!({
-        "template": "progress",
-        "fallback": "notification",
-        "visibility": "private",
-        "snapshot": {
-            "revision": 0,
-            "title": "Delivery",
-            "status": "Preparing",
-            "progress": progress
-        }
-    })
-}
-
-pub fn progress_start(key: &str) -> StartRequest {
-    StartRequest::new(key, 1, progress_content(0.25))
 }

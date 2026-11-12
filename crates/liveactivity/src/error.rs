@@ -16,6 +16,22 @@ pub enum ErrorCode {
     BackendFailure,
     /// A framework event sink rejected an event.
     EventDelivery,
+    /// The platform has no Live Activity presentation at all.
+    UnsupportedPlatform,
+    /// The platform refused to start an activity while the app was not in the foreground.
+    NotForeground,
+    /// The host application is not set up for the backend.
+    ConfigurationRequired,
+    /// The content exceeds a backend size limit.
+    PayloadTooLarge,
+    /// No activity has the requested identifier.
+    NotFound,
+    /// The revision is older than the accepted one.
+    StaleRevision,
+    /// The same key or revision already holds different content.
+    Conflict,
+    /// A platform or backend limit of running activities is reached.
+    SystemLimit,
 }
 
 /// Stable error crossing from a backend to a framework adapter.
@@ -42,5 +58,5 @@ impl Error {
     }
 }
 
-/// Result returned by liveactivity-core interfaces.
+/// Result returned by the liveactivity interfaces.
 pub type Result<T> = std::result::Result<T, Error>;

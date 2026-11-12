@@ -57,6 +57,6 @@ platform logic.
 ## Registry result
 
 At review time crates.io contained activitykit, istmo-live-activity and
-tauri-plugin-live-activity. The names liveactivity, liveactivity-core and
+tauri-plugin-live-activity. The names liveactivity, liveactivity and
 liveactivity-testkit returned no crate. GitHub public repository search returned
 no repository named liveactivity-rs.

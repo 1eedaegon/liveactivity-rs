@@ -1,6 +1,7 @@
 # Product requirements
 
-Status: feasibility spike
+Status: feasibility spike, extended by ADR-0002 to ADR-0004 (the "out of scope"
+list below describes the first spike only)
 
 Date: 2026-11-12
 
@@ -43,7 +44,7 @@ event bridges.
 
 ## Success criteria
 
-1. A crate outside liveactivity-core implements both bridge directions using
+1. A crate outside liveactivity implements both bridge directions using
    only public types.
 2. Start, update, end, list and capability calls cross the injected backend.
 3. A simulated native event reaches the framework event sink.

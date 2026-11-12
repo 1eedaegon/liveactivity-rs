@@ -1,6 +1,6 @@
 use crate::{
-    ActivityRecord, BackendContext, Capabilities, EndRequest, EventSink, LiveActivityBackend,
-    Result, StartRequest, UpdateRequest,
+    ActivityRecord, BackendContext, Capabilities, EndRequest, Error, ErrorCode, EventSink,
+    LiveActivityBackend, PermissionKind, Permissions, Result, StartRequest, UpdateRequest,
 };
 use std::sync::Arc;
 
@@ -62,5 +62,37 @@ impl LiveActivity {
             activity.validate()?;
         }
         Ok(activities)
+    }
+
+    /// Sends the events the platform queued to the event sink; see
+    /// [`LiveActivityBackend::sync_events`].
+    pub async fn sync_events(&self) -> Result<()> {
+        self.backend.sync_events().await
+    }
+
+    /// Reads the operating system's permissions through the selected backend.
+    pub async fn permissions(&self) -> Result<Permissions> {
+        let permissions = self.backend.permissions().await?;
+        permissions.validate()?;
+        Ok(permissions)
+    }
+
+    /// Asks the operating system for `kind` through the selected backend.
+    pub async fn request_permission(&self, kind: PermissionKind) -> Result<Permissions> {
+        let permissions = self.backend.request_permission(kind).await?;
+        permissions.validate()?;
+        Ok(permissions)
+    }
+
+    /// Stores a PNG that content names, through the selected backend.
+    pub async fn write_image(&self, name: impl Into<String>, png: Vec<u8>) -> Result<()> {
+        let name = name.into();
+        if name.trim().is_empty() {
+            return Err(Error::new(
+                ErrorCode::InvalidRequest,
+                "name must not be empty",
+            ));
+        }
+        self.backend.write_image(name, png).await
     }
 }

@@ -13,7 +13,7 @@ Construction is the only backend-selection point for a LiveActivity instance.
 ## Command flow
 
 1. The framework adapter parses and validates its boundary payload.
-2. It creates a typed request from liveactivity-core.
+2. It creates a typed request from liveactivity.
 3. LiveActivity forwards the request to the backend.
 4. The backend calls activitykit, liveupdate or another provider.
 5. The typed result or Error crosses the same path back.
@@ -39,16 +39,17 @@ reconstruct backends after an Activity recreation.
 
 ## Backend availability
 
-The future facade crate may provide target-gated optional implementations:
+The `liveactivity` crate holds both default backends behind additive default
+features (ADR-0003):
 
-- ios-activitykit
-- android-liveupdate
+- `activitykit`: `ios::ActivityKitBackend`
+- `liveupdate`: `android::LiveUpdateBackend`
 
-Tauri transport remains in tauri-plugin-live-activity or a dedicated adapter
-crate. An android-tauri feature may add convenience code, but it must be
-additive to android-liveupdate rather than an exclusive alternative.
+`connect_native` selects the one of the target. A framework's own transport,
+such as the Tauri plugin's bridge to its Kotlin side, stays in that framework's
+plugin and is handed to the backend at construction.
 
 ## Compatibility
 
-CONTRACT_VERSION is carried in every top-level serialized message. The first
-spike uses version 1. Unsupported versions fail before native invocation.
+CONTRACT_VERSION is carried in every top-level serialized message. It is 1
+until the first release. Unsupported versions fail before native invocation.

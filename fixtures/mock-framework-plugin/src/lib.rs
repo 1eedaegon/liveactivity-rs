@@ -1,12 +1,12 @@
 //! Independent fixture crate proving that a framework plugin can implement the
-//! liveactivity-core service-provider interfaces.
+//! liveactivity service-provider interfaces.
 
 #![forbid(unsafe_code)]
 
-use liveactivity_core::{
+use liveactivity::{
     ActivityRecord, ActivityState, BackendContext, BackendFuture, CONTRACT_VERSION, Capabilities,
-    EndRequest, Error, ErrorCode, EventSink, LiveActivity, LiveActivityBackend, LiveActivityEvent,
-    Result, StartRequest, UpdateRequest,
+    Content, EndRequest, Error, ErrorCode, EventSink, FeatureSupport, LiveActivity,
+    LiveActivityBackend, LiveActivityEvent, Result, StartRequest, UpdateRequest,
 };
 use std::sync::mpsc::{self, Receiver, Sender};
 
@@ -82,15 +82,7 @@ impl MockFrameworkPlugin {
     }
 
     fn capabilities_value(backend: String) -> Capabilities {
-        Capabilities {
-            contract_version: CONTRACT_VERSION,
-            backend,
-            start: true,
-            update: true,
-            end: true,
-            list: true,
-            actions: true,
-        }
+        Capabilities::all(backend, FeatureSupport::Supported)
     }
 
     fn activity(
@@ -99,15 +91,18 @@ impl MockFrameworkPlugin {
         activity_key: String,
         revision: u64,
         state: ActivityState,
-        content: serde_json::Value,
+        content: Option<Content>,
     ) -> ActivityRecord {
+        let template = content.as_ref().and_then(Content::template).cloned();
+        let native = content.as_ref().and_then(Content::native).cloned();
         ActivityRecord {
             contract_version: CONTRACT_VERSION,
             id,
             activity_key,
             revision,
             state,
-            content,
+            content: native.unwrap_or_default(),
+            template,
             backend,
         }
     }
@@ -139,7 +134,7 @@ impl LiveActivityBackend for MockFrameworkPlugin {
                 request.activity_key,
                 0,
                 ActivityState::Active,
-                request.content,
+                Some(request.content),
             );
             context.emit(LiveActivityEvent::state_changed(activity.clone()))?;
             Ok(activity)
@@ -157,7 +152,7 @@ impl LiveActivityBackend for MockFrameworkPlugin {
                 "recovered".into(),
                 request.revision,
                 ActivityState::Active,
-                request.content,
+                Some(request.content),
             ))
         })
     }
@@ -173,7 +168,7 @@ impl LiveActivityBackend for MockFrameworkPlugin {
                 "recovered".into(),
                 request.revision,
                 ActivityState::Ended,
-                request.content.unwrap_or(serde_json::Value::Null),
+                request.content,
             ))
         })
     }
@@ -197,7 +192,7 @@ pub struct MockPluginHarness {
     pub events: Receiver<LiveActivityEvent>,
 }
 
-/// Connects the external mock plugin through only liveactivity-core public APIs.
+/// Connects the external mock plugin through only liveactivity public APIs.
 pub fn connect_mock_plugin(
     backend_name: impl Into<String>,
     start_error: Option<Error>,

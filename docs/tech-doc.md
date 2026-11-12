@@ -2,7 +2,7 @@
 
 ## Canonical contract
 
-The public API of liveactivity-core is canonical because every intended
+The public API of liveactivity is canonical because every intended
 consumer is a Rust crate compiled in the same Cargo graph. A later Kotlin,
 Swift or dynamic-library boundary will require a separate versioned wire
 schema; handwritten duplicate structs are not acceptable.
@@ -24,14 +24,14 @@ hold a context without mutable global state.
 
 - Activity identifiers and keys remain strings.
 - Revisions are unsigned 64-bit integers.
-- Platform-specific content is represented by serde_json Value during this
-  interface spike.
+- Content is a portable template or the selected backend's own JSON, marked
+  native (ADR-0004).
 - Every top-level message carries contractVersion.
 - Enums use camelCase JSON names and are non-exhaustive in Rust where backend
   evolution is expected.
 
-The production contract should replace unstructured content with the existing
-template and layout types before release.
+A typed portable layout contract is still open: layout content is native to
+the iOS backend.
 
 ## Feature policy
 
@@ -50,9 +50,10 @@ backend.
 
 ## Production migration
 
-1. Replace the mock backend with an adapter over activitykit.
-2. Extract the current TauriBridge over liveupdate into a Tauri adapter.
-3. Run the existing tauri-plugin-live-activity contract fixtures against the
-   new service.
-4. Add a second non-Tauri adapter proof.
-5. Only then stabilize and publish the facade crate.
+1. Done: default backends over activitykit and liveupdate in this crate.
+2. Done as a trial branch: tauri-plugin-live-activity on this crate, with its
+   TauriBridge handed to the Android backend.
+3. Open: the plugin's Android layout, permission dialog and image code as a
+   framework-neutral AAR.
+4. Open: a second non-Tauri adapter proof.
+5. Then stabilize the contract and publish.

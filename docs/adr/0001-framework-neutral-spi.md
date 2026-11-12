@@ -13,7 +13,7 @@ backend selector.
 
 ## Decision
 
-liveactivity-core defines LiveActivityBackend, EventSink and BackendContext.
+liveactivity defines LiveActivityBackend, EventSink and BackendContext.
 Framework plugins implement or construct a backend and inject it through
 LiveActivity::connect. Cargo features only make implementations available.
 

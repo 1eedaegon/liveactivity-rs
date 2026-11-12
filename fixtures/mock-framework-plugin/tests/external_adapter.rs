@@ -1,7 +1,7 @@
-//! Conformance tests compiled outside liveactivity-core.
+//! Conformance tests compiled outside liveactivity.
 
 use futures_executor::block_on;
-use liveactivity_core::{
+use liveactivity::{
     BackendContext, DismissalPolicy, EndRequest, Error, ErrorCode, EventSink, LiveActivity,
     LiveActivityBackend, LiveActivityEvent, LiveActivityEventPayload, StartRequest, UpdateRequest,
 };
@@ -47,6 +47,17 @@ fn req_f_002_commands_reach_the_injected_backend() {
     assert_eq!(harness.calls.recv().unwrap(), ObservedCall::End(end));
     assert_eq!(harness.calls.recv().unwrap(), ObservedCall::List);
     assert!(harness.calls.try_recv().is_err());
+}
+
+#[test]
+fn req_f_010_a_backend_that_is_called_back_has_no_events_to_sync() {
+    // REQ-F-010
+    let harness = connect_mock_plugin("external", None).unwrap();
+
+    block_on(harness.service.sync_events()).unwrap();
+
+    assert!(harness.calls.try_recv().is_err());
+    assert!(harness.events.try_recv().is_err());
 }
 
 #[test]
@@ -110,11 +121,11 @@ fn req_f_006_capabilities_are_backend_owned() {
     let capabilities = block_on(harness.service.capabilities()).unwrap();
 
     assert_eq!(capabilities.backend, "custom-provider");
-    assert!(capabilities.start);
-    assert!(capabilities.update);
-    assert!(capabilities.end);
-    assert!(capabilities.list);
-    assert!(capabilities.actions);
+    assert!(capabilities.start.is_supported());
+    assert!(capabilities.update.is_supported());
+    assert!(capabilities.end.is_supported());
+    assert!(capabilities.list.is_supported());
+    assert!(capabilities.actions.is_supported());
 }
 
 #[test]
@@ -145,8 +156,7 @@ fn req_f_008_invalid_messages_stop_at_the_core_boundary() {
 #[test]
 fn req_n_001_public_contract_is_framework_neutral() {
     // REQ-N-001
-    let manifest =
-        include_str!("../../../crates/liveactivity-core/Cargo.toml").to_ascii_lowercase();
+    let manifest = include_str!("../../../crates/liveactivity/Cargo.toml").to_ascii_lowercase();
     for framework in ["tauri", "wry", "dioxus", "slint"] {
         assert!(
             !manifest.contains(framework),
@@ -180,4 +190,42 @@ fn req_n_003_backend_is_dyn_compatible() {
     ));
 
     assert_eq!(block_on(backend.capabilities()).unwrap().backend, "dynamic");
+}
+
+#[test]
+fn req_d_002_the_interface_alone_takes_a_backend_that_is_no_default_engine() {
+    // REQ-D-002: this package depends on liveactivity without its default engines.
+    use liveactivity::testkit::{MemoryBackend, conformance};
+
+    let (event_sender, _events) = mpsc::channel();
+    let service = LiveActivity::connect(FrameworkEventSink::new(event_sender), |context| {
+        Ok(MemoryBackend::new(context))
+    })
+    .unwrap();
+
+    let report = block_on(conformance(&service));
+    assert_eq!(report.backend, MemoryBackend::NAME);
+    report.assert_passed();
+}
+
+#[test]
+fn req_f_012_a_backend_without_permissions_or_images_says_so() {
+    // REQ-F-012
+    use liveactivity::{PermissionKind, PermissionState, Permissions};
+
+    let harness = connect_mock_plugin("external", None).unwrap();
+
+    assert_eq!(
+        block_on(harness.service.permissions()).unwrap(),
+        Permissions::all(PermissionState::Unknown)
+    );
+    let refused = block_on(
+        harness
+            .service
+            .request_permission(PermissionKind::Notifications),
+    )
+    .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::Unsupported);
+    let refused = block_on(harness.service.write_image("cover", vec![1])).unwrap_err();
+    assert_eq!(refused.code, ErrorCode::Unsupported);
 }

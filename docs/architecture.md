@@ -31,7 +31,7 @@ Native events travel in the reverse direction:
 
 ## Ownership
 
-- liveactivity-core owns domain models, errors, backend interface, event
+- liveactivity owns domain models, errors, backend interface, event
   interface and orchestration.
 - activitykit and liveupdate remain platform engines.
 - A framework plugin owns framework handles, lifecycle hooks, IPC commands and

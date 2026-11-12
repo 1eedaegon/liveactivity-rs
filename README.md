@@ -240,11 +240,26 @@ cargo test --workspace --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo llvm-cov --workspace --all-features --fail-under-lines 80
 bash tools/check-requirements.sh
+bash tests/release/run.sh
 ```
 
 Requirements and their test evidence are in
 [docs/requirements.md](docs/requirements.md), the structure in
 [docs/design.md](docs/design.md).
+
+## Releases
+
+Releases follow the subjects of the commits on `main`, which are
+[conventional commits](https://www.conventionalcommits.org/). After CI passes
+on `main`, the release workflow bumps the version, writes the changelog, tags
+the commit and publishes the crate:
+
+| Subject | Release |
+| --- | --- |
+| `feat:` | minor |
+| `fix:`, `perf:`, `refactor:`, `docs:`, `revert:` | patch |
+| `test:`, `ci:`, `chore:`, `build:`, `style:` | none |
+| `!` or a `BREAKING CHANGE:` footer | major, only by running the "Auto release" workflow by hand with `major` checked |
 
 ## License
 

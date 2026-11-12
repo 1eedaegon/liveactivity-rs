@@ -31,6 +31,7 @@ jobs:
       - run: cargo test --locked --workspace --all-features
       - run: cargo llvm-cov --locked --workspace --all-features --summary-only --fail-under-lines 80
       - run: bash tools/check-requirements.sh
+      - run: bash tests/release/run.sh
       # The JNI path of the Android backend compiles only for Android.
       - run: rustup target add aarch64-linux-android
       - run: cargo check --locked -p liveactivity --target aarch64-linux-android

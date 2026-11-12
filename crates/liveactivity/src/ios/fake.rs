@@ -36,6 +36,8 @@ pub(crate) struct Entry {
     pub(crate) revision: u64,
     pub(crate) stale_at: Option<u64>,
     pub(crate) timestamp: Option<u64>,
+    /// The score of the last content that gave one.
+    pub(crate) relevance: Option<f64>,
     /// Whether the system lists it.
     pub(crate) listed: bool,
     /// What the system could not show of it.
@@ -188,11 +190,12 @@ fn live(state: State) -> bool {
     matches!(state, State::Active | State::Stale | State::Pending)
 }
 
-/// A start's content, as a repeated keyed start compares it: everything but the timestamp and the push, which the
-/// running activity has or lacks already.
+/// A start's content, as a repeated keyed start compares it: everything but the timestamp, the relevance and the
+/// push, which are no part of the request that ActivityKit's side compares.
 fn content(start: &StartSpec) -> StartSpec {
     StartSpec {
         timestamp: None,
+        relevance: None,
         push: None,
         ..start.clone()
     }
@@ -274,6 +277,7 @@ impl Kit for FakeKit {
                 revision: start.revision,
                 stale_at: start.stale_at,
                 timestamp: Some(start.timestamp.unwrap_or(1_000)),
+                relevance: start.relevance,
                 listed: true,
                 degraded: Vec::new(),
             });
@@ -364,6 +368,12 @@ impl Handle for FakeHandle {
         self.entry().and_then(|entry| entry.timestamp)
     }
 
+    fn relevance(&self) -> f64 {
+        self.entry()
+            .and_then(|entry| entry.relevance)
+            .unwrap_or(0.0)
+    }
+
     fn degraded_features(&self) -> Vec<String> {
         self.entry().map(|entry| entry.degraded).unwrap_or_default()
     }
@@ -386,6 +396,8 @@ impl Handle for FakeHandle {
                 entry.values = update.values.clone();
                 entry.stale_at = update.stale_at;
                 entry.timestamp = Some(update.timestamp.unwrap_or(2_000));
+                // Without a score the activity keeps its own.
+                entry.relevance = update.relevance.or(entry.relevance);
             }
             guard.updates.push(update);
             Ok(())
@@ -410,6 +422,7 @@ impl Handle for FakeHandle {
                 entry.values = values;
                 entry.stale_at = end.stale_at;
                 entry.timestamp = Some(end.timestamp.unwrap_or(3_000));
+                entry.relevance = end.relevance.or(entry.relevance);
                 entry.state = State::Ended;
                 entry.listed = !matches!(end.policy, crate::models::EndPolicy::Immediate {});
             }

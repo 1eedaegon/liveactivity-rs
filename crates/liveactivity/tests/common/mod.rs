@@ -67,6 +67,25 @@ impl MemoryDriver {
     }
 }
 
+impl MemoryDriver {
+    /// Queues the dismissal of a notification by the person, as the Android side does.
+    pub fn dismiss(&self, id: &str, sequence: u64) {
+        let event: ActivityEvent = serde_json::from_value(json!({
+            "sequence": sequence,
+            "activityId": id,
+            "occurredAt": 1_800_000_000_000_u64,
+            "kind": {"kind": "dismissed"},
+        }))
+        .unwrap();
+        self.lock().events.events.push(event);
+    }
+
+    /// The snapshot liveupdate last posted for `id`.
+    pub fn posted(&self, id: &str) -> liveupdate::Snapshot {
+        self.lock().observed[id].snapshot.clone()
+    }
+}
+
 impl Driver for MemoryDriver {
     fn capabilities(&self) -> liveupdate::Result<Capabilities> {
         Ok(self.lock().capabilities)

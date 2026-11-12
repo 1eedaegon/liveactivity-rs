@@ -208,3 +208,44 @@ fn req_n_001_the_crate_declares_only_its_engines_and_serde() {
         ]
     );
 }
+
+#[test]
+fn req_c_006_a_wrong_member_of_another_platform_reaches_no_backend() {
+    // REQ-C-006
+    // On a host, which is neither platform, a right request is refused by the backend and a wrong one before it.
+    let live = LiveActivity::builder().build().unwrap();
+    let start = |edit: fn(&mut liveactivity::LayoutStartInput)| {
+        let mut input: liveactivity::LayoutStartInput = liveactivity::parse_request(
+            "start_layout",
+            json!({"activityKey":"ride:7","schemaVersion":2,"fallback":"notification",
+                "layout":{"lockScreen":{"type":"text","bind":"eta"}},
+                "snapshot":{"revision":0,"values":{"eta":"4 min"},"relevance":80,
+                    "android":{"title":"Driver on the way","status":"4 min",
+                        "presentation":{"style":{"kind":"standard"},"shortCriticalText":"4 min"}}}}),
+        )
+        .unwrap();
+        edit(&mut input);
+        block_on(live.start_layout(input)).unwrap_err().code
+    };
+    assert_eq!(start(|_| {}), "UNSUPPORTED_PLATFORM");
+    assert_eq!(
+        start(|input| input.snapshot.relevance = Some(f64::NAN)),
+        "INVALID_INPUT"
+    );
+    assert_eq!(
+        start(|input| {
+            let content = input.snapshot.android.as_mut().unwrap();
+            content.presentation.short_critical_text = Some("four minutes".into());
+        }),
+        "INVALID_INPUT"
+    );
+    let mut update = liveactivity::LayoutUpdateInput::new(
+        "id",
+        liveactivity::LayoutSnapshot::new(1, Default::default()),
+    );
+    update.alert = Some(liveactivity::Alert::new("", "Meet at the entrance"));
+    assert_eq!(
+        block_on(live.update_layout(update)).unwrap_err().code,
+        "INVALID_INPUT"
+    );
+}

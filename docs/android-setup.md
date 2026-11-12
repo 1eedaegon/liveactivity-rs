@@ -163,6 +163,49 @@ style and reports what it left out in `degradedFeatures`:
 The layout store keeps values in plain text in the app's private files. Do not put secrets in an
 activity.
 
+### An Android content
+
+A layout is drawn by iOS; on Android the backend projects it onto a notification. When the
+projection is not what the application wants, a snapshot says what the notification shows, in
+Android's own terms: a progress with segments and points, metrics, the text of the status chip,
+icons of actions. It needs the same files as layouts.
+
+```rust
+use liveactivity::{AndroidContent, AndroidPresentation, PresentationStyle, ProgressSegment, ProgressStyle};
+
+let mut snapshot = LayoutSnapshot::new(1, values);
+snapshot.android = Some(AndroidContent {
+    title: "Delivery 7".into(),
+    status: "2 stops away".into(),
+    presentation: AndroidPresentation {
+        style: PresentationStyle::Progress(ProgressStyle {
+            progress: 60,
+            indeterminate: false,
+            styled_by_progress: true,
+            segments: vec![
+                ProgressSegment { length: 60, id: None, color: Some(0xFF00_7F00), semantic_style: None },
+                ProgressSegment { length: 40, id: None, color: None, semantic_style: None },
+            ],
+            points: Vec::new(),
+            start_icon: None,
+            end_icon: None,
+            tracker_icon: None,
+        }),
+        short_critical_text: Some("8 min".into()),
+        large_icon: None,
+        actions: Vec::new(),
+        samsung_now_bar: None,
+    },
+});
+live.update_layout(LayoutUpdateInput::new(&record.id, snapshot)).await?;
+```
+
+Ask `live.capabilities().await?.android_presentation` which styles the device draws before
+choosing one: the progress style needs Android 16, the metric style Android 17. Android keeps the
+style of the first snapshot and answers `UNSUPPORTED_FEATURE` to a content of another style, so
+give a content with every snapshot of an activity or with none.
+The rules are in [the contract](contract.md#an-android-content).
+
 ## 5. Permissions
 
 `live.permissions()` reports what Android allows:

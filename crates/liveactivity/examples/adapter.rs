@@ -43,6 +43,12 @@ fn sink(framework: Arc<dyn Framework>) -> impl Fn(Event) + Send + Sync + 'static
                 serde_json::to_value(token),
             ),
             Event::Updated(updated) => ("live-activity://updated", serde_json::to_value(updated)),
+            Event::Started(started) => ("live-activity://started", serde_json::to_value(started)),
+            Event::State(state) => ("live-activity://state", serde_json::to_value(state)),
+            Event::Permissions(permissions) => (
+                "live-activity://permissions",
+                serde_json::to_value(permissions),
+            ),
             // A kind of a later version: nothing to forward yet.
             _ => return,
         };

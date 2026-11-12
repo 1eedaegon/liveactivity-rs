@@ -1,5 +1,30 @@
-use crate::{ActionEvent, PushToStartTokenEvent, PushTokenEvent, UpdatedEvent};
+use crate::{
+    ActionEvent, ActivityState, LayoutActivityRecord, Permissions, PushToStartTokenEvent,
+    PushTokenEvent, UpdatedEvent,
+};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+/// A layout activity that began while the application ran: one it started, or one a push started.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartedEvent {
+    /// The activity as it began.
+    pub record: LayoutActivityRecord,
+}
+
+/// A new lifecycle state of an activity, of a template or a layout.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StateEvent {
+    /// The handle of the activity.
+    pub activity_id: String,
+    /// Absent when the backend no longer knows that activity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_key: Option<String>,
+    /// The state the platform reports now.
+    pub state: ActivityState,
+}
 
 /// What a platform reports of the application's activities. More kinds may come: match with a `_` arm.
 #[non_exhaustive]
@@ -13,6 +38,13 @@ pub enum Event {
     PushToStartToken(PushToStartTokenEvent),
     /// Content that a push delivered to a layout activity (iOS).
     Updated(UpdatedEvent),
+    /// A layout activity began: one the application started, or one a push started (iOS).
+    Started(StartedEvent),
+    /// A new lifecycle state of an activity. iOS reports every change while the application runs; Android reports
+    /// that the person dismissed the notification.
+    State(StateEvent),
+    /// What the person allows, after a change in Settings (iOS).
+    Permissions(Permissions),
 }
 
 /// Where a backend's events go: implemented by a framework plugin, or any closure.

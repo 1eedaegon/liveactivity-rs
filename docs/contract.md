@@ -254,6 +254,8 @@ The answer is a `LayoutActivityRecord`. It has no `template` and does not repeat
 | `snapshot.values` | 0 to 32 values by key: see [Values](#values) |
 | `snapshot.staleAt` | Optional time. Each snapshot has its own; one without it clears the date |
 | `snapshot.timestamp` | Optional time: when the content was made. Without it iOS takes the time the content is sent. ActivityKit (iOS 17.2) drops content older than what it shows, while the request still succeeds |
+| `snapshot.relevance` | Optional finite number. Which of the application's activities the Dynamic Island shows first: the highest wins. Without it the activity keeps its score, 0 at first. Android ignores it, and an Android record does not repeat it |
+| `snapshot.android` | Optional. What Android shows for this snapshot instead of the projection of the layout: see [An Android content](#an-android-content). iOS ignores it, and an iOS record does not repeat it |
 | `android` | Optional. `{ "visibility": "public" \| "private" \| "secret" }`, the lock screen visibility of the notification; `private` when absent. iOS ignores it |
 | `push` | Optional. `"token"` or `{ "channel": "<base64 id>" }` (iOS 18): what the activity asks ActivityKit for. Android ignores it. In Rust it is `LayoutPush::Token` or `LayoutPush::Channel(id)` |
 
@@ -272,6 +274,71 @@ again against the layout and the styles of the start, bound style members includ
 `LayoutStartInput::validate_update` and `validate_end` apply that check to a start and the request
 after it.
 
+An update may bring an alert:
+
+```json
+{ "id": "9B1D4C70-2E5A-4F0B-8C3D-7A6E5F4D3C2B",
+  "snapshot": { "revision": 2, "values": { "title": "Delivery 7", "status": "At the door", "done": 1, "tone": "green" } },
+  "alert": { "title": "Delivery arrived", "body": "Your parcel is at the door" } }
+```
+
+| Member | Rule |
+| --- | --- |
+| `alert.title` | 1 to 120 code points, at least one of them not whitespace |
+| `alert.body` | 1 to 240 code points, at least one of them not whitespace |
+
+On iOS the device lights up, the Dynamic Island expands (without one, the Lock Screen presentation
+shows as a banner), and an Apple Watch shows the title and the body. Android updates silently and
+names `alert` in the record's `degradedFeatures` until the next snapshot. Without `alert` an update
+is silent everywhere. In Rust: `LayoutUpdateInput::new(id, snapshot)`, then set `alert`.
+
+### An Android content
+
+A layout says what iOS draws. Android draws a notification, and by default the backend projects
+the layout onto one ([What Android shows](#what-android-shows)). A snapshot may instead say what
+the notification shows, in Android's own terms:
+
+```json
+"snapshot": {
+  "revision": 1,
+  "values": { "title": "Delivery 7", "status": "On the way", "done": 0.6, "tone": "green" },
+  "android": {
+    "title": "Delivery 7",
+    "status": "2 stops away",
+    "presentation": {
+      "style": { "kind": "progress", "value": {
+        "progress": 60, "styledByProgress": true,
+        "segments": [ { "length": 60, "color": 4278222848 }, { "length": 40 } ],
+        "points": [ { "position": 60 } ]
+      } },
+      "shortCriticalText": "8 min",
+      "actions": [ { "id": "call", "title": "Call the courier" } ]
+    }
+  }
+}
+```
+
+| Member | Rule |
+| --- | --- |
+| `title` | The notification's title, 1 to 120 code points |
+| `status` | The notification's text, 1 to 240 code points |
+| `presentation` | liveupdate's `AndroidPresentation`, re-exported with its types: a `style` (`standard`, `bigText`, `progress` with up to 32 segments and points and three icons, `timer`, `metric` with up to three metrics), a `shortCriticalText` of at most 7 code points for the status chip, a `largeIcon`, up to three `actions` with an optional icon, and `samsungNowBar` texts |
+
+- The content is checked on every platform, by liveupdate's own rules, so a wrong one is
+  `INVALID_INPUT` on iOS too.
+- It is read strictly, like the rest of a request, with one allowance that liveupdate's own
+  encoding makes: a member at its default, `false` or an empty array, may be written or left out.
+- Android keeps the style of an activity's first snapshot, which is its content's, or else the one
+  the layout projects to. A later content of another style is a valid request that Android cannot
+  show: `UNSUPPORTED_FEATURE`, on Android only, and the activity keeps what it shows. So an activity
+  gives its content with every snapshot or with none.
+- A snapshot without a content is projected from the layout.
+- A tap on one of `actions` reaches the sink as `Event::Action`, like a tap on a button node.
+- `capabilities().androidPresentation` says which styles the device draws.
+- An icon of the `appFile` kind is a path under the app's files. `write_image(name, png)` writes
+  to `<image_folder>/<name>`, which is `liveactivity/images/<name>` unless the host chose another
+  folder.
+
 ### end_layout
 
 ```json
@@ -280,8 +347,9 @@ after it.
   "snapshot": { "revision": 2, "values": { "title": "Delivery 7", "status": "Delivered", "done": 1, "tone": "green" } } }
 ```
 
-`policy` is the same as for `end`. `snapshot` is optional: the final content, checked as an update.
-Without it the activity ends with its last accepted values.
+`policy` is the same as for `end`. `snapshot` is optional: the final content, checked as an update,
+with its own `relevance` and Android content when given. Without it the activity ends with its last
+accepted values.
 
 ### list_layout
 
@@ -328,6 +396,18 @@ extension shares; on Android to the app's private files.
   "layout": "supported", "push": "supported"
 }
 ```
+
+On Android, when the backend has the app's files, the capabilities also say which notification
+styles the device draws, for [an Android content](#an-android-content):
+
+```json
+"androidPresentation": {
+  "standard": true, "bigText": true, "timer": true, "progressStyle": true, "metricStyle": false,
+  "actions": true, "images": true, "events": true, "samsungNowBar": false
+}
+```
+
+`progressStyle` needs Android 16 and `metricStyle` Android 17. Elsewhere the member is absent.
 
 A feature is `supported`, `unsupported` or `unknown`, and unknown never counts as supported. On iOS
 `actions` follows the device's support for buttons. On Android `layout` and `actions` are supported
@@ -409,6 +489,9 @@ match with a `_` arm.
 | `Event::PushToken` | `PushTokenEvent` | iOS: a push token of an activity, new or changed |
 | `Event::PushToStartToken` | `PushToStartTokenEvent` | iOS: the app's push-to-start token, new or changed |
 | `Event::Updated` | `UpdatedEvent` | iOS: content that a push delivered to a layout activity |
+| `Event::Started` | `StartedEvent` | iOS: a layout activity began, one the application started or one a push started |
+| `Event::State` | `StateEvent` | iOS: a new lifecycle state of any activity, while the application runs. Android: the person dismissed the notification |
+| `Event::Permissions` | `Permissions` | iOS: what the person allows, after a change in Settings |
 
 ```json
 { "actionId": "track", "activityId": "9B1D4C70-...", "activityKey": "delivery:7" }
@@ -426,6 +509,12 @@ match with a `_` arm.
 { "record": { "id": "9B1D4C70-...", "activityKey": "delivery:7", "schemaVersion": 2, "snapshot": { "revision": 5, "values": {} }, "backend": "activityKit", "state": "active", "visibility": "unknown", "degradedFeatures": [], "promotionRequested": false, "promotionState": "notApplicable" } }
 ```
 
+`StartedEvent` has the same shape as `UpdatedEvent`, a `record`. A `StateEvent`:
+
+```json
+{ "activityId": "9B1D4C70-...", "activityKey": "delivery:7", "state": "dismissed" }
+```
+
 `activityKey` is absent when the backend no longer knows the activity. Tokens are lowercase hex.
 
 `live.push_tokens()` answers what the backend holds since launch, for a sink that listened late:
@@ -438,8 +527,8 @@ match with a `_` arm.
 `pushToStart` is absent without a token. `activities` holds the newest token of each of the last 32
 activities that got one (`TOKENS_KEPT`), in the order their first tokens came. Android holds none.
 
-iOS delivers events as they come. Android stores taps; `live.sync_events()` hands the stored ones to
-the sink, oldest first. On iOS it does nothing.
+iOS delivers events as they come. Android stores taps and dismissals; `live.sync_events()` hands
+the stored ones to the sink, oldest first. On iOS it does nothing.
 
 ## The layout DSL
 
@@ -603,8 +692,9 @@ full of quotes, slashes or control characters can fail below the limit.
 
 ## What Android shows
 
-A notification cannot draw a layout. The Android backend projects the `lockScreen` tree onto one of
-Android's notification styles and reports what it left out. It reads only the lock screen tree, in
+A notification cannot draw a layout. For a snapshot without [an Android content](#an-android-content),
+the Android backend projects the `lockScreen` tree onto one of Android's notification styles and
+reports what it left out. It reads only the lock screen tree, in
 document order, depth first, with the current values and the `if` and `unless` conditions applied.
 
 The style of the notification is fixed when the activity starts. It is chosen from the tree,
@@ -641,8 +731,13 @@ A node hidden by its condition is not listed. The list is computed from the curr
 can change with an update. The record carries the layout snapshot the application sent, not the
 projection.
 
-A tap on an action reaches the sink with the activity's key. A tap on an `actionId` that the
-activity's layout never declared is dropped.
+A tap on an action reaches the sink with the activity's key. A tap on an `actionId` that neither
+the activity's layout nor an Android content it has shown declared is dropped. An activity keeps
+the action ids of its last contents, up to 32, because a stored tap may come after a later content
+replaced its action.
+
+With an Android content nothing is projected, so the record lists no `layout.*` feature. An update
+that asked for an alert lists `alert`.
 
 The template activities of version 1 need no projection: progress is a progress notification and
 timer a countdown. They have no buttons.

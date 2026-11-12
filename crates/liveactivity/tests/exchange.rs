@@ -447,3 +447,249 @@ fn req_x_007_with_the_apps_files_the_android_default_runs_layouts_images_and_key
     );
     std::fs::remove_dir_all(&files).unwrap();
 }
+
+/// A ride with a progress, a text and a button, as a layout, and optionally what Android shows for its first
+/// snapshot.
+fn ride(key: &str, android: Option<serde_json::Value>) -> liveactivity::LayoutStartInput {
+    let mut request = serde_json::json!({
+        "activityKey": key,
+        "schemaVersion": 2,
+        "fallback": "notification",
+        "layout": { "lockScreen": { "type": "vstack", "children": [
+            { "type": "text", "bind": "eta" },
+            { "type": "progress", "bind": "done" },
+            { "type": "button", "actionId": "pet", "child": { "type": "text", "value": "Pet" } },
+        ] } },
+        "snapshot": { "revision": 0, "values": { "eta": "6 min", "done": 0.2 } },
+    });
+    if let Some(android) = android {
+        request["snapshot"]["android"] = android;
+    }
+    liveactivity::parse_request("start_layout", request).unwrap()
+}
+
+/// A segmented progress with a point, a chip text and an action: what no layout can say.
+fn driving(progress: u32, chip: &str) -> serde_json::Value {
+    serde_json::json!({
+        "title": "Driver on the way",
+        "status": format!("{chip} away"),
+        "presentation": {
+            "style": { "kind": "progress", "value": {
+                "progress": progress, "styledByProgress": true,
+                "segments": [{ "length": 60, "color": 4278190335_u32 }, { "length": 40 }],
+                "points": [{ "position": 60 }],
+            } },
+            "shortCriticalText": chip,
+            "actions": [{ "id": "call", "title": "Call" }],
+        },
+    })
+}
+
+fn ride_update(id: &str, revision: u64, android: Option<serde_json::Value>) -> serde_json::Value {
+    let mut request = serde_json::json!({
+        "id": id,
+        "snapshot": { "revision": revision, "values": { "eta": "2 min", "done": 0.7 } },
+    });
+    if let Some(android) = android {
+        request["snapshot"]["android"] = android;
+    }
+    request
+}
+
+fn android_with_files(test: &str) -> (LiveActivity, Receiver<Event>, MemoryDriver) {
+    let driver = MemoryDriver::default();
+    let backend = LiveUpdateBackend::new(driver.clone()).with_files(
+        liveactivity::android::AndroidFiles::new("Mochi", app_files(test)),
+    );
+    let (live, events) = connect(backend);
+    (live, events, driver)
+}
+
+#[test]
+fn req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection() {
+    // REQ-A-001, REQ-I-002
+    let (live, _events, driver) = android_with_files("content");
+    let start = ride("ride:7", Some(driving(20, "6 min")));
+    let record = block_on(live.start_layout(start.clone())).unwrap();
+
+    // What liveupdate posted is the content as given.
+    let posted = driver.posted(&record.id);
+    assert_eq!(posted.title, "Driver on the way");
+    assert_eq!(posted.status, "6 min away");
+    let presentation = posted.presentation.unwrap();
+    let liveactivity::PresentationStyle::Progress(style) = &presentation.style else {
+        panic!("the content's style is posted, not a projected one");
+    };
+    assert_eq!(
+        (style.progress, style.segments.len(), style.points.len()),
+        (20, 2, 1)
+    );
+    assert_eq!(style.segments[0].color, Some(4278190335));
+    assert_eq!(presentation.short_critical_text.as_deref(), Some("6 min"));
+    assert_eq!(presentation.actions[0].id, "call");
+    // No projection was made, so nothing of the layout is reported as left out; the record repeats the snapshot.
+    assert!(
+        record
+            .degraded_features
+            .iter()
+            .all(|feature| !feature.starts_with("layout."))
+    );
+    assert_eq!(record.snapshot.android, start.snapshot.android);
+
+    // An update with its content and an alert: Android shows the content silently and says so.
+    let mut loud = ride_update(&record.id, 1, Some(driving(70, "2 min")));
+    loud["alert"] = serde_json::json!({ "title": "Almost there", "body": "2 minutes away" });
+    let loud = liveactivity::parse_request("update_layout", loud).unwrap();
+    let updated = block_on(live.update_layout(loud)).unwrap();
+    assert!(updated.degraded_features.contains(&"alert".to_owned()));
+    let liveactivity::PresentationStyle::Progress(style) =
+        driver.posted(&record.id).presentation.unwrap().style
+    else {
+        panic!("the activity keeps its style");
+    };
+    assert_eq!(style.progress, 70);
+    // The next update has no alert, and nothing is reported of one.
+    let quiet = ride_update(&record.id, 2, Some(driving(80, "1 min")));
+    let quiet = liveactivity::parse_request("update_layout", quiet).unwrap();
+    let updated = block_on(live.update_layout(quiet)).unwrap();
+    assert!(!updated.degraded_features.contains(&"alert".to_owned()));
+
+    // Android keeps the style of an activity's first snapshot: a content of another style is a valid request
+    // that this platform cannot show, and the activity keeps what it shows.
+    let mut other = driving(90, "now");
+    other["presentation"]["style"] = serde_json::json!({ "kind": "standard" });
+    let other =
+        liveactivity::parse_request("update_layout", ride_update(&record.id, 3, Some(other)));
+    let refused = block_on(live.update_layout(other.unwrap())).unwrap_err();
+    assert_eq!(refused.code, "UNSUPPORTED_FEATURE");
+    assert_eq!(driver.posted(&record.id).revision, 2);
+
+    // A snapshot without a content is projected, as every snapshot of a layout that never gave one.
+    let plain = liveactivity::parse_request("update_layout", ride_update(&record.id, 3, None));
+    block_on(live.update_layout(plain.unwrap())).unwrap();
+    let projected = driver.posted(&record.id);
+    assert_eq!(projected.title, "2 min");
+    let liveactivity::PresentationStyle::Progress(style) = projected.presentation.unwrap().style
+    else {
+        panic!("the layout's progress is projected");
+    };
+    assert_eq!((style.progress, style.segments.len()), (700, 1));
+    let other = block_on(live.start_layout(ride("ride:8", None))).unwrap();
+    assert_eq!(driver.posted(&other.id).title, "6 min");
+    assert_eq!(other.snapshot.android, None);
+
+    // An activity that began with a projection takes a content of the style it was projected to, and no other.
+    let standard = serde_json::json!({ "title": "Arrived", "status": "At the door",
+        "presentation": { "style": { "kind": "standard" } } });
+    let refused =
+        liveactivity::parse_request("update_layout", ride_update(&other.id, 1, Some(standard)))
+            .and_then(|update| block_on(live.update_layout(update)));
+    assert_eq!(refused.unwrap_err().code, "UNSUPPORTED_FEATURE");
+    let same_style = ride_update(&other.id, 1, Some(driving(50, "3 min")));
+    let same_style = liveactivity::parse_request("update_layout", same_style).unwrap();
+    block_on(live.update_layout(same_style)).unwrap();
+    assert_eq!(driver.posted(&other.id).title, "Driver on the way");
+    let other = block_on(live.start_layout(ride("ride:9", None))).unwrap();
+
+    // REQ-C-007: what only iOS reads is no part of what Android keeps and compares. The same start with a
+    // relevance and a push request is the same activity, and the record repeats neither.
+    let mut for_ios = ride("ride:9", None);
+    for_ios.snapshot.relevance = Some(80.0);
+    for_ios.push = Some(liveactivity::LayoutPush::Token);
+    let again = block_on(live.start_layout(for_ios)).unwrap();
+    assert_eq!(again.id, other.id);
+    assert_eq!(again.snapshot.relevance, None);
+    let mut relevant = liveactivity::LayoutSnapshot::new(1, again.snapshot.values.clone());
+    relevant.relevance = Some(95.0);
+    let updated = liveactivity::LayoutUpdateInput::new(&other.id, relevant);
+    assert_eq!(
+        block_on(live.update_layout(updated))
+            .unwrap()
+            .snapshot
+            .relevance,
+        None
+    );
+}
+
+#[test]
+fn req_a_002_taps_of_a_content_and_dismissals_reach_the_sink() {
+    // REQ-A-002, REQ-E-002
+    let (live, events, driver) = android_with_files("content-taps");
+    let record = block_on(live.start_layout(ride("ride:7", Some(driving(20, "6 min"))))).unwrap();
+
+    // A later content has another action: the one it replaced stays declared, since Android stores a tap, also
+    // while the application does not run, and the tap may come after the update.
+    let mut later = driving(40, "4 min");
+    later["presentation"]["actions"] = serde_json::json!([{ "id": "message", "title": "Message" }]);
+    let later =
+        liveactivity::parse_request("update_layout", ride_update(&record.id, 1, Some(later)));
+    block_on(live.update_layout(later.unwrap())).unwrap();
+    let latest = ride_update(&record.id, 2, Some(driving(60, "3 min")));
+    let latest = liveactivity::parse_request("update_layout", latest).unwrap();
+    block_on(live.update_layout(latest)).unwrap();
+    driver.tap(&record.id, 0, "message");
+    block_on(live.sync_events()).unwrap();
+    assert!(matches!(events.try_recv().unwrap(), Event::Action(tap) if tap.action_id == "message"));
+
+    // The actions of the activity are those of its contents and of its layout's buttons.
+    driver.tap(&record.id, 1, "call");
+    driver.tap(&record.id, 2, "pet");
+    driver.tap(&record.id, 3, "undeclared");
+    driver.dismiss(&record.id, 4);
+    block_on(live.sync_events()).unwrap();
+    let tap = |action: &str| {
+        Event::Action(ActionEvent {
+            action_id: action.into(),
+            activity_id: record.id.clone(),
+            activity_key: Some("ride:7".into()),
+        })
+    };
+    assert_eq!(events.try_recv().unwrap(), tap("call"));
+    assert_eq!(events.try_recv().unwrap(), tap("pet"));
+    // The person removed the notification: a state event, in its place among the taps.
+    assert_eq!(
+        events.try_recv().unwrap(),
+        Event::State(liveactivity::StateEvent {
+            activity_id: record.id.clone(),
+            activity_key: Some("ride:7".into()),
+            state: ActivityState::Dismissed,
+        })
+    );
+    assert!(events.try_recv().is_err());
+
+    // Without the app's files the backend knows no key, and reports the dismissal all the same.
+    let driver = MemoryDriver::default();
+    let (live, events) = connect(LiveUpdateBackend::new(driver.clone()));
+    driver.dismiss("gone", 1);
+    block_on(live.sync_events()).unwrap();
+    assert_eq!(
+        events.try_recv().unwrap(),
+        Event::State(liveactivity::StateEvent {
+            activity_id: "gone".into(),
+            activity_key: None,
+            state: ActivityState::Dismissed,
+        })
+    );
+}
+
+#[test]
+fn req_a_003_capabilities_report_the_styles_the_device_draws() {
+    // REQ-A-003
+    let (live, _events, driver) = android_with_files("styles");
+    driver.lock().capabilities.presentation.metric_style = true;
+    let capabilities = block_on(live.capabilities()).unwrap();
+    let styles = capabilities.android_presentation.unwrap();
+    assert!(styles.metric_style && styles.actions);
+    assert!(!styles.progress_style);
+    let wire = serde_json::to_value(&capabilities).unwrap();
+    assert_eq!(wire["androidPresentation"]["metricStyle"], true);
+
+    // A backend that shows no Android content reports no styles, and its JSON has no such member.
+    for (_, connect) in BACKENDS {
+        let (live, _events) = connect();
+        let capabilities = block_on(live.capabilities()).unwrap();
+        assert_eq!(capabilities.android_presentation, None);
+        let wire = serde_json::to_value(&capabilities).unwrap();
+        assert!(wire.get("androidPresentation").is_none());
+    }
+}

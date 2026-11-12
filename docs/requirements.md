@@ -89,7 +89,79 @@ and refuses every other call with `UNSUPPORTED_PLATFORM`. A blocking call on
 the main thread of an Apple platform answers at once instead of hanging.
 
 Evidence: `contract::req_c_003_whatever_the_builder_is_not_told_is_the_default`
-and `ios::tests::a_blocking_call_on_the_main_thread_answers_at_once`.
+and `blocking::tests::a_blocking_call_on_the_main_thread_answers_at_once`.
+
+## REQ-C-005 Requests are read in this crate's types
+
+A layout request is read strictly in this crate's types, and activitykit checks the part it knows. Members
+activitykit does not know are taken; an unknown member, a `null`, a request that does not encode back to itself
+and a request under another command's name are refused.
+
+The request fixtures of the activitykit version this crate builds with get the same verdict here, except where
+this crate's contract takes a member that activitykit's does not.
+
+Evidence: `layout::tests::req_c_005_a_request_is_read_strictly_in_this_crates_types` and
+`engine_fixtures::req_c_005_the_engines_fixtures_get_the_same_verdict_here`.
+
+## REQ-C-006 The same check on every platform
+
+A relevance is finite, an alert has a title and a body within their lengths, and an Android content is one
+liveupdate takes. The check runs before any backend, whatever the platform.
+
+Evidence: `layout::tests::req_c_006_what_a_request_says_beside_the_layout_is_checked` and
+`contract::req_c_006_a_wrong_member_of_another_platform_reaches_no_backend`.
+
+## REQ-C-007 Platform members stay with their platform
+
+The Android options and the Android content of a request never reach the iOS engine: two starts that differ only
+in them are the same activity on iOS. The relevance and the push request are no part of what Android keeps and
+compares.
+
+Evidence: `ios::tests::req_c_007_android_members_never_reach_the_ios_engine` and
+`exchange::req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection`.
+
+## REQ-I-001 Relevance
+
+The relevance of a snapshot reaches ActivityKit with a start, an update and an end, and the record reports it.
+
+Evidence: `ios::tests::req_i_001_a_relevance_reaches_the_kit_and_the_record_reports_it` and
+`ios::kit::tests::specs_reach_activitykit_with_their_revision_times_and_push`.
+
+## REQ-I-002 Alert of an update
+
+The alert of an update reaches ActivityKit. Android updates silently and names `alert` in the record's
+`degradedFeatures`.
+
+Evidence: `ios::tests::req_i_002_an_alert_reaches_the_kit_with_its_update` and
+`exchange::req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection`.
+
+## REQ-E-002 Started, state and permission events
+
+The sink receives a layout activity that began, a new lifecycle state of any activity, and the permissions after
+the person changed them. On Android a dismissal is a state event.
+
+Evidence: `ios::backend::tests::req_e_002_starts_states_and_permissions_reach_the_sink` and
+`exchange::req_a_002_taps_of_a_content_and_dismissals_reach_the_sink`.
+
+## REQ-A-001 Android content of a snapshot
+
+A snapshot's Android content is shown as given, in place of the projection of the layout. A snapshot without one
+is projected as before.
+
+Evidence: `exchange::req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection`.
+
+## REQ-A-002 Actions of an Android content
+
+A tap on an action of an Android content reaches the sink with the key of its activity; a tap on an action that
+neither the layout nor a content declared is dropped.
+
+Evidence: `exchange::req_a_002_taps_of_a_content_and_dismissals_reach_the_sink`.
+
+## REQ-A-003 Style support in the capabilities
+
+Capabilities report which notification styles the device draws, when the Android backend runs layouts.
+
+Evidence: `exchange::req_a_003_capabilities_report_the_styles_the_device_draws`.
 
 ## REQ-N-001 No framework in the crate
 

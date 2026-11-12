@@ -24,6 +24,10 @@ required-features = ["testkit"]
 name = "adapter"
 required-features = ["testkit"]
 
+[[example]]
+name = "features"
+required-features = ["testkit"]
+
 [dependencies]
 activitykit.workspace = true
 liveupdate = { workspace = true, features = ["android"] }

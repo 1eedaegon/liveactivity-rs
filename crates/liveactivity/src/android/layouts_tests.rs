@@ -157,10 +157,7 @@ fn values(title: &str, done: f64) -> Json {
 }
 
 fn update(id: &str, snapshot: LayoutSnapshot) -> LayoutUpdateInput {
-    LayoutUpdateInput {
-        id: id.into(),
-        snapshot,
-    }
+    LayoutUpdateInput::new(id, snapshot)
 }
 
 fn code(result: Result<impl std::fmt::Debug>) -> String {
@@ -470,22 +467,28 @@ fn a_stored_tap_comes_out_with_the_activity_key() {
         },
         tap(3, "gone", "pet"),
     ];
+    // The dismissal keeps its place among the taps.
     assert_eq!(
-        f.layouts.taps(&f.updates).unwrap(),
+        f.layouts.events(&f.updates).unwrap(),
         [
-            ActionEvent {
+            Event::Action(ActionEvent {
                 action_id: "pet".into(),
                 activity_id: record.id.clone(),
                 activity_key: Some("snack:1".into())
-            },
-            ActionEvent {
+            }),
+            Event::State(StateEvent {
+                activity_id: record.id.clone(),
+                activity_key: Some("snack:1".into()),
+                state: crate::ActivityState::Dismissed,
+            }),
+            Event::Action(ActionEvent {
                 action_id: "pet".into(),
                 activity_id: "gone".into(),
                 activity_key: None
-            },
+            }),
         ]
     );
-    assert_eq!(f.layouts.taps(&f.updates).unwrap(), []);
+    assert_eq!(f.layouts.events(&f.updates).unwrap(), []);
 }
 #[test]
 fn taps_of_undeclared_actions_are_dropped() {
@@ -502,7 +505,7 @@ fn taps_of_undeclared_actions_are_dropped() {
             action_id: "feed".into(),
         },
     }];
-    assert_eq!(f.layouts.taps(&f.updates).unwrap(), []);
+    assert_eq!(f.layouts.events(&f.updates).unwrap(), []);
 }
 
 #[test]
@@ -520,6 +523,7 @@ fn a_file_store_keeps_the_entries_across_instances() {
             snapshot: input.snapshot.clone(),
             origin: input,
             degraded: vec!["layout.island".into()],
+            actions: vec!["call".into()],
         },
     );
     store.save(&entries).unwrap();
@@ -727,12 +731,12 @@ fn a_store_that_cannot_be_read_loses_no_tap() {
     }];
     f.store.corrupt(true);
     assert_eq!(
-        f.layouts.taps(&f.updates).unwrap(),
-        [ActionEvent {
+        f.layouts.events(&f.updates).unwrap(),
+        [Event::Action(ActionEvent {
             action_id: "pet".into(),
             activity_id: record.id,
             activity_key: None
-        }]
+        })]
     );
 }
 #[test]

@@ -194,6 +194,10 @@ pub struct Capabilities {
     /// Pushes: tokens, channels and push-to-start (iOS); a native side that predates them omits it.
     #[serde(default = "unsupported")]
     pub push: FeatureSupport,
+    /// Which notification styles the device draws, for the Android content of a snapshot. Present when the
+    /// Android backend runs layouts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub android_presentation: Option<crate::layout::PresentationCapabilities>,
 }
 
 fn unsupported() -> FeatureSupport {

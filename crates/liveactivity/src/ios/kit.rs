@@ -1,0 +1,235 @@
+//! activitykit's `ActivityKit` and `Activity` as the [`Kit`] and [`Handle`] that the backend's logic runs on. Only
+//! a device with Live Activities runs these calls; the logic itself is tested on a fake kit.
+
+use super::{
+    Acknowledge, Authorization, EndSpec, Handle, Kit, StartSpec, UpdateSpec, action_event,
+};
+use crate::{layout::ActionEvent, models::EndPolicy};
+use activitykit::{
+    Acknowledgement, Activity, ActivityKit, End, Event, Start, State, Update, Values,
+};
+use std::{
+    future::Future,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+/// 9999-12-31T23:59:59.999Z in epoch milliseconds: a cap every platform's `SystemTime` holds.
+pub(crate) const LATEST_MILLIS: u64 = 253_402_300_799_999;
+
+/// The time of `millis` epoch milliseconds, clamped to [`LATEST_MILLIS`].
+pub(crate) fn time(millis: u64) -> SystemTime {
+    UNIX_EPOCH + Duration::from_millis(millis.min(LATEST_MILLIS))
+}
+
+/// `at` in epoch milliseconds, when it is after the epoch and fits.
+pub(crate) fn millis(at: SystemTime) -> Option<u64> {
+    u64::try_from(at.duration_since(UNIX_EPOCH).ok()?.as_millis()).ok()
+}
+
+pub(crate) fn start_of(spec: StartSpec) -> Start {
+    let start = Start::new(spec.layout, spec.values)
+        .key(spec.key)
+        .revision(spec.revision);
+    let start = match spec.stale_at {
+        Some(at) => start.stale_at(time(at)),
+        None => start,
+    };
+    match spec.timestamp {
+        Some(at) => start.timestamp(time(at)),
+        None => start,
+    }
+}
+
+pub(crate) fn update_of(spec: UpdateSpec) -> Update {
+    let update = Update::new(spec.values).revision(spec.revision);
+    let update = match spec.stale_at {
+        Some(at) => update.stale_at(time(at)),
+        None => update,
+    };
+    match spec.timestamp {
+        Some(at) => update.timestamp(time(at)),
+        None => update,
+    }
+}
+
+pub(crate) fn end_of(spec: EndSpec) -> End {
+    let end = match spec.policy {
+        EndPolicy::Immediate {} => End::immediately(),
+        EndPolicy::Default {} => End::default(),
+        EndPolicy::After { at } => End::after(time(at)),
+    };
+    let end = match spec.values {
+        Some(values) => end.values(values),
+        None => end,
+    };
+    let end = match spec.revision {
+        Some(revision) => end.revision(revision),
+        None => end,
+    };
+    let end = match spec.stale_at {
+        Some(at) => end.stale_at(time(at)),
+        None => end,
+    };
+    match spec.timestamp {
+        Some(at) => end.timestamp(time(at)),
+        None => end,
+    }
+}
+
+impl Acknowledge for Acknowledgement {
+    fn acknowledge(&self) {
+        Acknowledgement::acknowledge(self);
+    }
+}
+
+impl Kit for ActivityKit {
+    type Handle = Activity;
+    type Ack = Acknowledgement;
+
+    fn taps(&self) -> Box<dyn Iterator<Item = (ActionEvent, Acknowledgement)> + Send> {
+        let events = self.events();
+        Box::new(std::iter::from_fn(move || {
+            loop {
+                match events.recv_blocking().ok()? {
+                    Event::Action {
+                        activity,
+                        action,
+                        acknowledgement,
+                        ..
+                    } => return Some((action_event(&activity, action), acknowledgement)),
+                    // The contract reports taps; `list` gives the state of an activity.
+                    _ => continue,
+                }
+            }
+        }))
+    }
+
+    fn authorization(&self) -> Authorization {
+        let authorization = ActivityKit::authorization(self);
+        Authorization {
+            supported: authorization.supported,
+            enabled: authorization.enabled,
+            buttons: authorization.buttons,
+        }
+    }
+
+    fn start(&self, spec: StartSpec) -> impl Future<Output = activitykit::Result<Activity>> + Send {
+        self.start_with(start_of(spec))
+    }
+
+    fn activity(
+        &self,
+        id: &str,
+    ) -> impl Future<Output = activitykit::Result<Option<Activity>>> + Send {
+        ActivityKit::activity(self, id)
+    }
+
+    fn activities(&self) -> impl Future<Output = activitykit::Result<Vec<Activity>>> + Send {
+        ActivityKit::activities(self)
+    }
+
+    fn write_image(&self, name: &str, png: &[u8]) -> activitykit::Result<()> {
+        ActivityKit::write_image(self, name, png)
+    }
+}
+
+impl Handle for Activity {
+    fn id(&self) -> &str {
+        Activity::id(self)
+    }
+
+    fn key(&self) -> &str {
+        Activity::key(self)
+    }
+
+    fn state(&self) -> State {
+        Activity::state(self)
+    }
+
+    fn values(&self) -> Values {
+        Activity::values(self)
+    }
+
+    fn revision(&self) -> Option<u64> {
+        Activity::revision(self)
+    }
+
+    fn stale_at(&self) -> Option<u64> {
+        Activity::stale_at(self).and_then(millis)
+    }
+
+    fn timestamp(&self) -> Option<u64> {
+        Activity::timestamp(self).and_then(millis)
+    }
+
+    fn degraded_features(&self) -> Vec<String> {
+        Activity::degraded_features(self)
+    }
+
+    fn update(&self, spec: UpdateSpec) -> impl Future<Output = activitykit::Result<()>> + Send {
+        self.update_with(update_of(spec))
+    }
+
+    fn end(&self, spec: EndSpec) -> impl Future<Output = activitykit::Result<()>> + Send {
+        Activity::end(self, end_of(spec))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn debug(value: impl std::fmt::Debug) -> String {
+        format!("{value:?}")
+    }
+
+    #[test]
+    fn specs_reach_activitykit_with_their_revision_and_times() {
+        let layout = activitykit::Layout::new(activitykit::layout::text("Recording"));
+        let values = || Values::from([("level", 0.2)]);
+        let spec = StartSpec {
+            key: "rec".into(),
+            layout: layout.clone(),
+            values: values(),
+            revision: 5,
+            stale_at: Some(1_000),
+            timestamp: Some(2_000),
+        };
+        let expected = Start::new(layout, values())
+            .key("rec")
+            .revision(5)
+            .stale_at(time(1_000))
+            .timestamp(time(2_000));
+        assert_eq!(debug(start_of(spec)), debug(expected));
+
+        let update = UpdateSpec {
+            values: values(),
+            revision: 6,
+            stale_at: None,
+            timestamp: Some(u64::MAX),
+        };
+        let expected = Update::new(values())
+            .revision(6)
+            .timestamp(time(LATEST_MILLIS));
+        assert_eq!(debug(update_of(update)), debug(expected));
+
+        let end = |policy, values: Option<Values>| EndSpec {
+            policy,
+            revision: values.as_ref().map(|_| 7),
+            values,
+            stale_at: None,
+            timestamp: None,
+        };
+        assert_eq!(
+            end_of(end(EndPolicy::Immediate {}, None)),
+            End::immediately()
+        );
+        assert_eq!(end_of(end(EndPolicy::Default {}, None)), End::default());
+        assert_eq!(
+            end_of(end(EndPolicy::After { at: 9_000 }, Some(values()))),
+            End::after(time(9_000)).values(values()).revision(7)
+        );
+        assert_eq!(millis(time(1_800_000_000_000)), Some(1_800_000_000_000));
+        assert_eq!(millis(UNIX_EPOCH - Duration::from_secs(1)), None);
+    }
+}

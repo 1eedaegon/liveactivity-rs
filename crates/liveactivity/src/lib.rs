@@ -1,54 +1,72 @@
-//! Framework-neutral Live Activities.
+//! Live Activities for Rust applications, behind one interface.
 //!
-//! One interface, [`LiveActivityBackend`] for commands and [`EventSink`] for
-//! events, joined by [`LiveActivity::connect`]. A framework plugin implements
-//! the sink and exposes [`LiveActivity`] to its framework; a native
-//! implementation implements the backend.
+//! An application or a framework plugin talks to [`LiveActivity`]; a platform implements
+//! [`LiveActivityBackend`]. The default backends are the `activitykit` crate on iOS and the
+//! `liveupdate` crate on Android, used as they are: [`connect_native`] picks the one of the
+//! target, and [`LiveActivity::connect`] takes any other.
 //!
-//! The default backends are the `activitykit` and `liveupdate` crates, which
-//! this crate depends on and does not reimplement: [`ios::ActivityKitBackend`]
-//! and [`android::LiveUpdateBackend`] only fit them to the interface, and
-//! [`connect_native`] selects the one of the target. With
-//! `default-features = false` the crate is the interface alone.
+//! ```no_run
+//! use liveactivity::{EndInput, StartInput, UpdateInput};
 //!
-//! No framework-specific handle is imported into this crate.
+//! # async fn run() -> liveactivity::Result<()> {
+//! let live = liveactivity::connect_native(|tap: liveactivity::ActionEvent| {
+//!     println!("{} tapped {}", tap.activity_id, tap.action_id);
+//! })?;
+//!
+//! let order = live
+//!     .start(StartInput::progress("order:42", "Order 42", "Preparing", 0.1))
+//!     .await?;
+//! live.update(UpdateInput::progress(&order.id, 1, "Order 42", "On the way", 0.6))
+//!     .await?;
+//! live.end(EndInput::new(&order.id)).await?;
+//! # Ok(())
+//! # }
+//! ```
 
 #![forbid(unsafe_code)]
 
-#[cfg(feature = "liveupdate")]
 pub mod android;
 mod backend;
-mod content;
+
+/// The contract alone: the requests, records, layout types, errors and checks, without the service. A framework
+/// plugin re-exports this as its own types.
+pub mod contract {
+    pub use crate::error::{ERROR_CODES, Error, Result};
+    pub use crate::image::{
+        ImageInput, MAX_IMAGE_BYTES, MAX_IMAGE_HEIGHT, MAX_IMAGE_WIDTH, check_image,
+    };
+    pub use crate::layout::*;
+    pub use crate::models::*;
+    pub use crate::validation::{Validate, parse_request, validate_request};
+}
+
 mod error;
 mod event;
-#[cfg(feature = "activitykit")]
+mod image;
 pub mod ios;
-mod model;
+mod layout;
+mod models;
 mod native;
-mod permission;
 mod service;
 #[cfg(feature = "testkit")]
 pub mod testkit;
+mod validation;
 
-/// The iOS engine crate, so an adapter builds its kit with the same version.
-#[cfg(feature = "activitykit")]
+/// The iOS engine crate, so a caller builds its kit with the same version.
 #[doc(no_inline)]
 pub use ::activitykit;
-/// The Android engine crate, so an adapter implements its bridge against the same version.
-#[cfg(feature = "liveupdate")]
+/// The Android engine crate, so a caller implements its bridge against the same version.
 #[doc(no_inline)]
 pub use ::liveupdate;
 pub use backend::{BackendFuture, LiveActivityBackend};
-pub use content::{Content, Fallback, Template, TemplateKind, Timer};
-pub use error::{Error, ErrorCode, Result};
+pub use error::{ERROR_CODES, Error, Result};
 pub use event::{BackendContext, EventSink};
-pub use model::{
-    ActivityRecord, ActivityState, Capabilities, DismissalPolicy, EndRequest, FeatureSupport,
-    LiveActivityEvent, LiveActivityEventPayload, StartRequest, UpdateRequest,
+pub use image::{
+    ImageInput, MAX_IMAGE_BYTES, MAX_IMAGE_HEIGHT, MAX_IMAGE_WIDTH, check_image, write as write_png,
 };
+pub use ios::block_on;
+pub use layout::*;
+pub use models::*;
 pub use native::connect_native;
-pub use permission::{PermissionKind, PermissionState, Permissions};
 pub use service::LiveActivity;
-
-/// Version of the typed and serialized contract in this crate.
-pub const CONTRACT_VERSION: u16 = 1;
+pub use validation::{Validate, parse_request, validate_request};

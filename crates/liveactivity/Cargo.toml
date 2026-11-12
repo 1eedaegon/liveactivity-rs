@@ -11,17 +11,16 @@ keywords = ["live-activity", "activitykit", "android", "plugin"]
 categories = ["api-bindings", "os"]
 
 [features]
-# The default native backends. Without them the crate is the interface alone,
-# for an adapter that brings another backend.
-default = ["activitykit", "liveupdate"]
-activitykit = ["dep:activitykit"]
-liveupdate = ["dep:liveupdate", "liveupdate/android"]
-# The conformance suite and a reference backend, for the tests of an implementer.
+# The conformance suite and a backend without a platform, for tests.
 testkit = []
 
+[[example]]
+name = "usage"
+required-features = ["testkit"]
+
 [dependencies]
-activitykit = { workspace = true, optional = true }
-liveupdate = { workspace = true, optional = true }
+activitykit.workspace = true
+liveupdate = { workspace = true, features = ["android"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -1,105 +1,133 @@
 use crate::{
-    ActivityRecord, Capabilities, EndRequest, Error, ErrorCode, PermissionKind, PermissionState,
-    Permissions, Result, StartRequest, UpdateRequest,
+    ActivityRecord, Capabilities, EndInput, Error, LayoutActivityRecord, LayoutEndInput,
+    LayoutStartInput, LayoutUpdateInput, PermissionKind, Permissions, Result, StartInput,
+    UpdateInput,
 };
 use std::{future::Future, pin::Pin, sync::Arc};
 
-/// Boxed future used by the object-safe backend interface.
+/// Boxed future of the object-safe backend interface.
 pub type BackendFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
-/// Command bridge implemented by a platform or framework adapter.
+fn unsupported<'a, T: 'a>(message: &'static str) -> BackendFuture<'a, T> {
+    Box::pin(async move { Err(Error::unsupported_feature(message)) })
+}
+
+/// What a platform implements to show Live Activities: one method per command of the contract.
+///
+/// The five template commands and the two queries are required. Layouts, permission requests,
+/// images and queued events have defaults, so a backend that draws templates only is complete.
+/// The requests are validated before they reach a backend.
 pub trait LiveActivityBackend: Send + Sync + 'static {
-    /// Reports backend and device capabilities.
+    /// What the backend can do on this device.
     fn capabilities(&self) -> BackendFuture<'_, Capabilities>;
 
-    /// Starts a Live Activity.
-    fn start(&self, request: StartRequest) -> BackendFuture<'_, ActivityRecord>;
+    /// The operating system's permissions.
+    fn permissions(&self) -> BackendFuture<'_, Permissions>;
 
-    /// Updates a Live Activity.
-    fn update(&self, request: UpdateRequest) -> BackendFuture<'_, ActivityRecord>;
+    /// Starts a progress or timer activity.
+    fn start(&self, input: StartInput) -> BackendFuture<'_, ActivityRecord>;
 
-    /// Ends a Live Activity.
-    fn end(&self, request: EndRequest) -> BackendFuture<'_, ActivityRecord>;
+    /// Replaces the content of a progress or timer activity.
+    fn update(&self, input: UpdateInput) -> BackendFuture<'_, ActivityRecord>;
 
-    /// Lists the activities known to the backend.
+    /// Ends a progress or timer activity.
+    fn end(&self, input: EndInput) -> BackendFuture<'_, ActivityRecord>;
+
+    /// The progress and timer activities the backend knows.
     fn list(&self) -> BackendFuture<'_, Vec<ActivityRecord>>;
 
-    /// Sends the events the platform queued since the last call to the event sink.
-    ///
-    /// A platform that calls back needs nothing here, which is the default. A platform that
-    /// queues events, as Android does, drains them; the framework adapter calls this when its
-    /// native side signals an event and when the application resumes.
+    /// Asks the operating system for a permission. The default cannot ask.
+    fn request_permissions(&self, kind: PermissionKind) -> BackendFuture<'_, Permissions> {
+        let _ = kind;
+        unsupported("This backend cannot request permissions.")
+    }
+
+    /// Starts a layout activity. The default draws no layouts.
+    fn start_layout(&self, input: LayoutStartInput) -> BackendFuture<'_, LayoutActivityRecord> {
+        let _ = input;
+        unsupported("This backend draws no layouts.")
+    }
+
+    /// Replaces the values of a layout activity. The default draws no layouts.
+    fn update_layout(&self, input: LayoutUpdateInput) -> BackendFuture<'_, LayoutActivityRecord> {
+        let _ = input;
+        unsupported("This backend draws no layouts.")
+    }
+
+    /// Ends a layout activity. The default draws no layouts.
+    fn end_layout(&self, input: LayoutEndInput) -> BackendFuture<'_, LayoutActivityRecord> {
+        let _ = input;
+        unsupported("This backend draws no layouts.")
+    }
+
+    /// The layout activities the backend knows. The default has none.
+    fn list_layout(&self) -> BackendFuture<'_, Vec<LayoutActivityRecord>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    /// Stores a checked PNG under `name` for `image` nodes that name it. The default stores none.
+    fn write_image(&self, name: String, png: Vec<u8>) -> BackendFuture<'_, ()> {
+        let _ = (name, png);
+        unsupported("This backend stores no images.")
+    }
+
+    /// Sends the taps the platform queued to the event sink. A platform that calls back needs
+    /// nothing here, which is the default.
     fn sync_events(&self) -> BackendFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
-
-    /// Reads the operating system's permissions. The default knows none.
-    fn permissions(&self) -> BackendFuture<'_, Permissions> {
-        Box::pin(async { Ok(Permissions::all(PermissionState::Unknown)) })
-    }
-
-    /// Asks the operating system for `kind` and answers the permissions after it. The default
-    /// cannot ask.
-    fn request_permission(&self, kind: PermissionKind) -> BackendFuture<'_, Permissions> {
-        let _ = kind;
-        Box::pin(async {
-            Err(Error::new(
-                ErrorCode::Unsupported,
-                "this backend cannot request permissions",
-            ))
-        })
-    }
-
-    /// Stores the PNG `png` under `name` for content that names it, replacing an earlier one.
-    /// The default stores no images.
-    fn write_image(&self, name: String, png: Vec<u8>) -> BackendFuture<'_, ()> {
-        let _ = (name, png);
-        Box::pin(async {
-            Err(Error::new(
-                ErrorCode::Unsupported,
-                "this backend stores no images",
-            ))
-        })
-    }
 }
 
-impl<T> LiveActivityBackend for Arc<T>
-where
-    T: LiveActivityBackend + ?Sized,
-{
+impl<T: LiveActivityBackend + ?Sized> LiveActivityBackend for Arc<T> {
     fn capabilities(&self) -> BackendFuture<'_, Capabilities> {
         (**self).capabilities()
-    }
-
-    fn start(&self, request: StartRequest) -> BackendFuture<'_, ActivityRecord> {
-        (**self).start(request)
-    }
-
-    fn update(&self, request: UpdateRequest) -> BackendFuture<'_, ActivityRecord> {
-        (**self).update(request)
-    }
-
-    fn end(&self, request: EndRequest) -> BackendFuture<'_, ActivityRecord> {
-        (**self).end(request)
-    }
-
-    fn list(&self) -> BackendFuture<'_, Vec<ActivityRecord>> {
-        (**self).list()
-    }
-
-    fn sync_events(&self) -> BackendFuture<'_, ()> {
-        (**self).sync_events()
     }
 
     fn permissions(&self) -> BackendFuture<'_, Permissions> {
         (**self).permissions()
     }
 
-    fn request_permission(&self, kind: PermissionKind) -> BackendFuture<'_, Permissions> {
-        (**self).request_permission(kind)
+    fn start(&self, input: StartInput) -> BackendFuture<'_, ActivityRecord> {
+        (**self).start(input)
+    }
+
+    fn update(&self, input: UpdateInput) -> BackendFuture<'_, ActivityRecord> {
+        (**self).update(input)
+    }
+
+    fn end(&self, input: EndInput) -> BackendFuture<'_, ActivityRecord> {
+        (**self).end(input)
+    }
+
+    fn list(&self) -> BackendFuture<'_, Vec<ActivityRecord>> {
+        (**self).list()
+    }
+
+    fn request_permissions(&self, kind: PermissionKind) -> BackendFuture<'_, Permissions> {
+        (**self).request_permissions(kind)
+    }
+
+    fn start_layout(&self, input: LayoutStartInput) -> BackendFuture<'_, LayoutActivityRecord> {
+        (**self).start_layout(input)
+    }
+
+    fn update_layout(&self, input: LayoutUpdateInput) -> BackendFuture<'_, LayoutActivityRecord> {
+        (**self).update_layout(input)
+    }
+
+    fn end_layout(&self, input: LayoutEndInput) -> BackendFuture<'_, LayoutActivityRecord> {
+        (**self).end_layout(input)
+    }
+
+    fn list_layout(&self) -> BackendFuture<'_, Vec<LayoutActivityRecord>> {
+        (**self).list_layout()
     }
 
     fn write_image(&self, name: String, png: Vec<u8>) -> BackendFuture<'_, ()> {
         (**self).write_image(name, png)
+    }
+
+    fn sync_events(&self) -> BackendFuture<'_, ()> {
+        (**self).sync_events()
     }
 }

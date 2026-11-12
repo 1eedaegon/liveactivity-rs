@@ -153,6 +153,8 @@ pub(crate) fn layout_snapshot(snapshot: &Snapshot) -> (Template, LayoutSnapshot)
         values: values(snapshot),
         stale_at: snapshot.stale_at,
         timestamp: None,
+        relevance: None,
+        android: None,
     };
     (template_of(snapshot), layout)
 }

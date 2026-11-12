@@ -35,6 +35,7 @@ impl LiveActivityBackend for UnsupportedBackend {
                 max_payload_bytes: 0,
                 layout: Unsupported,
                 push: Unsupported,
+                android_presentation: None,
             })
         })
     }

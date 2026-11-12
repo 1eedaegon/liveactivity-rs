@@ -17,7 +17,11 @@ application or framework plugin
 
 - **Contract** (`models`, `layout`, `error`, `validation`, `image`): the
   requests, records, capabilities, permissions and error codes, as serde types
-  with fixed JSON. Layout nodes and styles are activitykit's, re-exported.
+  with fixed JSON. The envelope of a request is this crate's: identity,
+  revisions, the options of each platform, the relevance, the alert of an
+  update. The vocabulary of each presentation is its engine's, re-exported:
+  layout nodes and styles are activitykit's, the notification styles of an
+  Android content are liveupdate's.
 - **Interface** (`backend`, `event`, `service`): `LiveActivityBackend` has one
   method per command of the contract. `LiveActivity` validates a request and
   hands it to the backend it was connected to. `EventSink` takes an `Event`:
@@ -42,7 +46,9 @@ application or framework plugin
    and adds only what neither has: templates on iOS, the split between
    template and layout activities, and the handles of ended activities.
 3. **The contract is typed and validated once.** A request that one backend
-   would refuse is refused before any backend, with `INVALID_INPUT`.
+   would refuse is refused before any backend, with `INVALID_INPUT`. A layout
+   request is read in this crate's types; activitykit checks the part it
+   knows, and its own request fixtures are run against this reader.
 4. **A backend says what it lacks.** Layouts, images and permission requests
    default to `UNSUPPORTED_FEATURE`, and capabilities report them, so a host
    composes a default backend with its own native side instead of forking it.
@@ -50,6 +56,13 @@ application or framework plugin
    only the host has.
 5. **Exchangeable means conformant.** A backend that passes the conformance
    suite can replace another without a change in the caller.
+6. **What one platform reads stays with it.** Android options and content
+   never reach the iOS engine; a relevance and a push request are no part of
+   what Android keeps. What a platform would show if it could, such as an
+   alert on Android, is named in the record's `degradedFeatures`.
+
+What the engines are about to open, and what this crate does with each, is in
+[design/engine-expressiveness](design/engine-expressiveness/PRD.md).
 
 ## Open
 

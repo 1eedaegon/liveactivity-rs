@@ -186,6 +186,7 @@ impl LiveActivityBackend for MemoryBackend {
                 max_payload_bytes: 4096,
                 layout: no,
                 push: no,
+                android_presentation: None,
             })
         })
     }

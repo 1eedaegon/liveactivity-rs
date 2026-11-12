@@ -35,6 +35,7 @@ other call answers `UNSUPPORTED_PLATFORM`.
 | [docs/ios-setup.md](docs/ios-setup.md) | the widget extension, the App Group and pushes of an iOS app |
 | [docs/android-setup.md](docs/android-setup.md) | the AAR, the permissions and the files of an Android app |
 | [docs/framework-integration.md](docs/framework-integration.md) | writing a framework plugin: commands, events, lifecycle, threads |
+| [docs/design/engine-expressiveness](docs/design/engine-expressiveness/PRD.md) | what the engines are about to open, and what this crate does with each |
 
 ## The two sides
 
@@ -51,41 +52,263 @@ let live = LiveActivity::builder()
 
 | You are | You write |
 | --- | --- |
-| an application | `.event_sink(..)`, then the calls below |
+| an application | `.event_sink(..)`, then the calls of [Features](#features) |
 | a framework plugin | an `EventSink` that forwards events to the framework's own, commands that call `LiveActivity`, and a backend only when the framework has a native side of its own |
 | a platform | a `LiveActivityBackend` |
 
-## Using it
+## Features
+
+Every snippet below is a function of
+[`examples/features.rs`](crates/liveactivity/examples/features.rs), which
+compiles and runs:
+
+```sh
+cargo run -p liveactivity --example features --features testkit
+```
+
+| Feature | Call | iOS | Android |
+| --- | --- | --- | --- |
+| [Connect](#connect) | `LiveActivity::builder()` | ✓ | ✓ |
+| [Progress and timer](#progress-and-timer-activities) | `start`, `update`, `end`, `list` | ✓ | ✓ |
+| [Layouts](#layout-activities) | `start_layout`, `update_layout`, `end_layout`, `list_layout` | ✓ | ✓ projected onto a notification |
+| [Buttons and taps](#buttons-and-taps) | a `button` node, `Event::Action` | ✓ | ✓ up to three |
+| [Alerts](#alerts-and-relevance) | `LayoutUpdateInput.alert` | ✓ | silent, reported as `alert` |
+| [Relevance](#alerts-and-relevance) | `LayoutSnapshot.relevance` | ✓ | ignored |
+| [Android content](#android-content) | `LayoutSnapshot.android` | ignored | ✓ |
+| [Images](#images) | `write_image`, an `image` node | ✓ needs an App Group | ✓ as the large icon |
+| [Pushes](#pushes) | `LayoutStartInput.push`, `push_tokens` | ✓ | none |
+| [Events](#events) | the event sink, `sync_events` | ✓ as they come | ✓ on `sync_events` |
+| [Capabilities and permissions](#capabilities-and-permissions) | `capabilities`, `permissions`, `request_permissions` | ✓ | ✓ the dialog is the host's |
+| [Blocking calls](#blocking-calls) | `wait` | ✓ off the main thread | ✓ |
+
+### Connect
 
 ```rust
-use liveactivity::{EndInput, Event, LiveActivity, StartInput, UpdateInput};
-
 let live = LiveActivity::builder()
     .event_sink(|event: Event| match event {
-        Event::Action(tap) => println!("{} tapped {}", tap.activity_id, tap.action_id),
+        Event::Action(tap) => println!("tapped {} on {}", tap.action_id, tap.activity_id),
+        Event::State(change) => println!("{} is {:?}", change.activity_id, change.state),
         Event::PushToken(token) => println!("send {} to the server", token.token),
         _ => {}
     })
     .build()?;
 ```
 
-`liveactivity::connect_native(sink)` is the same in one call. Keep the
-`LiveActivity` in application state; it is cheap to clone and safe to use from
-any thread.
+Without `.backend(..)` the backend is the platform's own. Keep the
+`LiveActivity` in application state: it is cheap to clone and safe to use from
+any thread. `liveactivity::connect_native(sink)` is the same in one call.
 
-| Call | Does |
-| --- | --- |
-| `start(StartInput::progress(..))`, `StartInput::timer(..)` | starts a progress or countdown activity |
-| `update(UpdateInput::progress(..))` | sends the whole content again under a higher revision |
-| `end(EndInput::new(id))`, `EndInput::immediate(id)` | ends the activity |
-| `list()` | the activities the backend knows |
-| `start_layout`, `update_layout`, `end_layout`, `list_layout` | the same for an activity with a layout of its own |
-| `capabilities()`, `permissions()`, `request_permissions(kind)` | what the device and the person allow |
-| `write_image(name, png)` | stores a PNG that a layout's `image` node shows |
-| `push_tokens()` | the push tokens iOS has given since launch, for a sink that listened late |
-| `sync_events()` | delivers the taps Android queued; call it when the application starts and resumes |
+### Progress and timer activities
 
-The rules are the same on every backend:
+A title, a status, and a progress from 0 to 1 or a countdown. They need no
+layout and look native on both platforms.
+
+```rust
+let order = live
+    .start(StartInput::progress("order:42", "Order 42", "Preparing", 0.1))
+    .await?;
+// An update sends the whole content again, under a higher revision.
+live.update(UpdateInput::progress(&order.id, 1, "Order 42", "On the way", 0.6))
+    .await?;
+live.end(EndInput::new(&order.id)).await?;
+
+// A countdown between two times, in epoch milliseconds.
+let tea = live
+    .start(StartInput::timer("tea:1", "Tea", "Steeping", started_at, ends_at))
+    .await?;
+live.end(EndInput::immediate(&tea.id)).await?;
+```
+
+`live.list()` answers the activities the backend knows.
+
+### Layout activities
+
+A tree of nodes, fixed at start, and values that updates replace. iOS draws
+the tree on the Lock Screen and in the Dynamic Island; Android projects it
+onto a notification and names what it left out in the record's
+`degraded_features`. The nodes and styles are in
+[docs/contract.md](docs/contract.md#the-layout-dsl).
+
+```rust
+use liveactivity::activitykit::{layout::{button, progress, text, vstack}, values};
+
+let layout = Layout {
+    lock_screen: vstack([
+        text(Bound::key("title")),
+        progress("done"),
+        button("track", text("Track")),
+    ]),
+    island: None,
+    background: None,
+    keyline: None,
+};
+let values = values! { "title" => "Delivery 7", "done" => 0.4 }.into_inner();
+let start = LayoutStartInput::new("delivery:7", layout, LayoutSnapshot::new(0, values));
+let record = live.start_layout(start).await?;
+
+// Every value again, under a higher revision.
+let values = values! { "title" => "Delivery 7", "done" => 0.9 }.into_inner();
+live.update_layout(LayoutUpdateInput::new(&record.id, LayoutSnapshot::new(1, values)))
+    .await?;
+
+live.end_layout(LayoutEndInput::new(&record.id)).await?;
+```
+
+A request that comes as JSON is read with
+`parse_request("start_layout", json)?`, which checks it against the contract.
+
+### Buttons and taps
+
+A `button(action_id, label)` node is a button on iOS and a notification action
+on Android. Its tap reaches the sink as `Event::Action`, with the `action_id`,
+the activity's `id` and its key. The tap does not change the activity: send an
+update if the button should change something.
+
+### Alerts and relevance
+
+```rust
+let mut snapshot = LayoutSnapshot::new(2, values);
+// Which of the application's activities the Dynamic Island shows first.
+snapshot.relevance = Some(90.0);
+let mut update = LayoutUpdateInput::new(id, snapshot);
+update.alert = Some(Alert::new("Delivery arrived", "Your parcel is at the door"));
+let record = live.update_layout(update).await?;
+```
+
+On iOS the device lights up, the Dynamic Island expands and an Apple Watch
+shows the title and the body. Android updates silently and names `alert` in
+`record.degraded_features`. An update without an alert is silent everywhere.
+
+### Android content
+
+What the notification shows, in Android's own terms, instead of the projection
+of the layout: a progress with segments and points, metrics, the text of the
+status chip, icons of actions. The types are liveupdate's, re-exported.
+
+```rust
+let segment = |length, color| ProgressSegment { length, id: None, color, semantic_style: None };
+
+// Which notification styles the device draws.
+let styles = live.capabilities().await?.android_presentation;
+let segmented = styles.is_some_and(|styles| styles.progress_style);
+
+let mut snapshot = LayoutSnapshot::new(3, values);
+snapshot.android = Some(AndroidContent {
+    title: "Delivery 7".into(),
+    status: "2 stops away".into(),
+    presentation: AndroidPresentation {
+        style: PresentationStyle::Progress(ProgressStyle {
+            progress: 60,
+            indeterminate: false,
+            styled_by_progress: true,
+            segments: if segmented {
+                vec![segment(60, Some(0xFF00_7F00)), segment(40, None)]
+            } else {
+                vec![segment(100, None)]
+            },
+            points: Vec::new(),
+            start_icon: None,
+            end_icon: None,
+            tracker_icon: None,
+        }),
+        // The text of the status chip, at most 7 characters.
+        short_critical_text: Some("8 min".into()),
+        large_icon: None,
+        actions: Vec::new(),
+        samsung_now_bar: None,
+    },
+});
+live.update_layout(LayoutUpdateInput::new(id, snapshot)).await?;
+```
+
+Android keeps the style of an activity's first snapshot, and answers
+`UNSUPPORTED_FEATURE` to a content of another style: give a content with every
+snapshot of an activity or with none. The backend needs the app's
+files for it: see [Platform setup](#platform-setup).
+
+### Images
+
+```rust
+live.write_image("badge.png", &png).await?;
+```
+
+Write the PNG first, then show it with an `image` node whose source is
+`{ "file": "badge.png" }`. On iOS it goes to the App Group that the widget
+extension reads. On Android the first such image of a layout becomes the
+notification's large icon.
+
+### Pushes
+
+iOS only. A start asks for a token, the sink gets it as `Event::PushToken`,
+and a server updates the activity through APNs.
+
+```rust
+start.push = Some(LayoutPush::Token);
+live.start_layout(start).await?;
+
+// What came before the sink listened.
+for held in live.push_tokens().await?.activities {
+    println!("{} has the token {}", held.activity_id, held.token);
+}
+```
+
+The server builds its payloads with `activitykit::push::Payload`. Content that
+a push delivered comes back as `Event::Updated`, and an activity that a push
+started as `Event::Started`. The steps are in
+[docs/ios-setup.md](docs/ios-setup.md#7-pushes).
+
+### Events
+
+| Event | When | iOS | Android |
+| --- | --- | --- | --- |
+| `Event::Action` | a button or an action was tapped | ✓ | ✓ |
+| `Event::State` | an activity has a new lifecycle state | every change while the app runs | the person dismissed it |
+| `Event::Started` | a layout activity began, also one a push started | ✓ | |
+| `Event::Updated` | a push changed the content of a layout activity | ✓ | |
+| `Event::PushToken` | an activity got a push token, or a new one | ✓ | |
+| `Event::PushToStartToken` | the app got its push-to-start token | ✓ | |
+| `Event::Permissions` | the person changed what the app may do | ✓ | |
+
+The enum may grow: match with a `_` arm. iOS delivers events as they come, and
+a tap keeps the app awake until the sink returns, for at most 4 seconds.
+Android stores taps and dismissals, also while the application does not run:
+
+```rust
+// When the application starts and resumes. On iOS it does nothing.
+live.sync_events().await?;
+```
+
+### Capabilities and permissions
+
+```rust
+let capabilities = live.capabilities().await?;
+if capabilities.layout != FeatureSupport::Supported {
+    println!("{}: progress and timer activities only", capabilities.platform);
+}
+let permissions = live.permissions().await?;
+if permissions.notifications == PermissionState::Prompt {
+    live.request_permissions(PermissionKind::Notifications).await?;
+}
+```
+
+A feature is supported, unsupported or unknown, and unknown never counts as
+supported. On iOS Live Activities are a switch in Settings and there is no
+dialog. On Android the system's dialog needs an Activity, which the host
+shows: see [Supporting it](#supporting-it).
+
+### Blocking calls
+
+Calls are futures for any executor. Where there is none:
+
+```rust
+let record = liveactivity::wait(live.start(input))?;
+```
+
+On iOS the answer comes from the main thread, so a blocking call there would
+never end: `wait` answers `NATIVE_ERROR` at once on the main thread instead of
+hanging. On Android a call runs on the thread that polls it.
+
+### Rules of every backend
 
 - **Key.** `activity_key` is the application's own name of the activity. A
   repeated start with the same key and request answers the running activity; a
@@ -96,33 +319,9 @@ The rules are the same on every backend:
 - **End.** Ending twice is fine. An ended activity takes no update (`NOT_FOUND`).
 - **Errors.** Every failure is an `Error` with a `code` out of `ERROR_CODES`
   and a message.
-
-Requests are checked against the contract before a backend sees them, so an
-invalid one is `INVALID_INPUT` everywhere.
-
-Calls are futures for any executor. Where there is none, `liveactivity::wait`
-blocks for the answer. On iOS the answer comes from the main thread, so a
-blocking call there would never end: `wait` answers `NATIVE_ERROR` at once on
-the main thread instead of hanging. On Android a call runs on the thread that
-polls it.
-
-[`examples/usage.rs`](crates/liveactivity/examples/usage.rs) runs anywhere:
-
-```sh
-cargo run -p liveactivity --example usage --features testkit
-```
-
-### Events
-
-| Event | When |
-| --- | --- |
-| `Event::Action` | a button of an activity was tapped |
-| `Event::PushToken` | iOS gave an activity a push token, or changed it |
-| `Event::PushToStartToken` | iOS gave the app its push-to-start token, or changed it |
-| `Event::Updated` | a push changed the content of a layout activity |
-
-The enum may grow: match with a `_` arm. On iOS a tap keeps the app awake
-until the sink returns, for at most 4 seconds.
+- **Validation.** Requests are checked against the contract before a backend
+  sees them, so an invalid one is `INVALID_INPUT` on every platform.
+- **What a platform leaves out** is named in the record's `degraded_features`.
 
 ## Supporting it
 
@@ -191,7 +390,7 @@ to the Android side.
 
 ### A platform
 
-Implement `LiveActivityBackend`, one method per call of the table above. Only
+Implement `LiveActivityBackend`, one method per call of the contract. Only
 the template calls and the two queries are required; layouts, permission
 requests and images default to `UNSUPPORTED_FEATURE`, a backend without pushes
 holds no token, and `capabilities` says what the backend has. `attach` hands

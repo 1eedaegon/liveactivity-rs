@@ -17,8 +17,9 @@ mod tests;
 
 use crate::{
     Error, Result,
+    event::{StartedEvent, StateEvent},
     layout::{
-        ActionEvent, LayoutActivityRecord, LayoutEndInput, LayoutPush, LayoutSnapshot,
+        ActionEvent, Alert, LayoutActivityRecord, LayoutEndInput, LayoutPush, LayoutSnapshot,
         LayoutStartInput, LayoutUpdateInput,
     },
     models::*,
@@ -29,10 +30,7 @@ use activitykit::{State, Values};
 use std::{
     collections::VecDeque,
     future::Future,
-    pin::pin,
-    sync::{Arc, Mutex, PoisonError},
-    task::{Context, Poll, Wake, Waker},
-    thread,
+    sync::{Mutex, PoisonError},
 };
 
 /// What holds a tap's intent, and with it an app that the system launched for the tap, until it is acknowledged.
@@ -54,6 +52,12 @@ pub(crate) enum KitEvent<H, A> {
     },
     /// A push delivered content to the activity, which its handle holds now.
     Updated(H),
+    /// An activity began while the app ran: one the app started, or one the system or a push started.
+    Started(H),
+    /// ActivityKit reports a new lifecycle state of the activity.
+    State(H, State),
+    /// The whole authorization after the person changed it in Settings.
+    Authorization(Authorization),
 }
 
 /// What the backend needs of activitykit's `ActivityKit`.
@@ -86,6 +90,8 @@ pub(crate) trait Handle: Clone + Send + Sync + 'static {
     fn revision(&self) -> Option<u64>;
     fn stale_at(&self) -> Option<u64>;
     fn timestamp(&self) -> Option<u64>;
+    /// The relevance score of the last accepted content: 0 unless one was given.
+    fn relevance(&self) -> f64;
     fn degraded_features(&self) -> Vec<String>;
     fn update(&self, update: UpdateSpec) -> impl Future<Output = activitykit::Result<()>> + Send;
     fn end(&self, end: EndSpec) -> impl Future<Output = activitykit::Result<()>> + Send;
@@ -101,7 +107,8 @@ pub(crate) struct Authorization {
     pub(crate) frequent_pushes: bool,
 }
 
-/// A start: activitykit's `Start` with a key, a revision, a stale date, a timestamp and what it asks for of the pushes.
+/// A start: activitykit's `Start` with a key, a revision, a stale date, a timestamp, a relevance and what it asks
+/// for of the pushes.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StartSpec {
     pub(crate) key: String,
@@ -110,19 +117,23 @@ pub(crate) struct StartSpec {
     pub(crate) revision: u64,
     pub(crate) stale_at: Option<u64>,
     pub(crate) timestamp: Option<u64>,
+    pub(crate) relevance: Option<f64>,
     pub(crate) push: Option<LayoutPush>,
 }
 
-/// An update: activitykit's `Update` at the caller's revision, with a stale date and a timestamp.
+/// An update: activitykit's `Update` at the caller's revision, with a stale date, a timestamp, a relevance and
+/// an alert.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct UpdateSpec {
     pub(crate) values: Values,
     pub(crate) revision: u64,
     pub(crate) stale_at: Option<u64>,
     pub(crate) timestamp: Option<u64>,
+    pub(crate) relevance: Option<f64>,
+    pub(crate) alert: Option<Alert>,
 }
 
-/// An end: activitykit's `End` with its policy and, when given, the final content and its revision.
+/// An end: activitykit's `End` with its policy and, when given, the final content, its revision and its relevance.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct EndSpec {
     pub(crate) policy: EndPolicy,
@@ -130,6 +141,7 @@ pub(crate) struct EndSpec {
     pub(crate) revision: Option<u64>,
     pub(crate) stale_at: Option<u64>,
     pub(crate) timestamp: Option<u64>,
+    pub(crate) relevance: Option<f64>,
 }
 
 /// Which contract version an activity belongs to.
@@ -207,7 +219,49 @@ pub(crate) fn updated_event<H: Handle>(handle: &H) -> Option<UpdatedEvent> {
     })
 }
 
+/// The start of a layout activity as the event sink gets it. Nothing is reported of an activity of contract v1,
+/// whose start answered its record.
+pub(crate) fn started_event<H: Handle>(handle: &H) -> Option<StartedEvent> {
+    kind(handle).is_layout().then(|| StartedEvent {
+        record: layout_record(handle),
+    })
+}
+
+/// A new lifecycle state of `handle` as the event sink gets it.
+pub(crate) fn state_event<H: Handle>(handle: &H, new: State) -> StateEvent {
+    let key = handle.key();
+    StateEvent {
+        activity_id: handle.id().to_owned(),
+        activity_key: (!key.is_empty()).then(|| key.to_owned()),
+        state: state(new),
+    }
+}
+
+/// What `authorization` allows. Live Activities are a switch in Settings: there is no prompt, so a request
+/// reports `settingsRequired`.
+pub(crate) fn permissions_of(authorization: Authorization, request: bool) -> Permissions {
+    let live_activities = match (authorization.supported, authorization.enabled, request) {
+        (false, _, _) => PermissionState::NotApplicable,
+        (true, true, _) => PermissionState::Granted,
+        (true, false, true) => PermissionState::SettingsRequired,
+        (true, false, false) => PermissionState::Denied,
+    };
+    let frequent_pushes = match (authorization.supported, authorization.frequent_pushes) {
+        (false, _) => PermissionState::NotApplicable,
+        (true, true) => PermissionState::Granted,
+        (true, false) => PermissionState::Denied,
+    };
+    Permissions {
+        notifications: PermissionState::NotApplicable,
+        live_activities,
+        promotion: PermissionState::NotApplicable,
+        frequent_pushes,
+    }
+}
+
 fn layout_record<H: Handle>(handle: &H) -> LayoutActivityRecord {
+    // The system's score without one is 0, which a record does not repeat.
+    let relevance = handle.relevance();
     LayoutActivityRecord {
         id: handle.id().to_owned(),
         activity_key: handle.key().to_owned(),
@@ -217,6 +271,9 @@ fn layout_record<H: Handle>(handle: &H) -> LayoutActivityRecord {
             values: handle.values().into_inner(),
             stale_at: handle.stale_at(),
             timestamp: handle.timestamp(),
+            relevance: (relevance != 0.0).then_some(relevance),
+            // iOS holds no Android content.
+            android: None,
         },
         backend: Backend::ActivityKit,
         state: state(handle.state()),
@@ -261,16 +318,19 @@ pub(crate) fn start_spec(request: LayoutStartInput) -> StartSpec {
         revision: request.snapshot.revision,
         stale_at: request.snapshot.stale_at,
         timestamp: request.snapshot.timestamp,
+        relevance: request.snapshot.relevance,
         push: request.push,
     }
 }
 
-fn update_spec(snapshot: LayoutSnapshot) -> UpdateSpec {
+fn update_spec(snapshot: LayoutSnapshot, alert: Option<Alert>) -> UpdateSpec {
     UpdateSpec {
         values: snapshot.values.into(),
         revision: snapshot.revision,
         stale_at: snapshot.stale_at,
         timestamp: snapshot.timestamp,
+        relevance: snapshot.relevance,
+        alert,
     }
 }
 
@@ -282,6 +342,7 @@ fn end_spec(policy: EndPolicy, snapshot: Option<LayoutSnapshot>) -> EndSpec {
             revision: Some(snapshot.revision),
             stale_at: snapshot.stale_at,
             timestamp: snapshot.timestamp,
+            relevance: snapshot.relevance,
         },
         None => EndSpec {
             policy,
@@ -289,6 +350,7 @@ fn end_spec(policy: EndPolicy, snapshot: Option<LayoutSnapshot>) -> EndSpec {
             revision: None,
             stale_at: None,
             timestamp: None,
+            relevance: None,
         },
     }
 }
@@ -330,29 +392,12 @@ impl<K: Kit> Apple<K> {
             max_payload_bytes: 4096,
             layout: supported,
             push: supported,
+            android_presentation: None,
         }
     }
 
-    /// Live Activities are a switch in Settings: there is no prompt, so a request reports `settingsRequired`.
     pub(crate) fn permissions(&self, request: bool) -> Permissions {
-        let authorization = self.kit.authorization();
-        let live_activities = match (authorization.supported, authorization.enabled, request) {
-            (false, _, _) => PermissionState::NotApplicable,
-            (true, true, _) => PermissionState::Granted,
-            (true, false, true) => PermissionState::SettingsRequired,
-            (true, false, false) => PermissionState::Denied,
-        };
-        let frequent_pushes = match (authorization.supported, authorization.frequent_pushes) {
-            (false, _) => PermissionState::NotApplicable,
-            (true, true) => PermissionState::Granted,
-            (true, false) => PermissionState::Denied,
-        };
-        Permissions {
-            notifications: PermissionState::NotApplicable,
-            live_activities,
-            promotion: PermissionState::NotApplicable,
-            frequent_pushes,
-        }
+        permissions_of(self.kit.authorization(), request)
     }
 
     pub(crate) fn request_permissions(&self, kind: PermissionKind) -> Result<Permissions> {
@@ -384,7 +429,9 @@ impl<K: Kit> Apple<K> {
     ) -> Result<LayoutActivityRecord> {
         input.validate()?;
         let handle = self.find(&input.id, Kind::is_layout).await?;
-        handle.update(update_spec(input.snapshot)).await?;
+        handle
+            .update(update_spec(input.snapshot, input.alert))
+            .await?;
         Ok(layout_record(&handle))
     }
 
@@ -421,7 +468,7 @@ impl<K: Kit> Apple<K> {
         if kind(&handle) != Kind::Template(template) {
             return Err(Error::invalid());
         }
-        handle.update(update_spec(snapshot)).await?;
+        handle.update(update_spec(snapshot, None)).await?;
         template_record(&handle).ok_or_else(Error::native)
     }
 
@@ -462,62 +509,4 @@ impl<K: Kit> Apple<K> {
     }
 }
 
-/// Whether the calling thread is the process's main thread, where activitykit answers.
-#[cfg(target_os = "ios")]
-#[allow(unsafe_code)]
-fn on_main_thread() -> bool {
-    unsafe extern "C" {
-        fn pthread_main_np() -> std::ffi::c_int;
-    }
-    // SAFETY: pthread_main_np takes no argument and only reads which thread calls it.
-    unsafe { pthread_main_np() != 0 }
-}
-
-#[cfg(not(target_os = "ios"))]
-fn on_main_thread() -> bool {
-    false
-}
-
-/// The answer of a call, for code that cannot await: [`block_on`] with a guard. On the main thread of an iOS app
-/// the answer would never come, because activitykit answers there, so the call answers `NATIVE_ERROR` at once
-/// instead of hanging.
-///
-/// # Errors
-///
-/// The error of the call, or `NATIVE_ERROR` on the main thread of an iOS app.
-pub fn wait<T>(future: impl Future<Output = Result<T>>) -> Result<T> {
-    wait_on(on_main_thread(), future)
-}
-
-fn wait_on<T>(main: bool, future: impl Future<Output = Result<T>>) -> Result<T> {
-    if main {
-        return Err(Error::new(
-            "NATIVE_ERROR",
-            "A blocking call on the main thread, where activitykit answers, would never end: call it on another \
-             thread, or await it.",
-        ));
-    }
-    block_on(future)
-}
-
-/// Drives `future` to its end on this thread.
-pub fn block_on<F: Future>(future: F) -> F::Output {
-    struct Unpark(thread::Thread);
-    impl Wake for Unpark {
-        fn wake(self: Arc<Self>) {
-            self.0.unpark();
-        }
-    }
-    let waker = Waker::from(Arc::new(Unpark(thread::current())));
-    let mut context = Context::from_waker(&waker);
-    let mut future = pin!(future);
-    loop {
-        if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
-            return output;
-        }
-        thread::park();
-    }
-}
-
 pub use backend::ActivityKitBackend;
-pub(crate) use backend::already_connected;

@@ -1,5 +1,8 @@
 use super::{fake::FakeKit, *};
-use crate::layout::{LayoutPush, Value};
+use crate::{
+    block_on,
+    layout::{LayoutPush, Value},
+};
 use activitykit::{Error as Kit, LimitScope};
 use serde_json::{Value as Json, json};
 
@@ -26,10 +29,7 @@ fn snapshot(revision: u64, tone: &str) -> LayoutSnapshot {
 }
 
 fn update(id: &str, revision: u64, tone: &str) -> LayoutUpdateInput {
-    LayoutUpdateInput {
-        id: id.into(),
-        snapshot: snapshot(revision, tone),
-    }
+    LayoutUpdateInput::new(id, snapshot(revision, tone))
 }
 
 fn end(id: &str, policy: EndPolicy, snapshot: Option<LayoutSnapshot>) -> LayoutEndInput {
@@ -149,6 +149,8 @@ fn an_update_goes_out_at_the_requests_revision_under_activitykits_rules() {
             revision: 7,
             stale_at: Some(2000),
             timestamp: Some(1_790_000_000_900),
+            relevance: None,
+            alert: None,
         }
     );
     assert_eq!(
@@ -254,7 +256,8 @@ fn an_end_sends_its_policy_and_its_final_content_at_its_revision_and_ending_agai
             values: None,
             revision: None,
             stale_at: None,
-            timestamp: None
+            timestamp: None,
+            relevance: None,
         }
     );
     drop(book);
@@ -698,26 +701,97 @@ fn a_tap_names_the_action_the_activity_and_its_key() {
         None
     );
 }
+
 #[test]
-fn block_on_drives_a_future_that_another_thread_completes() {
-    let (sender, receiver) = activitykit::async_channel::bounded(1);
-    let answer = thread::spawn(move || {
-        thread::sleep(std::time::Duration::from_millis(20));
-        sender.send_blocking(42).unwrap();
-    });
-    assert_eq!(block_on(async { receiver.recv().await.unwrap() }), 42);
-    answer.join().unwrap();
+fn req_c_007_android_members_never_reach_the_ios_engine() {
+    // REQ-C-007
+    let (apple, kit) = apple();
+    let first = block_on(apple.start_layout(start("demo:1", "green"))).unwrap();
+    // The same start with other Android options and an Android content is the same activity.
+    let mut json = start_json("demo:1", "green");
+    json["android"]["visibility"] = json!("secret");
+    json["snapshot"]["android"] = json!({"title":"On time","status":"Gate 4",
+        "presentation":{"style":{"kind":"standard"}}});
+    let other: LayoutStartInput = crate::parse_request("start_layout", json).unwrap();
+    assert!(other.snapshot.android.is_some());
+    assert_eq!(
+        block_on(apple.start_layout(other.clone())).unwrap().id,
+        first.id
+    );
+    assert_eq!(kit.book().starts.len(), 1);
+    // activitykit is not asked about them, and the record does not repeat what iOS does not hold.
+    assert_eq!(other.wire().android, None);
+    let record = block_on(apple.list_layout()).unwrap().remove(0);
+    assert_eq!(record.snapshot.android, None);
 }
 
 #[test]
-fn a_blocking_call_on_the_main_thread_answers_at_once() {
-    // REQ-C-004
-    let call = || async { Ok::<_, Error>(7) };
-    assert_eq!(super::wait_on(false, call()), Ok(7));
-    assert_eq!(
-        super::wait_on(true, call()).unwrap_err().code,
-        "NATIVE_ERROR"
-    );
-    // A test runs off the main thread.
-    assert_eq!(crate::wait(call()), Ok(7));
+fn req_i_001_a_relevance_reaches_the_kit_and_the_record_reports_it() {
+    // REQ-I-001
+    let (apple, kit) = apple();
+    let mut first = start("demo:1", "green");
+    first.snapshot.relevance = Some(80.0);
+    let record = block_on(apple.start_layout(first)).unwrap();
+    assert_eq!(kit.book().starts[0].relevance, Some(80.0));
+    assert_eq!(record.snapshot.relevance, Some(80.0));
+    // An update without a score keeps it; one with another replaces it.
+    let kept = block_on(apple.update_layout(update(&record.id, 6, "red"))).unwrap();
+    assert_eq!(kept.snapshot.relevance, Some(80.0));
+    let mut raised = update(&record.id, 7, "green");
+    raised.snapshot.relevance = Some(95.5);
+    let raised = block_on(apple.update_layout(raised)).unwrap();
+    assert_eq!(raised.snapshot.relevance, Some(95.5));
+    let sent: Vec<_> = kit
+        .book()
+        .updates
+        .iter()
+        .map(|update| update.relevance)
+        .collect();
+    assert_eq!(sent, [None, Some(95.5)]);
+    // The final content has one too.
+    let mut last = snapshot(8, "red");
+    last.relevance = Some(10.0);
+    let ended =
+        block_on(apple.end_layout(end(&record.id, EndPolicy::Default {}, Some(last)))).unwrap();
+    assert_eq!(kit.book().ends[0].relevance, Some(10.0));
+    assert_eq!(ended.snapshot.relevance, Some(10.0));
+    // No score is the system's 0, which a record does not repeat.
+    let plain = block_on(apple.start_layout(start("demo:2", "green"))).unwrap();
+    assert_eq!(plain.snapshot.relevance, None);
+    // A score that is no number never reaches the kit.
+    let mut endless = start("demo:3", "green");
+    endless.snapshot.relevance = Some(f64::INFINITY);
+    assert_eq!(block_on(apple.start_layout(endless)), Err(Error::invalid()));
+}
+
+#[test]
+fn req_i_002_an_alert_reaches_the_kit_with_its_update() {
+    // REQ-I-002
+    let (apple, kit) = apple();
+    let id = block_on(apple.start_layout(start("demo:1", "green")))
+        .unwrap()
+        .id;
+    let alert = crate::Alert {
+        title: "Gate changed".into(),
+        body: "Now gate 12".into(),
+    };
+    let mut loud = update(&id, 6, "red");
+    loud.alert = Some(alert.clone());
+    block_on(apple.update_layout(loud)).unwrap();
+    block_on(apple.update_layout(update(&id, 7, "green"))).unwrap();
+    let alerts: Vec<_> = kit
+        .book()
+        .updates
+        .iter()
+        .map(|update| update.alert.clone())
+        .collect();
+    assert_eq!(alerts, [Some(alert), None]);
+    // An alert without a title is no alert, and the update does not go out.
+    let mut blank = update(&id, 8, "red");
+    blank.alert = Some(crate::Alert {
+        title: " ".into(),
+        body: "Now gate 12".into(),
+    });
+    assert_eq!(block_on(apple.update_layout(blank)), Err(Error::invalid()));
+    assert_eq!(kit.book().updates.len(), 2);
 }

@@ -1,4 +1,7 @@
-use super::{Acknowledge, Apple, Kit, KitEvent, push_token_event, updated_event};
+use super::{
+    Acknowledge, Apple, Kit, KitEvent, permissions_of, push_token_event, started_event,
+    state_event, updated_event,
+};
 use crate::{
     ActivityRecord, BackendContext, BackendFuture, Capabilities, EndInput, Error, Event,
     LayoutActivityRecord, LayoutEndInput, LayoutStartInput, LayoutUpdateInput, LiveActivityBackend,
@@ -48,14 +51,6 @@ impl Default for ActivityKitBackend {
     }
 }
 
-/// A backend takes one event sink: a second connection would share, and so split, the platform's events.
-pub(crate) fn already_connected() -> Error {
-    Error::new(
-        "CONFLICT",
-        "The backend is already connected to an event sink",
-    )
-}
-
 /// Starts the thread that hands every event of `kit` to the sink, until the kit's events end. The kit is subscribed
 /// to before this returns, so a tap that launched the app waits for the subscriber. A tap keeps its intent until the
 /// sink has returned; a token is noted in `tokens` before its event goes out.
@@ -84,6 +79,17 @@ fn forward_events<K: Kit>(kit: &K, events: BackendContext, tokens: TokenBook) ->
                             events.emit(Event::Updated(updated));
                         }
                     }
+                    KitEvent::Started(activity) => {
+                        if let Some(started) = started_event(&activity) {
+                            events.emit(Event::Started(started));
+                        }
+                    }
+                    KitEvent::State(activity, state) => {
+                        events.emit(Event::State(state_event(&activity, state)));
+                    }
+                    KitEvent::Authorization(authorization) => {
+                        events.emit(Event::Permissions(permissions_of(authorization, false)));
+                    }
                 }
             }
         })
@@ -96,7 +102,7 @@ impl LiveActivityBackend for ActivityKitBackend {
     /// no event, so no thread waits for one.
     fn attach(&self, events: BackendContext) -> Result<()> {
         if self.attached.set(()).is_err() {
-            return Err(already_connected());
+            return Err(Error::already_connected());
         }
         if Kit::authorization(&self.kit).supported {
             forward_events(&self.kit, events, self.tokens.clone())?;
@@ -161,8 +167,11 @@ impl LiveActivityBackend for ActivityKitBackend {
 mod tests {
     use super::*;
     use crate::{
-        ActionEvent, LiveActivity, block_on,
-        ios::fake::{FakeAck, FakeKit, Log},
+        ActionEvent, LiveActivity, StartedEvent, StateEvent, block_on,
+        ios::{
+            Apple, Authorization,
+            fake::{FakeAck, FakeKit, Log},
+        },
     };
     use std::{sync::mpsc, time::Duration};
 
@@ -229,6 +238,66 @@ mod tests {
         assert_eq!(held.push_to_start.as_deref(), Some("abcd"));
         assert_eq!(held.activities, [token]);
         // When the kit's events end, so does the thread.
+        kit.close_events();
+    }
+
+    #[test]
+    fn req_e_002_starts_states_and_permissions_reach_the_sink() {
+        // REQ-E-002
+        let kit = FakeKit::default();
+        let apple = Apple::new(kit.clone());
+        let (seen, events) = mpsc::channel();
+        let context = BackendContext::new(move |event: Event| seen.send(event).unwrap());
+        forward_events(&kit, context, TokenBook::default()).unwrap();
+        let next = || events.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        // A layout activity that began, also one a push started, comes with its record.
+        let start = crate::parse_request(
+            "start_layout",
+            serde_json::json!({"activityKey":"ride:7","schemaVersion":2,"fallback":"notification",
+                "layout":{"lockScreen":{"type":"text","bind":"eta"}},
+                "snapshot":{"revision":0,"values":{"eta":"4 min"}}}),
+        )
+        .unwrap();
+        let record = block_on(apple.start_layout(start)).unwrap();
+        kit.send_event(KitEvent::Started(kit.handle(&record.id, "ride:7")));
+        assert_eq!(
+            next(),
+            Event::Started(StartedEvent {
+                record: record.clone()
+            })
+        );
+        // A template activity is no layout activity: nothing is reported of its start.
+        let job = StartInput::progress("job:1", "Job", "Running", 0.3);
+        let template = block_on(apple.start_template(job)).unwrap();
+        kit.send_event(KitEvent::Started(kit.handle(&template.id, "job:1")));
+
+        // A new state of any activity, a template's among them.
+        kit.send_event(KitEvent::State(
+            kit.handle(&template.id, "job:1"),
+            activitykit::State::Dismissed,
+        ));
+        assert_eq!(
+            next(),
+            Event::State(StateEvent {
+                activity_id: template.id.clone(),
+                activity_key: Some("job:1".into()),
+                state: crate::ActivityState::Dismissed,
+            })
+        );
+
+        // The permissions after the person turned Live Activities off.
+        kit.send_event(KitEvent::Authorization(Authorization {
+            supported: true,
+            enabled: false,
+            buttons: true,
+            frequent_pushes: false,
+        }));
+        let Event::Permissions(permissions) = next() else {
+            panic!("a change of the authorization is a permissions event");
+        };
+        assert_eq!(permissions.live_activities, crate::PermissionState::Denied);
+        assert_eq!(permissions.frequent_pushes, crate::PermissionState::Denied);
         kit.close_events();
     }
 

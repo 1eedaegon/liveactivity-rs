@@ -102,8 +102,8 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
         &self.engine
     }
 
-    /// Drains the taps Android queued and hands each to the event sink, oldest first. Answers how many it handed
-    /// over. A host calls this, or `sync_events`, when its Android side signals a stored event and when the
+    /// Drains the taps and dismissals Android queued and hands each to the event sink, oldest first. Answers how
+    /// many it handed over. A host calls this, or `sync_events`, when its Android side signals a stored event and when the
     /// application starts or resumes: liveupdate's receiver stores taps also while the app does not run.
     ///
     /// # Errors
@@ -115,28 +115,32 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
             return Ok(0);
         };
         let _pump = self.pump.lock().unwrap_or_else(PoisonError::into_inner);
-        let taps = match &self.layouts {
-            // With the layouts' store a tap names its activity's key, and one on an undeclared action is dropped.
-            Some((layouts, _)) => layouts.taps(&self.engine)?,
+        let queued = match &self.layouts {
+            // With the layouts' store an event names its activity's key, and a tap on an undeclared action is
+            // dropped.
+            Some((layouts, _)) => layouts.events(&self.engine)?,
             None => self
                 .engine
                 .events()
                 .map_err(convert::error)?
                 .events
                 .into_iter()
-                .filter_map(|event| match event.kind {
-                    EventKind::Action { action_id } => Some(crate::ActionEvent {
+                .map(|event| match event.kind {
+                    EventKind::Action { action_id } => Event::Action(crate::ActionEvent {
                         action_id,
                         activity_id: event.activity_id,
                         activity_key: None,
                     }),
-                    EventKind::Dismissed => None,
+                    EventKind::Dismissed => Event::State(crate::StateEvent {
+                        activity_id: event.activity_id,
+                        activity_key: None,
+                        state: crate::ActivityState::Dismissed,
+                    }),
                 })
                 .collect(),
         };
-        let count = taps.len();
-        taps.into_iter()
-            .for_each(|tap| events.emit(Event::Action(tap)));
+        let count = queued.len();
+        queued.into_iter().for_each(|event| events.emit(event));
         Ok(count)
     }
 
@@ -175,7 +179,7 @@ impl<D: Driver + 'static> LiveActivityBackend for LiveUpdateBackend<D> {
         // A backend is connected once.
         self.events
             .set(events)
-            .map_err(|_| crate::ios::already_connected())
+            .map_err(|_| Error::already_connected())
     }
 
     fn capabilities(&self) -> BackendFuture<'_, Capabilities> {

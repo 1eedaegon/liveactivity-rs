@@ -40,6 +40,10 @@ pub(crate) fn start_of(spec: StartSpec) -> activitykit::Result<Start> {
         Some(at) => start.timestamp(time(at)),
         None => start,
     };
+    let start = match spec.relevance {
+        Some(score) => start.relevance(score),
+        None => start,
+    };
     Ok(match spec.push {
         Some(LayoutPush::Token) => start.push(Push::Token),
         Some(LayoutPush::Channel(id)) => start.push(Push::Channel(ChannelId::new(id)?)),
@@ -53,8 +57,16 @@ pub(crate) fn update_of(spec: UpdateSpec) -> Update {
         Some(at) => update.stale_at(time(at)),
         None => update,
     };
-    match spec.timestamp {
+    let update = match spec.timestamp {
         Some(at) => update.timestamp(time(at)),
+        None => update,
+    };
+    let update = match spec.relevance {
+        Some(score) => update.relevance(score),
+        None => update,
+    };
+    match spec.alert {
+        Some(alert) => update.alert(activitykit::Alert::new(alert.title, alert.body)),
         None => update,
     }
 }
@@ -77,8 +89,12 @@ pub(crate) fn end_of(spec: EndSpec) -> End {
         Some(at) => end.stale_at(time(at)),
         None => end,
     };
-    match spec.timestamp {
+    let end = match spec.timestamp {
         Some(at) => end.timestamp(time(at)),
+        None => end,
+    };
+    match spec.relevance {
+        Some(score) => end.relevance(score),
         None => end,
     }
 }
@@ -86,6 +102,15 @@ pub(crate) fn end_of(spec: EndSpec) -> End {
 impl Acknowledge for Acknowledgement {
     fn acknowledge(&self) {
         Acknowledgement::acknowledge(self);
+    }
+}
+
+fn authorization_of(authorization: activitykit::Authorization) -> Authorization {
+    Authorization {
+        supported: authorization.supported,
+        enabled: authorization.enabled,
+        buttons: authorization.buttons,
+        frequent_pushes: authorization.frequent_pushes,
     }
 }
 
@@ -111,6 +136,13 @@ fn kit_event(event: Event) -> Option<KitEvent<Activity, Acknowledgement>> {
             token: token.to_string(),
         }),
         Event::Updated { activity, .. } => Some(KitEvent::Updated(activity)),
+        Event::Started { activity, .. } => Some(KitEvent::Started(activity)),
+        Event::State {
+            activity, state, ..
+        } => Some(KitEvent::State(activity, state)),
+        Event::Authorization(authorization) => {
+            Some(KitEvent::Authorization(authorization_of(authorization)))
+        }
         _ => None,
     }
 }
@@ -131,13 +163,7 @@ impl Kit for ActivityKit {
     }
 
     fn authorization(&self) -> Authorization {
-        let authorization = ActivityKit::authorization(self);
-        Authorization {
-            supported: authorization.supported,
-            enabled: authorization.enabled,
-            buttons: authorization.buttons,
-            frequent_pushes: authorization.frequent_pushes,
-        }
+        authorization_of(ActivityKit::authorization(self))
     }
 
     async fn start(&self, spec: StartSpec) -> activitykit::Result<Activity> {
@@ -189,6 +215,10 @@ impl Handle for Activity {
         Activity::timestamp(self).and_then(millis)
     }
 
+    fn relevance(&self) -> f64 {
+        Activity::relevance(self)
+    }
+
     fn degraded_features(&self) -> Vec<String> {
         Activity::degraded_features(self)
     }
@@ -221,13 +251,15 @@ mod tests {
             revision: 5,
             stale_at: Some(1_000),
             timestamp: Some(2_000),
+            relevance: Some(80.0),
             push,
         };
         let expected = Start::new(layout.clone(), values())
             .key("rec")
             .revision(5)
             .stale_at(time(1_000))
-            .timestamp(time(2_000));
+            .timestamp(time(2_000))
+            .relevance(80.0);
         assert_eq!(
             debug(start_of(spec(None)).unwrap()),
             debug(expected.clone())
@@ -245,11 +277,31 @@ mod tests {
             revision: 6,
             stale_at: None,
             timestamp: Some(u64::MAX),
+            relevance: Some(20.0),
+            alert: Some(crate::Alert {
+                title: "Stopped".into(),
+                body: "Tap to resume".into(),
+            }),
         };
+        // REQ-I-001, REQ-I-002
         let expected = Update::new(values())
             .revision(6)
-            .timestamp(time(LATEST_MILLIS));
+            .timestamp(time(LATEST_MILLIS))
+            .relevance(20.0)
+            .alert(activitykit::Alert::new("Stopped", "Tap to resume"));
         assert_eq!(debug(update_of(update)), debug(expected));
+        let silent = UpdateSpec {
+            values: values(),
+            revision: 7,
+            stale_at: None,
+            timestamp: None,
+            relevance: None,
+            alert: None,
+        };
+        assert_eq!(
+            debug(update_of(silent)),
+            debug(Update::new(values()).revision(7))
+        );
 
         let end = |policy, values: Option<Values>| EndSpec {
             policy,
@@ -257,6 +309,7 @@ mod tests {
             values,
             stale_at: None,
             timestamp: None,
+            relevance: None,
         };
         assert_eq!(
             end_of(end(EndPolicy::Immediate {}, None)),
@@ -267,6 +320,11 @@ mod tests {
             end_of(end(EndPolicy::After { at: 9_000 }, Some(values()))),
             End::after(time(9_000)).values(values()).revision(7)
         );
+        let relevant = EndSpec {
+            relevance: Some(5.0),
+            ..end(EndPolicy::Default {}, None)
+        };
+        assert_eq!(end_of(relevant), End::default().relevance(5.0));
         assert_eq!(millis(time(1_800_000_000_000)), Some(1_800_000_000_000));
         assert_eq!(millis(UNIX_EPOCH - Duration::from_secs(1)), None);
     }

@@ -29,11 +29,13 @@
 
 pub mod android;
 mod backend;
+mod blocking;
 
 /// The contract alone: the requests, records, layout types, errors and checks, without the service. A framework
 /// plugin re-exports this as its own types.
 pub mod contract {
     pub use crate::error::{ERROR_CODES, Error, Result};
+    pub use crate::event::{StartedEvent, StateEvent};
     pub use crate::image::{
         ImageInput, MAX_IMAGE_BYTES, MAX_IMAGE_HEIGHT, MAX_IMAGE_WIDTH, check_image,
     };
@@ -65,12 +67,12 @@ pub use ::activitykit;
 #[doc(no_inline)]
 pub use ::liveupdate;
 pub use backend::{BackendFuture, LiveActivityBackend};
+pub use blocking::{block_on, wait};
 pub use error::{ERROR_CODES, Error, Result};
-pub use event::{BackendContext, Event, EventSink};
+pub use event::{BackendContext, Event, EventSink, StartedEvent, StateEvent};
 pub use image::{
     ImageInput, MAX_IMAGE_BYTES, MAX_IMAGE_HEIGHT, MAX_IMAGE_WIDTH, check_image, write as write_png,
 };
-pub use ios::{block_on, wait};
 pub use layout::*;
 pub use models::*;
 pub use native::{UnsupportedBackend, connect_native};

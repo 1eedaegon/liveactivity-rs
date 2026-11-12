@@ -232,6 +232,26 @@ them. Two rules matter for the application:
   pushes above the app's revisions.
 - The app's own updates do not come back as `Event::Updated`.
 
+## Relevance and alerts
+
+Two members of a layout request reach ActivityKit beside the content.
+
+```rust
+let mut snapshot = LayoutSnapshot::new(2, values);
+snapshot.relevance = Some(90.0);
+let mut update = LayoutUpdateInput::new(&record.id, snapshot);
+update.alert = Some(Alert::new("Delivery arrived", "Your parcel is at the door"));
+live.update_layout(update).await?;
+```
+
+- `relevance` says which of the application's activities the Dynamic Island shows first: the
+  highest score wins. A start, an update and the final content of an end take one. A snapshot
+  without it keeps the activity's score, which is 0 at first, and the record reports a score other
+  than 0.
+- `alert` comes with an update. The device lights up, the Dynamic Island expands (without one, the
+  Lock Screen presentation shows as a banner), and an Apple Watch shows the title and the body.
+  The sound is the system's default.
+
 ## 8. Settings of the kit
 
 `ActivityKitBackend::new()` uses activitykit's default settings, and so does a builder without a

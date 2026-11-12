@@ -54,6 +54,14 @@ impl Error {
         )
     }
 
+    /// A backend takes one event sink: a second connection would share, and so split, the platform's events.
+    pub(crate) fn already_connected() -> Self {
+        Self::new(
+            "CONFLICT",
+            "The backend is already connected to an event sink",
+        )
+    }
+
     /// The backend does not provide what the request asks for.
     pub fn unsupported_feature(message: &str) -> Self {
         Self::new("UNSUPPORTED_FEATURE", message)

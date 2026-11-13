@@ -10,5 +10,5 @@
 - [x] Update the contract, setup and integration documents and the README.
 - [x] Review the change; refuse a content that uses what the device does not offer, answer an end again as iOS
       does, and forget a start that Android refused to post.
-- [ ] Run the host gates and the devices.
-- [ ] Take the engines from crates.io once both versions are published.
+- [x] Run the host gates and the devices.
+- [x] Take the engines from crates.io once both versions are published.

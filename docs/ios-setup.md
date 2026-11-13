@@ -1,7 +1,7 @@
 # iOS setup
 
 On iOS `liveactivity` runs on the [activitykit](https://github.com/1eedaegon/activitykit-rs) crate
-(0.3). The Rust side needs no code beyond the builder:
+(0.4). The Rust side needs no code beyond the builder:
 
 ```rust
 let live = liveactivity::LiveActivity::builder()
@@ -251,6 +251,37 @@ live.update_layout(update).await?;
 - `alert` comes with an update. The device lights up, the Dynamic Island expands (without one, the
   Lock Screen presentation shows as a banner), and an Apple Watch shows the title and the body.
   The sound is the system's default.
+
+## Links, accessibility and motion
+
+They are members of the layout, so the widget extension of step 4 draws them and the Rust side
+adds nothing: [the layout DSL](contract.md#the-layout-dsl) has the rules. Take the Swift package of
+activitykit 0.4 for them; the widget of 0.3 refuses a layout that has one.
+
+- **Links.** `layout.url` and a `link` node open the app with a URL. The app receives it like any
+  URL it is opened with, so there is nothing to register in Info.plist unless other apps should
+  open the scheme too:
+
+  ```swift
+  WindowGroup {
+      ContentView().onOpenURL { url in
+          // Validate before acting: a pushed layout carries a server's URL.
+          route(url)
+      }
+  }
+  ```
+
+  In UIKit the URL comes to `scene(_:openURLContexts:)`, or to
+  `scene(_:willConnectTo:options:)` when the tap launched the app. No event reports it.
+- **Accessibility.** A node's `accessibility` gives VoiceOver a label, a value and a hint, or hides
+  the node. A `path`, an `image` and a `custom` view have no text of their own: label them or hide
+  them.
+- **Motion.** A style's `contentTransition` and a node's `transition` choose among the transitions
+  the system runs in a Live Activity. It runs no others, and animates at most two seconds.
+- **Privacy.** A node with `privacy: "sensitive"` is hidden on a locked device and in the always-on
+  display when the person has asked for that.
+- **The Dynamic Island.** `island.expanded.priority`, `island.expanded.belowIfTooWide` and
+  `island.margins` are the system's own options of the expanded regions and of each presentation.
 
 ## 8. Settings of the kit
 

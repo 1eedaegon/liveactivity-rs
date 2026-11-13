@@ -18,10 +18,16 @@
 - The re-exported types gained public members and a variant, so a struct literal and a match over `Element`
   written against 0.2 need the new ones. The crate is 0.x: a minor release, `feat:` without `!`.
 - JSON written for 0.2 reads unchanged. Every new member is optional.
-- The Android layout store of 0.2 loads unchanged. Receipts that liveupdate 0.1 wrote are read by liveupdate 0.2.
 - liveupdate 0.2 renamed its Android package to `io.github.gon.liveupdate`. A host that names the AAR's classes
   in Kotlin or in a manifest renames them when it takes the new AAR; the JNI transport of this crate follows by
   itself.
+- With the package, liveupdate renamed where it keeps its receipts and stored events, and does not read those of
+  0.1. Android removes an application's notifications when the application is updated, so an activity that ran
+  across the update is gone from the screen under any version. After the update to this release it is also gone
+  from the lists, where it would have read `dismissed`: its id is `NOT_FOUND`, its key starts a new activity, and
+  a tap that 0.1 stored is not delivered. The Android layout store of 0.2 loads unchanged, and forgets the
+  activities liveupdate no longer lists. Seen on a phone with Android 17, updated in place with two running
+  activities.
 - An activity that mixed a content with projected snapshots was drawn in the style of its first snapshot. It is
   now drawn in each snapshot's own style where the device changes styles, and refused elsewhere.
 
@@ -37,8 +43,8 @@
   answer a corrected start as a conflict: the backend ends that receipt at once. A refused update cannot be
   taken back, since liveupdate has no call for it: the corrected content needs a higher revision, and the
   record reads `unknown` until one is shown. Both are documented in the contract.
-- **Published engines.** The change is developed against the engines' release commits. It merges when both
-  versions are on crates.io, since the manifest names them.
+- **Published engines.** The change was developed against the engines' release commits, before liveupdate 0.2.0
+  was on crates.io. The published sources are those commits', and the tests ran again on them.
 
 ## Test plan
 

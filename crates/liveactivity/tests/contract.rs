@@ -249,3 +249,51 @@ fn req_c_006_a_wrong_member_of_another_platform_reaches_no_backend() {
         "INVALID_INPUT"
     );
 }
+
+#[test]
+fn req_i_003_a_wrong_member_of_the_ios_surface_reaches_no_backend() {
+    // REQ-I-003
+    // On a host, which is neither platform, a right request is refused by the backend and a wrong one before it.
+    let live = LiveActivity::builder().build().unwrap();
+    let start = |layout: serde_json::Value| {
+        let request = json!({"activityKey":"ride:7","schemaVersion":2,"fallback":"notification",
+            "layout":layout,"snapshot":{"revision":0,"values":{"eta":"4 min"}}});
+        match liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", request)
+        {
+            Ok(input) => block_on(live.start_layout(input)).unwrap_err().code,
+            Err(error) => error.code,
+        }
+    };
+    let text = |members: serde_json::Value| {
+        let mut node = json!({"type":"text","bind":"eta"});
+        node.as_object_mut()
+            .unwrap()
+            .extend(members.as_object().unwrap().clone());
+        json!({"lockScreen":node})
+    };
+    let link = |url: &str| json!({"lockScreen":{"type":"link","url":url,"child":{"type":"text","bind":"eta"}}});
+
+    for right in [
+        json!({"lockScreen":{"type":"text","bind":"eta"},"url":"myapp://rides/7"}),
+        text(json!({"accessibility":{"label":"Arrival","value":{"bind":"eta"}}})),
+        text(json!({"accessibility":{"hidden":true}})),
+        text(json!({"transition":"pushLeading","if":"eta"})),
+        text(json!({"privacy":"sensitive"})),
+        link("https://example.com/rides/7"),
+    ] {
+        assert_eq!(start(right.clone()), "UNSUPPORTED_PLATFORM", "{right}");
+    }
+    for wrong in [
+        json!({"lockScreen":{"type":"text","bind":"eta"},"url":"rides/7"}),
+        text(json!({"accessibility":{}})),
+        text(json!({"accessibility":{"hidden":true,"label":"Arrival"}})),
+        text(json!({"accessibility":{"label":""}})),
+        text(json!({"transition":"spin"})),
+        text(json!({"privacy":"public"})),
+        link("no scheme"),
+        json!({"lockScreen":{"type":"button","actionId":"go",
+            "child":{"type":"link","url":"myapp://x","child":{"type":"text","bind":"eta"}}}}),
+    ] {
+        assert_eq!(start(wrong.clone()), "INVALID_INPUT", "{wrong}");
+    }
+}

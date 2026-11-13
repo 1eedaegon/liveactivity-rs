@@ -1,6 +1,7 @@
 //! A layout activity on Android: the projection of its lock screen tree and values onto a liveupdate schema-v2
 //! request, which liveupdate's renderer draws with Android's notification styles. Only the lock screen is walked,
-//! depth first in document order; a node shows when its `if` value is truthy and its `unless` value is not.
+//! depth first in document order; a node shows when its `if` value is truthy and its `unless` value is not. What a
+//! node says to a screen reader is iOS's: Android reads the notification's title and text.
 
 use crate::layout::{Element, ImageSource, Layout, LayoutSnapshot, Node, Value};
 use std::collections::BTreeMap;
@@ -13,7 +14,7 @@ const MAX_STATUS: usize = 240;
 const MAX_ACTION_TITLE: usize = 64;
 const MAX_ACTIONS: usize = liveupdate::MAX_ACTIONS;
 
-/// What the projection needs from the app around it.
+/// What the projection needs beside the layout and its values: the app around it, and how the activity started.
 pub(crate) struct Environment<'a> {
     /// The title of a layout without a text.
     pub(crate) app_name: &'a str,
@@ -21,13 +22,16 @@ pub(crate) struct Environment<'a> {
     pub(crate) samsung_now_bar: bool,
     /// The app-file path of a picture that `write_image` wrote, when it exists and liveupdate can draw it.
     pub(crate) image: &'a dyn Fn(&str) -> Option<String>,
+    /// Whether a locked screen shows the notification's content.
+    pub(crate) public: bool,
 }
 
 /// One layout snapshot as liveupdate takes it, and what the projection left out.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Projection {
     pub(crate) snapshot: liveupdate::Snapshot,
-    /// `layout.<type>` for the shown nodes left out, then the parts of the request Android does not draw.
+    /// `layout.<type>` for the shown nodes left out and `layout.<member>` for what a shown node asks in vain, then
+    /// the parts of the request Android does not draw.
     pub(crate) degraded: Vec<String>,
 }
 
@@ -67,7 +71,10 @@ pub(crate) fn project(
     environment: &Environment<'_>,
 ) -> Projection {
     let values = &snapshot.values;
-    let mut shown = Shown::default();
+    let mut shown = Shown {
+        public: environment.public,
+        ..Shown::default()
+    };
     walk(&layout.lock_screen, values, &mut shown);
 
     let chip = match (shown.progress, shown.timer) {
@@ -128,6 +135,8 @@ pub(crate) fn project(
         (styled, "layout.styles"),
         (layout.background.is_some(), "layout.background"),
         (layout.keyline.is_some(), "layout.keyline"),
+        // The notification opens the application, not a URL of the layout.
+        (layout.url.is_some(), "layout.url"),
     ] {
         if part.0 {
             degraded.push(part.1.to_owned());
@@ -142,11 +151,11 @@ pub(crate) fn project(
             timer: None,
             stale_at: snapshot.stale_at,
             presentation: Some(liveupdate::AndroidPresentation {
-                style,
                 short_critical_text: chip,
                 large_icon: large_icon.map(liveupdate::IconSource::AppFile),
                 actions: shown.actions,
                 samsung_now_bar,
+                ..liveupdate::AndroidPresentation::new(style)
             }),
         },
         degraded,
@@ -164,11 +173,20 @@ struct Shown {
     /// The first shown timer: its start, its end and whether it counts down.
     timer: Option<(f64, f64, bool)>,
     degraded: Vec<String>,
+    /// Whether a locked screen shows the notification's content, and so what a node marks as private.
+    public: bool,
 }
 
 fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
     if !visible(node, values) {
         return;
+    }
+    // A notification changes without a transition. One that a locked screen hides shows nothing private there.
+    if node.transition.is_some() {
+        note(&mut shown.degraded, "transition");
+    }
+    if node.privacy.is_some() && shown.public {
+        note(&mut shown.degraded, "privacy");
     }
     match &node.element {
         Element::Vstack { children, .. }
@@ -200,17 +218,15 @@ fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
         } => shown.files.push(file.clone()),
         Element::Button { action_id, child } => {
             let mut inside = Vec::new();
-            let label = button_label(child, values, &mut inside);
+            let label = button_label(child, values, shown.public, &mut inside);
             // liveupdate takes each action id once.
             let fresh = !shown.actions.iter().any(|action| &action.id == action_id);
             match label {
                 Some(label) if fresh && shown.actions.len() < MAX_ACTIONS => {
-                    shown.actions.push(liveupdate::NotificationAction {
-                        id: action_id.clone(),
-                        title: cut(&label, MAX_ACTION_TITLE),
-                        icon: None,
-                        authentication_required: false,
-                    });
+                    shown.actions.push(liveupdate::NotificationAction::new(
+                        action_id.clone(),
+                        cut(&label, MAX_ACTION_TITLE),
+                    ));
                     inside
                         .iter()
                         .for_each(|kind| note(&mut shown.degraded, kind));
@@ -222,21 +238,31 @@ fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
     }
 }
 
-/// The first shown text inside a button, which labels its action; every other shown node inside is left out.
+/// The first shown text inside a button, which labels its action. `inside` gets what the action leaves out: every
+/// other shown node, a transition, and on a notification that a locked screen shows (`public`) a privacy mark.
 fn button_label(
     node: &Node,
     values: &BTreeMap<String, Value>,
+    public: bool,
     inside: &mut Vec<&'static str>,
 ) -> Option<String> {
     let mut label = None;
     let mut first = true;
-    visit_shown(node, values, &mut |node| match &node.element {
-        Element::Vstack { .. } | Element::Hstack { .. } | Element::Zstack { .. } => {}
-        Element::Text { .. } if first => {
-            first = false;
-            label = text(node, values).filter(|text| !blank(text));
+    visit_shown(node, values, &mut |node| {
+        if node.transition.is_some() {
+            inside.push("transition");
         }
-        element => inside.push(kind(element)),
+        if node.privacy.is_some() && public {
+            inside.push("privacy");
+        }
+        match &node.element {
+            Element::Vstack { .. } | Element::Hstack { .. } | Element::Zstack { .. } => {}
+            Element::Text { .. } if first => {
+                first = false;
+                label = text(node, values).filter(|text| !blank(text));
+            }
+            element => inside.push(kind(element)),
+        }
     });
     label
 }
@@ -419,6 +445,7 @@ fn kind(element: &Element) -> &'static str {
         Element::Gauge { .. } => "gauge",
         Element::TimerText { .. } => "timerText",
         Element::Button { .. } => "button",
+        Element::Link { .. } => "link",
         Element::Custom { .. } => "custom",
     }
 }

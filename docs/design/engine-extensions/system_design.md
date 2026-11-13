@@ -15,7 +15,8 @@ No member of this crate's own is added. The new members are the engines', where 
       { "type": "text", "value": "Arrived", "if": "arrived", "transition": "moveTop" },
       { "type": "link", "url": "myapp://rides/7/map", "child": { "type": "text", "value": "Map" } } ] },
     "island": { "margins": { "expanded": 8 },
-                "expanded": { "priority": { "leading": 100 }, "belowIfTooWide": ["leading"] } } },
+                "expanded": { "leading": { "type": "text", "bind": "eta" },
+                              "priority": { "leading": 100 }, "belowIfTooWide": ["leading"] } } },
   "styles": { "count": { "contentTransition": "numericText" } },
   "android": { "visibility": "private" },
   "snapshot": {

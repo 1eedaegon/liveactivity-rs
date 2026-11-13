@@ -1,5 +1,8 @@
 //! An in-memory Android driver and a string bridge over it. The driver behaves like the Android side: `post` makes
-//! a notification observable, `cancel` removes it, and storage keeps exactly what `write` received.
+//! a notification observable, `cancel` removes it, and storage keeps exactly what `write` received. The post of
+//! an ended record is its last content, which Android shows until its time and no longer observes. A post whose
+//! content names a URL of the scheme [`UNOPENED`] is refused, as Android refuses a URL that nothing in the
+//! application opens.
 #![allow(dead_code)]
 
 use liveactivity::liveupdate::{
@@ -13,12 +16,21 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
+/// The scheme of a URL that no activity of the application opens.
+pub const UNOPENED: &str = "nobody-opens-this:";
+
 pub struct MemoryState {
     pub capabilities: Capabilities,
     pub records: Vec<DriverRecord>,
     pub observed: BTreeMap<String, Observation>,
+    /// The ended records posted as their last content, by id.
+    pub finals: BTreeMap<String, DriverRecord>,
     pub events: EventBatch,
     pub posts: usize,
+    /// How many of the next posts fail as a platform that could not post, whatever they hold.
+    pub failing_posts: usize,
+    /// How often the capabilities were asked.
+    pub capability_calls: usize,
 }
 
 #[derive(Clone)]
@@ -42,8 +54,11 @@ impl Default for MemoryDriver {
                 },
                 records: Vec::new(),
                 observed: BTreeMap::new(),
+                finals: BTreeMap::new(),
                 events: EventBatch::default(),
                 posts: 0,
+                failing_posts: 0,
+                capability_calls: 0,
             })),
         }
     }
@@ -80,15 +95,37 @@ impl MemoryDriver {
         self.lock().events.events.push(event);
     }
 
+    /// Queues what the Android side queues when the host reports that the person opened the application from
+    /// the notification.
+    pub fn open(&self, id: &str, sequence: u64) {
+        let event: ActivityEvent = serde_json::from_value(json!({
+            "sequence": sequence,
+            "activityId": id,
+            "occurredAt": 1_800_000_000_000_u64,
+            "kind": {"kind": "opened"},
+        }))
+        .unwrap();
+        self.lock().events.events.push(event);
+    }
+
     /// The snapshot liveupdate last posted for `id`.
     pub fn posted(&self, id: &str) -> liveupdate::Snapshot {
         self.lock().observed[id].snapshot.clone()
+    }
+
+    /// A device that offers the extensions `offer` names.
+    pub fn offering(offer: fn(&mut PresentationCapabilities)) -> Self {
+        let driver = Self::default();
+        offer(&mut driver.lock().capabilities.presentation);
+        driver
     }
 }
 
 impl Driver for MemoryDriver {
     fn capabilities(&self) -> liveupdate::Result<Capabilities> {
-        Ok(self.lock().capabilities)
+        let mut state = self.lock();
+        state.capability_calls += 1;
+        Ok(state.capabilities)
     }
 
     fn read(&self) -> liveupdate::Result<Vec<DriverRecord>> {
@@ -107,6 +144,29 @@ impl Driver for MemoryDriver {
     fn post(&self, record: &DriverRecord) -> liveupdate::Result<()> {
         let mut state = self.lock();
         state.posts += 1;
+        if state.failing_posts > 0 {
+            state.failing_posts -= 1;
+            return Err(liveupdate::Error::new(
+                liveupdate::ErrorCode::NativeError,
+                "Posting failed.",
+            ));
+        }
+        let url = record
+            .snapshot
+            .presentation
+            .as_ref()
+            .and_then(|presentation| presentation.open_url.as_deref());
+        if url.is_some_and(|url| url.starts_with(UNOPENED)) {
+            return Err(liveupdate::Error::new(
+                liveupdate::ErrorCode::InvalidInput,
+                "No activity of the application opens the URL.",
+            ));
+        }
+        if record.state == ActivityState::Ended {
+            state.observed.remove(&record.id);
+            state.finals.insert(record.id.clone(), record.clone());
+            return Ok(());
+        }
         let promotion_state = if record.promotion_requested {
             PromotionState::Promoted
         } else {

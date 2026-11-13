@@ -12,6 +12,7 @@ pub(crate) fn start_request(input: StartInput) -> liveupdate::StartRequest {
         fallback: fallback(input.fallback),
         visibility: liveupdate::Visibility::Private,
         snapshot: live_snapshot(input.snapshot),
+        placement: liveupdate::Placement::Tagged,
     }
 }
 
@@ -74,8 +75,12 @@ pub(crate) fn capabilities(value: liveupdate::Capabilities, layouts: bool) -> Ca
         max_payload_bytes: 4096,
         layout: support(layouts),
         push: FeatureSupport::Unsupported,
-        // An Android content goes through the layout commands.
-        android_presentation: layouts.then_some(value.presentation),
+        // An Android content goes through the layout commands. A foreground placement is liveupdate's to offer and
+        // a start's to ask for, which no member of the contract does.
+        android_presentation: layouts.then_some(liveupdate::PresentationCapabilities {
+            foreground_placement: false,
+            ..value.presentation
+        }),
     }
 }
 

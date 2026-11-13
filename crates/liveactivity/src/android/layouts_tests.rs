@@ -32,6 +32,8 @@ impl liveupdate::Driver for FakeDriver {
                 images: true,
                 events: true,
                 samsung_now_bar: true,
+                // The extensions of liveupdate 0.2 are not offered: the rules for a device without them.
+                ..liveupdate::PresentationCapabilities::default()
             },
         })
     }
@@ -628,10 +630,7 @@ fn an_ended_id_is_not_found_before_the_revision_rules() {
         .unwrap();
     let same = snapshot(0, values("Snack", 0.2));
     assert_eq!(
-        code(
-            f.layouts
-                .update(&f.updates, update(&record.id, same.clone()))
-        ),
+        code(f.layouts.update(&f.updates, update(&record.id, same))),
         "NOT_FOUND"
     );
     assert_eq!(
@@ -641,13 +640,18 @@ fn an_ended_id_is_not_found_before_the_revision_rules() {
         )),
         "NOT_FOUND"
     );
+    // An end again answers the ended record, as on iOS: a final content, here one of a later revision, is not
+    // applied to an activity that is over.
     let again = LayoutEndInput {
         id: record.id.clone(),
         policy: EndPolicy::Immediate {},
-        snapshot: Some(same),
+        snapshot: Some(snapshot(5, values("Snack", 0.9))),
     };
-    assert_eq!(code(f.layouts.end(&f.updates, again)), "NOT_FOUND");
-    // A plain end again answers the ended record.
+    let answered = f.layouts.end(&f.updates, again).unwrap();
+    assert_eq!(
+        (answered.state, answered.snapshot.revision),
+        (crate::ActivityState::Ended, 0)
+    );
     let plain = LayoutEndInput {
         id: record.id,
         policy: EndPolicy::Immediate {},
@@ -753,4 +757,36 @@ fn a_start_with_a_push_is_projected_without_it() {
     let same = f.layouts.start(&f.updates, again).unwrap();
     assert_eq!(same.id, record.id);
     assert_eq!(f.android.0.lock().unwrap().starts, 1);
+}
+
+#[test]
+fn only_the_receipt_of_the_start_that_was_refused_is_one_never_posted() {
+    // What `forget_refused` ends: the receipt of this start, and no activity that shows something.
+    let f = fixture();
+    let started = f
+        .layouts
+        .start(&f.updates, start("snack:1", values("Snack", 0.2)))
+        .unwrap();
+    let shown = f.updates.list().unwrap().remove(0);
+    assert_eq!(shown.id, started.id);
+    let sent = shown.snapshot.clone();
+    // The activity is on screen: it is no receipt of a refused start, whatever content is compared.
+    assert!(!never_posted(&shown, "snack:1", &sent));
+    let unposted = liveupdate::ActivityRecord {
+        state: liveupdate::ActivityState::Unknown,
+        ..shown.clone()
+    };
+    assert!(never_posted(&unposted, "snack:1", &sent));
+    // Another key, another content, a template activity: none of them is this start.
+    assert!(!never_posted(&unposted, "snack:2", &sent));
+    let other = liveupdate::Snapshot {
+        title: "Another".into(),
+        ..sent.clone()
+    };
+    assert!(!never_posted(&unposted, "snack:1", &other));
+    let template = liveupdate::ActivityRecord {
+        schema_version: 1,
+        ..unposted
+    };
+    assert!(!never_posted(&template, "snack:1", &sent));
 }

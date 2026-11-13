@@ -125,17 +125,19 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
                 .map_err(convert::error)?
                 .events
                 .into_iter()
-                .map(|event| match event.kind {
-                    EventKind::Action { action_id } => Event::Action(crate::ActionEvent {
+                .filter_map(|event| match event.kind {
+                    EventKind::Action { action_id } => Some(Event::Action(crate::ActionEvent {
                         action_id,
                         activity_id: event.activity_id,
                         activity_key: None,
-                    }),
-                    EventKind::Dismissed => Event::State(crate::StateEvent {
+                    })),
+                    EventKind::Dismissed => Some(Event::State(crate::StateEvent {
                         activity_id: event.activity_id,
                         activity_key: None,
                         state: crate::ActivityState::Dismissed,
-                    }),
+                    })),
+                    // A kind the contract has no event for, such as an activity that was opened.
+                    _ => None,
                 })
                 .collect(),
         };

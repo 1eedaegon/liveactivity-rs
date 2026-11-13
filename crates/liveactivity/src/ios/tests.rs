@@ -795,3 +795,73 @@ fn req_i_002_an_alert_reaches_the_kit_with_its_update() {
     assert_eq!(block_on(apple.update_layout(blank)), Err(Error::invalid()));
     assert_eq!(kit.book().updates.len(), 2);
 }
+
+#[test]
+fn req_i_003_the_ios_surface_of_a_layout_reaches_the_kit() {
+    // REQ-I-003
+    use crate::layout::{
+        Accessibility, Bindable, Bound, ContentTransition, Element, ExpandedRegion, Privacy,
+        Transition,
+    };
+    let request = json!({"activityKey":"ride:7","schemaVersion":2,"fallback":"notification",
+        "layout":{
+            "url":"myapp://rides/7",
+            "lockScreen":{"type":"vstack","children":[
+                {"type":"text","bind":"eta","style":"count","privacy":"sensitive",
+                    "accessibility":{"label":"Arrival","value":{"bind":"eta"}}},
+                {"type":"text","value":"Arrived","if":"arrived","transition":"moveTop"},
+                {"type":"link","url":{"bind":"map"},"child":{"type":"text","value":"Map"}}]},
+            "island":{
+                "margins":{"expanded":8},
+                "expanded":{"leading":{"type":"text","bind":"eta"},
+                    "priority":{"leading":100},"belowIfTooWide":["leading"]}}},
+        "styles":{"count":{"contentTransition":"numericText"}},
+        "snapshot":{"revision":0,"values":{"eta":"4 min","arrived":false,"map":"myapp://rides/7/map"}}});
+    let (apple, kit) = apple();
+    let start = crate::parse_request::<LayoutStartInput>("start_layout", request).unwrap();
+    block_on(apple.start_layout(start.clone())).unwrap();
+
+    let layout = kit.book().starts[0].layout.clone();
+    assert_eq!(
+        layout.url,
+        Some(Bindable::Literal("myapp://rides/7".to_owned()))
+    );
+    let Element::Vstack { children, .. } = &layout.lock_screen.element else {
+        panic!("the lock screen is the stack that was sent");
+    };
+    assert_eq!(children[0].privacy, Some(Privacy::Sensitive));
+    assert_eq!(
+        children[0].accessibility,
+        Some(
+            Accessibility::new()
+                .label("Arrival")
+                .value(Bound::key("eta"))
+        )
+    );
+    assert_eq!(children[1].transition, Some(Transition::MoveTop));
+    assert!(
+        matches!(&children[2].element, Element::Link { url, .. } if *url == Bindable::Bound(Bound::key("map")))
+    );
+    assert_eq!(
+        layout.styles["count"].content_transition,
+        Some(ContentTransition::NumericText)
+    );
+    let island = layout.island.as_ref().unwrap();
+    assert!(island.margins.is_some());
+    let expanded = island.expanded.as_ref().unwrap();
+    assert_eq!(expanded.priority.as_ref().unwrap().leading, Some(100.0));
+    assert_eq!(
+        expanded.below_if_too_wide,
+        Some(vec![ExpandedRegion::Leading])
+    );
+
+    // A URL that a value gives is checked with every update, by the rule the start is checked by.
+    let wrong: LayoutSnapshot = serde_json::from_value(
+        json!({"revision":1,"values":{"eta":"3 min","arrived":false,"map":"not a url"}}),
+    )
+    .unwrap();
+    assert_eq!(
+        start.validate_update(&LayoutUpdateInput::new("id", wrong)),
+        Err(Error::invalid())
+    );
+}

@@ -497,7 +497,11 @@ fn ride_update(id: &str, revision: u64, android: Option<serde_json::Value>) -> s
 }
 
 fn android_with_files(test: &str) -> (LiveActivity, Receiver<Event>, MemoryDriver) {
-    let driver = MemoryDriver::default();
+    android_on(MemoryDriver::default(), test)
+}
+
+/// The Android default backend with the app's files, on `driver`.
+fn android_on(driver: MemoryDriver, test: &str) -> (LiveActivity, Receiver<Event>, MemoryDriver) {
     let backend = LiveUpdateBackend::new(driver.clone()).with_files(
         liveactivity::android::AndroidFiles::new("Mochi", app_files(test)),
     );
@@ -536,7 +540,8 @@ fn req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection() {
     );
     assert_eq!(record.snapshot.android, start.snapshot.android);
 
-    // An update with its content and an alert: Android shows the content silently and says so.
+    // An update with its content and an alert, on a device that alerts once: Android shows the content silently
+    // and says so.
     let mut loud = ride_update(&record.id, 1, Some(driving(70, "2 min")));
     loud["alert"] = serde_json::json!({ "title": "Almost there", "body": "2 minutes away" });
     let loud = liveactivity::parse_request("update_layout", loud).unwrap();
@@ -554,8 +559,8 @@ fn req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection() {
     let updated = block_on(live.update_layout(quiet)).unwrap();
     assert!(!updated.degraded_features.contains(&"alert".to_owned()));
 
-    // Android keeps the style of an activity's first snapshot: a content of another style is a valid request
-    // that this platform cannot show, and the activity keeps what it shows.
+    // This device keeps the style an activity shows: a content of another style is a valid request that it
+    // cannot show, and the activity keeps what it shows.
     let mut other = driving(90, "now");
     other["presentation"]["style"] = serde_json::json!({ "kind": "standard" });
     let other =
@@ -578,7 +583,7 @@ fn req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection() {
     assert_eq!(driver.posted(&other.id).title, "6 min");
     assert_eq!(other.snapshot.android, None);
 
-    // An activity that began with a projection takes a content of the style it was projected to, and no other.
+    // An activity that began with a projection takes a content of the style it was projected to, and here no other.
     let standard = serde_json::json!({ "title": "Arrived", "status": "At the door",
         "presentation": { "style": { "kind": "standard" } } });
     let refused =
@@ -683,6 +688,36 @@ fn req_a_003_capabilities_report_the_styles_the_device_draws() {
     assert!(!styles.progress_style);
     let wire = serde_json::to_value(&capabilities).unwrap();
     assert_eq!(wire["androidPresentation"]["metricStyle"], true);
+    // This device offers none of the extensions.
+    assert!(!(styles.style_change || styles.delayed_end || styles.alert || styles.links));
+
+    // One that offers them all reports each, except the placement, which no member of the contract asks for.
+    {
+        let mut state = driver.lock();
+        let offered = &mut state.capabilities.presentation;
+        offered.chronometer = true;
+        offered.links = true;
+        offered.style_change = true;
+        offered.delayed_end = true;
+        offered.foreground_placement = true;
+        offered.alert = true;
+        offered.public_version = true;
+        offered.branding = true;
+    }
+    let wire = serde_json::to_value(block_on(live.capabilities()).unwrap()).unwrap();
+    let offered = &wire["androidPresentation"];
+    for extension in [
+        "chronometer",
+        "links",
+        "styleChange",
+        "delayedEnd",
+        "alert",
+        "publicVersion",
+        "branding",
+    ] {
+        assert_eq!(offered[extension], true, "{extension}");
+    }
+    assert_eq!(offered["foregroundPlacement"], false);
 
     // A backend that shows no Android content reports no styles, and its JSON has no such member.
     for (_, connect) in BACKENDS {
@@ -692,4 +727,480 @@ fn req_a_003_capabilities_report_the_styles_the_device_draws() {
         let wire = serde_json::to_value(&capabilities).unwrap();
         assert!(wire.get("androidPresentation").is_none());
     }
+}
+
+fn style_of(snapshot: &liveactivity::liveupdate::Snapshot) -> liveactivity::liveupdate::Template {
+    snapshot.template().unwrap()
+}
+
+fn layout_update(request: serde_json::Value) -> liveactivity::LayoutUpdateInput {
+    liveactivity::parse_request("update_layout", request).unwrap()
+}
+
+/// A content of the standard style, which the layout of [`ride`] does not project to.
+fn arrived() -> serde_json::Value {
+    serde_json::json!({ "title": "Arrived", "status": "At the door",
+        "presentation": { "style": { "kind": "standard" } } })
+}
+
+#[test]
+fn req_a_005_a_snapshot_of_another_style_is_shown_where_the_device_changes_styles() {
+    // REQ-A-005
+    use liveactivity::liveupdate::Template;
+    let offering = MemoryDriver::offering(|offered| offered.style_change = true);
+    let (live, _events, driver) = android_on(offering, "style-change");
+
+    // The layout projects to a progress. A content of another style replaces it, and the next snapshot without
+    // a content is the layout's own style again.
+    let record = block_on(live.start_layout(ride("ride:7", None))).unwrap();
+    assert_eq!(style_of(&driver.posted(&record.id)), Template::Progress);
+    let update = layout_update(ride_update(&record.id, 1, Some(arrived())));
+    block_on(live.update_layout(update)).unwrap();
+    let shown = driver.posted(&record.id);
+    assert_eq!(
+        (style_of(&shown), shown.title.as_str()),
+        (Template::Standard, "Arrived")
+    );
+    let update = layout_update(ride_update(&record.id, 2, None));
+    let updated = block_on(live.update_layout(update)).unwrap();
+    assert_eq!(style_of(&driver.posted(&record.id)), Template::Progress);
+    assert_eq!(updated.snapshot.revision, 2);
+
+    // An activity that began with a content is projected in the layout's style, not in the content's.
+    let other = block_on(live.start_layout(ride("ride:8", Some(arrived())))).unwrap();
+    assert_eq!(style_of(&driver.posted(&other.id)), Template::Standard);
+    let update = layout_update(ride_update(&other.id, 1, None));
+    block_on(live.update_layout(update)).unwrap();
+    let projected = driver.posted(&other.id);
+    assert_eq!(style_of(&projected), Template::Progress);
+    let liveactivity::PresentationStyle::Progress(style) = projected.presentation.unwrap().style
+    else {
+        panic!("the layout's progress is projected");
+    };
+    assert_eq!(style.progress, 700);
+
+    // A device that keeps the style an activity shows refuses both, and the activity keeps what it shows.
+    let (live, _events, driver) = android_with_files("style-kept");
+    let record = block_on(live.start_layout(ride("ride:7", Some(arrived())))).unwrap();
+    let update = layout_update(ride_update(&record.id, 1, None));
+    let refused = block_on(live.update_layout(update)).unwrap_err();
+    assert_eq!(refused.code, "UNSUPPORTED_FEATURE");
+    let update = layout_update(ride_update(&record.id, 1, Some(driving(50, "3 min"))));
+    let refused = block_on(live.update_layout(update)).unwrap_err();
+    assert_eq!(refused.code, "UNSUPPORTED_FEATURE");
+    assert_eq!(driver.posted(&record.id).revision, 0);
+    assert_eq!(
+        block_on(live.list_layout()).unwrap()[0].snapshot.revision,
+        0
+    );
+}
+
+#[test]
+fn req_i_002_an_alert_alerts_on_android_where_the_device_offers_it() {
+    // REQ-I-002
+    let offering = MemoryDriver::offering(|offered| offered.alert = true);
+    let (live, _events, driver) = android_on(offering, "alert");
+    let alerting = |posted: liveactivity::liveupdate::Snapshot| posted.presentation.unwrap().alert;
+    let loud = |id: &str, revision: u64, android: Option<serde_json::Value>| {
+        let mut update = ride_update(id, revision, android);
+        update["alert"] = serde_json::json!({ "title": "Almost there", "body": "2 minutes away" });
+        layout_update(update)
+    };
+
+    // A projected snapshot alerts with its revision, and nothing is named as left out.
+    let record = block_on(live.start_layout(ride("ride:7", None))).unwrap();
+    assert!(!alerting(driver.posted(&record.id)));
+    let updated = block_on(live.update_layout(loud(&record.id, 1, None))).unwrap();
+    assert!(alerting(driver.posted(&record.id)));
+    assert!(!updated.degraded_features.contains(&"alert".to_owned()));
+    // The alert is of that revision alone, and the record keeps the snapshot as it was sent.
+    let quiet = layout_update(ride_update(&record.id, 2, None));
+    block_on(live.update_layout(quiet)).unwrap();
+    assert!(!alerting(driver.posted(&record.id)));
+
+    // A content alerts too, without saying so itself. This one has another style than the projection's and a
+    // link, so it needs the device three times over: the device is asked once for them.
+    {
+        let mut state = driver.lock();
+        state.capabilities.presentation.style_change = true;
+        state.capabilities.presentation.links = true;
+    }
+    let mut linked = arrived();
+    linked["presentation"]["openUrl"] = serde_json::json!("myapp://rides/7");
+    let asked = driver.lock().capability_calls;
+    block_on(live.update_layout(loud(&record.id, 3, Some(linked)))).unwrap();
+    // liveupdate asks once itself, for the permission of an update.
+    assert_eq!(driver.lock().capability_calls - asked, 2);
+    assert!(alerting(driver.posted(&record.id)));
+    let updated =
+        block_on(live.update_layout(loud(&record.id, 4, Some(driving(70, "2 min"))))).unwrap();
+    assert!(alerting(driver.posted(&record.id)));
+    assert!(!updated.degraded_features.contains(&"alert".to_owned()));
+    let sent = updated.snapshot.android.unwrap();
+    assert!(!sent.presentation.alert);
+
+    // Elsewhere the update is silent and the record says so.
+    let (live, _events, driver) = android_with_files("alert-once");
+    let record = block_on(live.start_layout(ride("ride:7", None))).unwrap();
+    let updated = block_on(live.update_layout(loud(&record.id, 1, None))).unwrap();
+    assert!(!alerting(driver.posted(&record.id)));
+    assert!(updated.degraded_features.contains(&"alert".to_owned()));
+    // A content that says so itself is treated the same: sent without the alert, which the record names.
+    let mut content = driving(70, "2 min");
+    content["presentation"]["alert"] = serde_json::json!(true);
+    let update = layout_update(ride_update(&record.id, 2, Some(content)));
+    let updated = block_on(live.update_layout(update)).unwrap();
+    assert!(!alerting(driver.posted(&record.id)));
+    assert!(updated.degraded_features.contains(&"alert".to_owned()));
+}
+
+#[test]
+fn req_a_006_a_delayed_end_keeps_the_last_content_where_the_device_offers_it() {
+    // REQ-A-006
+    use liveactivity::{EndPolicy, LayoutEndInput};
+    let at = 1_800_000_600_000;
+    let offering = MemoryDriver::offering(|offered| offered.delayed_end = true);
+    let (live, _events, driver) = android_on(offering, "delayed-end");
+
+    // A layout activity ends with a final snapshot, which stays until its time and is no longer observed.
+    let record = block_on(live.start_layout(ride("ride:7", None))).unwrap();
+    let mut end = LayoutEndInput::new(&record.id);
+    end.policy = EndPolicy::After { at };
+    end.snapshot = Some(layout_update(ride_update(&record.id, 1, Some(arrived()))).snapshot);
+    let ended = block_on(live.end_layout(end.clone()));
+    // The content is of another style, which this device does not change: nothing ended, nothing changed.
+    assert_eq!(ended.unwrap_err().code, "UNSUPPORTED_FEATURE");
+    assert_eq!(driver.posted(&record.id).revision, 0);
+    end.snapshot = Some(layout_update(ride_update(&record.id, 1, None)).snapshot);
+    let ended = block_on(live.end_layout(end)).unwrap();
+    assert_eq!(ended.state, ActivityState::Ended);
+    assert_eq!(ended.snapshot.revision, 1);
+    {
+        let state = driver.lock();
+        let last = &state.finals[&record.id];
+        assert_eq!((last.dismiss_at, last.snapshot.revision), (Some(at), 1));
+        assert!(!state.observed.contains_key(&record.id));
+    }
+    // A second delayed end changes nothing, also once the device no longer offers one: the activity is over.
+    driver.lock().capabilities.presentation.delayed_end = false;
+    let mut later = LayoutEndInput::new(&record.id);
+    later.policy = EndPolicy::After { at: at + 1 };
+    assert_eq!(
+        block_on(live.end_layout(later)).unwrap().state,
+        ActivityState::Ended
+    );
+    assert_eq!(driver.lock().records[0].dismiss_at, Some(at));
+    driver.lock().capabilities.presentation.delayed_end = true;
+    // An end without a time removes the last content early, also when it repeats the final snapshot: an activity
+    // that is over takes no content, and its end answers its record.
+    let mut early = LayoutEndInput::immediate(&record.id);
+    early.snapshot = Some(layout_update(ride_update(&record.id, 1, None)).snapshot);
+    let removed = block_on(live.end_layout(early)).unwrap();
+    assert_eq!(
+        (removed.state, removed.snapshot.revision),
+        (ActivityState::Ended, 1)
+    );
+    assert_eq!(driver.lock().records[0].dismiss_at, None);
+
+    // What the person removed is ended without being shown again, whatever the end says.
+    let gone = block_on(live.start_layout(ride("ride:8", None))).unwrap();
+    driver.lock().observed.remove(&gone.id);
+    let mut end = LayoutEndInput::new(&gone.id);
+    end.policy = EndPolicy::After { at };
+    end.snapshot = Some(layout_update(ride_update(&gone.id, 1, None)).snapshot);
+    let ended = block_on(live.end_layout(end)).unwrap();
+    assert_eq!(
+        (ended.state, ended.snapshot.revision),
+        (ActivityState::Ended, 0)
+    );
+    assert!(!driver.lock().finals.contains_key(&gone.id));
+
+    // A template activity ends the same way.
+    let order = block_on(live.start(StartInput::progress(
+        "order:42",
+        "Order 42",
+        "Preparing",
+        0.1,
+    )));
+    let order = order.unwrap();
+    let mut end = EndInput::new(&order.id);
+    end.policy = EndPolicy::After { at };
+    assert_eq!(block_on(live.end(end)).unwrap().state, ActivityState::Ended);
+    assert_eq!(driver.lock().finals[&order.id].dismiss_at, Some(at));
+
+    // A device that removes an ended activity at once refuses, and the activities stay as they were.
+    let (live, _events, driver) = android_with_files("immediate-end");
+    let record = block_on(live.start_layout(ride("ride:7", None))).unwrap();
+    let mut end = LayoutEndInput::new(&record.id);
+    end.policy = EndPolicy::After { at };
+    end.snapshot = Some(layout_update(ride_update(&record.id, 1, None)).snapshot);
+    assert_eq!(
+        block_on(live.end_layout(end)).unwrap_err().code,
+        "UNSUPPORTED_FEATURE"
+    );
+    let listed = block_on(live.list_layout()).unwrap();
+    assert_eq!(
+        (listed[0].state, listed[0].snapshot.revision),
+        (ActivityState::Active, 0)
+    );
+    assert_eq!(driver.posted(&record.id).revision, 0);
+    let order = block_on(live.start(StartInput::progress(
+        "order:42",
+        "Order 42",
+        "Preparing",
+        0.1,
+    )));
+    let mut end = EndInput::new(&order.unwrap().id);
+    end.policy = EndPolicy::After { at };
+    assert_eq!(
+        block_on(live.end(end)).unwrap_err().code,
+        "UNSUPPORTED_FEATURE"
+    );
+    assert_eq!(
+        block_on(live.list()).unwrap()[0].state,
+        ActivityState::Active
+    );
+}
+
+#[test]
+fn req_a_004_a_public_activity_names_the_privacy_a_notification_cannot_keep() {
+    // REQ-A-004
+    let (live, _events, _driver) = android_with_files("privacy");
+    let start = |key: &str, visibility: Option<&str>| {
+        let mut request = serde_json::json!({
+            "activityKey": key, "schemaVersion": 2, "fallback": "notification",
+            "layout": { "url": "myapp://rides/7", "lockScreen": { "type": "vstack", "children": [
+                { "type": "text", "bind": "eta", "privacy": "sensitive" },
+                { "type": "link", "url": "myapp://rides/7/map",
+                  "child": { "type": "text", "value": "Map" } },
+            ] } },
+            "snapshot": { "revision": 0, "values": { "eta": "6 min" } },
+        });
+        if let Some(visibility) = visibility {
+            request["android"] = serde_json::json!({ "visibility": visibility });
+        }
+        let input = liveactivity::parse_request("start_layout", request).unwrap();
+        block_on(live.start_layout(input))
+            .unwrap()
+            .degraded_features
+    };
+    let named = |features: Vec<String>, feature: &str| features.iter().any(|left| left == feature);
+    // A notification whose content a locked screen shows cannot hide one node of it.
+    let public = start("ride:1", Some("public"));
+    assert!(named(public.clone(), "layout.privacy"));
+    assert!(named(public.clone(), "layout.link") && named(public, "layout.url"));
+    // One that a locked screen hides, as a start is unless it says otherwise, hides the node with the rest.
+    assert!(!named(start("ride:2", None), "layout.privacy"));
+    assert!(!named(start("ride:3", Some("secret")), "layout.privacy"));
+}
+
+/// A content with everything liveupdate 0.2 added to a presentation.
+fn extended() -> serde_json::Value {
+    serde_json::json!({
+        "title": "Driver on the way",
+        "status": "4 min away",
+        "presentation": {
+            "style": { "kind": "standard" },
+            "openUrl": "myapp://rides/7",
+            "actions": [{ "id": "map", "title": "Map", "openUrl": "myapp://rides/7/map" }],
+            "chronometer": {
+                "timer": { "startedAt": 1_790_000_000_000_u64, "endsAt": 1_790_000_240_000_u64 },
+                "countsDown": true,
+            },
+            "alert": true,
+            "publicVersion": { "title": "Ride", "status": "On the way" },
+            "smallIcon": { "kind": "resource", "value": "ic_ride" },
+            "accentColor": 4278222848_u32,
+            "subText": "Ride 7",
+        },
+    })
+}
+
+#[test]
+fn req_a_007_the_extensions_of_a_content_reach_android() {
+    // REQ-A-007
+    let offering = MemoryDriver::offering(|offered| {
+        offered.links = true;
+        offered.chronometer = true;
+        offered.alert = true;
+        offered.public_version = true;
+        offered.branding = true;
+    });
+    let (live, events, driver) = android_on(offering, "extensions");
+    let record = block_on(live.start_layout(ride("ride:7", Some(extended())))).unwrap();
+
+    // What liveupdate posted is the presentation as it was sent.
+    let posted = serde_json::to_value(driver.posted(&record.id).presentation).unwrap();
+    assert_eq!(posted, extended()["presentation"]);
+    assert_eq!(
+        serde_json::to_value(&record.snapshot.android).unwrap(),
+        extended()
+    );
+
+    // liveupdate reports an activity that was opened. The contract has no event for it yet: the drain goes on.
+    driver.open(&record.id, 0);
+    driver.tap(&record.id, 1, "pet");
+    block_on(live.sync_events()).unwrap();
+    assert!(matches!(events.try_recv().unwrap(), Event::Action(tap) if tap.action_id == "pet"));
+    assert!(events.try_recv().is_err());
+
+    // A public version is of a private activity. A start that says otherwise is refused before any backend, so
+    // on every platform.
+    let public = |visibility: &str| {
+        let mut request = serde_json::to_value(ride("ride:8", Some(extended()))).unwrap();
+        request["android"] = serde_json::json!({ "visibility": visibility });
+        liveactivity::validate_request("start_layout", request)
+    };
+    assert_eq!(public("private"), Ok(()));
+    assert_eq!(public("public").unwrap_err().code, "INVALID_INPUT");
+    assert_eq!(public("secret").unwrap_err().code, "INVALID_INPUT");
+
+    // In an update only Android knows how the activity started, and refuses there.
+    let mut open = serde_json::to_value(ride("ride:9", Some(arrived()))).unwrap();
+    open["android"] = serde_json::json!({ "visibility": "public" });
+    let open = liveactivity::parse_request("start_layout", open).unwrap();
+    let open = block_on(live.start_layout(open)).unwrap();
+    let update = layout_update(ride_update(&open.id, 1, Some(extended())));
+    assert_eq!(
+        block_on(live.update_layout(update)).unwrap_err().code,
+        "INVALID_INPUT"
+    );
+    assert_eq!(driver.posted(&open.id).revision, 0);
+
+    // A content is shown as given or not at all. On a device that does not offer what it uses, each member is a
+    // valid request that the device cannot show, at a start and in an update.
+    let (bare, _events, bare_driver) = android_with_files("no-extensions");
+    let started = block_on(bare.start_layout(ride("ride:7", Some(arrived())))).unwrap();
+    for (member, value) in [
+        ("openUrl", serde_json::json!("myapp://rides/7")),
+        (
+            "actions",
+            serde_json::json!([{ "id": "map", "title": "Map", "openUrl": "myapp://rides/7/map" }]),
+        ),
+        (
+            "chronometer",
+            extended()["presentation"]["chronometer"].clone(),
+        ),
+        (
+            "publicVersion",
+            extended()["presentation"]["publicVersion"].clone(),
+        ),
+        ("smallIcon", extended()["presentation"]["smallIcon"].clone()),
+        ("accentColor", serde_json::json!(4278222848_u32)),
+        ("subText", serde_json::json!("Ride 7")),
+    ] {
+        let mut content = arrived();
+        content["presentation"][member] = value;
+        let update = layout_update(ride_update(&started.id, 1, Some(content.clone())));
+        let refused = block_on(bare.update_layout(update)).unwrap_err();
+        assert_eq!(refused.code, "UNSUPPORTED_FEATURE", "{member}");
+        let refused = block_on(bare.start_layout(ride("ride:8", Some(content)))).unwrap_err();
+        assert_eq!(refused.code, "UNSUPPORTED_FEATURE", "{member}");
+    }
+    assert_eq!(bare_driver.posted(&started.id).revision, 0);
+    assert_eq!(block_on(bare.list_layout()).unwrap().len(), 1);
+    // What is wrong wherever it can be known is answered as wrong, not as something this device lacks: a public
+    // version for an activity that started as public.
+    let mut open = serde_json::to_value(ride("ride:9", Some(arrived()))).unwrap();
+    open["android"] = serde_json::json!({ "visibility": "public" });
+    let open = liveactivity::parse_request("start_layout", open).unwrap();
+    let open = block_on(bare.start_layout(open)).unwrap();
+    let mut content = arrived();
+    content["presentation"]["publicVersion"] = extended()["presentation"]["publicVersion"].clone();
+    let update = layout_update(ride_update(&open.id, 1, Some(content)));
+    assert_eq!(
+        block_on(bare.update_layout(update)).unwrap_err().code,
+        "INVALID_INPUT"
+    );
+
+    // Without the app's files the backend runs templates only, and its drain leaves the same kind out.
+    let driver = MemoryDriver::default();
+    let (templates, events) = connect(LiveUpdateBackend::new(driver.clone()));
+    driver.open("opened", 0);
+    driver.tap("opened", 1, "pet");
+    block_on(templates.sync_events()).unwrap();
+    assert!(matches!(events.try_recv().unwrap(), Event::Action(tap) if tap.action_id == "pet"));
+    assert!(events.try_recv().is_err());
+}
+
+#[test]
+fn req_a_007_a_content_that_android_refuses_at_the_post_leaves_nothing_behind() {
+    // REQ-A-007
+    let offering = MemoryDriver::offering(|offered| offered.links = true);
+    let (live, _events, driver) = android_on(offering, "refused-post");
+    let opening = |url: &str| {
+        let mut content = arrived();
+        content["presentation"]["openUrl"] = serde_json::json!(url);
+        content
+    };
+    let unopened = format!("{}//x", common::UNOPENED);
+
+    // Only the device knows that nothing in the application opens the URL: Android refuses to post the start.
+    // Nothing runs afterwards, and the key is free for the start that Android takes.
+    let refused = block_on(live.start_layout(ride("ride:1", Some(opening(&unopened)))));
+    assert_eq!(refused.unwrap_err().code, "INVALID_INPUT");
+    assert!(block_on(live.list_layout()).unwrap().is_empty());
+    let started = block_on(live.start_layout(ride("ride:1", Some(opening("myapp://rides/1")))));
+    let started = started.unwrap();
+    assert_eq!(driver.posted(&started.id).title, "Arrived");
+    let listed = block_on(live.list_layout()).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        (listed[0].id.as_str(), listed[0].state),
+        (started.id.as_str(), ActivityState::Active)
+    );
+    // The same refused start again is refused again, and leaves the running activity of another key alone.
+    let refused = block_on(live.start_layout(ride("ride:2", Some(opening(&unopened)))));
+    assert_eq!(refused.unwrap_err().code, "INVALID_INPUT");
+    let refused = block_on(live.start_layout(ride("ride:2", Some(opening(&unopened)))));
+    assert_eq!(refused.unwrap_err().code, "INVALID_INPUT");
+    assert_eq!(block_on(live.list_layout()).unwrap().len(), 1);
+
+    // A refused update leaves the activity as it is shown. liveupdate keeps the revision it tried, so until a
+    // later one is shown the record's state is unknown, and the corrected content needs the next revision.
+    let update = layout_update(ride_update(&started.id, 1, Some(opening(&unopened))));
+    assert_eq!(
+        block_on(live.update_layout(update)).unwrap_err().code,
+        "INVALID_INPUT"
+    );
+    assert_eq!(driver.posted(&started.id).revision, 0);
+    let listed = block_on(live.list_layout()).unwrap();
+    assert_eq!(
+        (listed[0].state, listed[0].snapshot.revision),
+        (ActivityState::Unknown, 0)
+    );
+    let same = layout_update(ride_update(
+        &started.id,
+        1,
+        Some(opening("myapp://rides/1/map")),
+    ));
+    assert_eq!(
+        block_on(live.update_layout(same)).unwrap_err().code,
+        "CONFLICT"
+    );
+    let update = layout_update(ride_update(
+        &started.id,
+        2,
+        Some(opening("myapp://rides/1/map")),
+    ));
+    let updated = block_on(live.update_layout(update)).unwrap();
+    assert_eq!(
+        (updated.state, updated.snapshot.revision),
+        (ActivityState::Active, 2)
+    );
+    assert_eq!(driver.posted(&started.id).revision, 2);
+
+    // A start that failed for a reason of the platform stays, for the same start to try again: the answer may
+    // have been lost. When that start is then refused for its content, it is forgotten like any refused start.
+    driver.lock().failing_posts = 1;
+    let failed = block_on(live.start_layout(ride("ride:3", Some(opening(&unopened)))));
+    assert_eq!(failed.unwrap_err().code, "NATIVE_ERROR");
+    assert_eq!(block_on(live.list_layout()).unwrap().len(), 2);
+    let refused = block_on(live.start_layout(ride("ride:3", Some(opening(&unopened)))));
+    assert_eq!(refused.unwrap_err().code, "INVALID_INPUT");
+    let listed = block_on(live.list_layout()).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, started.id);
+    let corrected = block_on(live.start_layout(ride("ride:3", Some(opening("myapp://rides/3")))));
+    assert_eq!(corrected.unwrap().state, ActivityState::Active);
 }

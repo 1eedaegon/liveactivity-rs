@@ -104,7 +104,8 @@ pub enum EndPolicy {
     Immediate {},
     /// Leave it to the platform.
     Default {},
-    /// Keep the ended activity on screen for a while, where the platform can.
+    /// Keep the ended activity on screen until a time. iOS keeps it for at most four hours; Android keeps its last
+    /// content where the device offers `delayedEnd`, and answers `UNSUPPORTED_FEATURE` elsewhere.
     After {
         /// Until when, in epoch milliseconds.
         at: u64,
@@ -194,8 +195,9 @@ pub struct Capabilities {
     /// Pushes: tokens, channels and push-to-start (iOS); a native side that predates them omits it.
     #[serde(default = "unsupported")]
     pub push: FeatureSupport,
-    /// Which notification styles the device draws, for the Android content of a snapshot. Present when the
-    /// Android backend runs layouts.
+    /// Which notification styles the device draws and which extensions it offers, for the Android content of a
+    /// snapshot and for what follows a device: another style in an update, an update that alerts, a last content
+    /// that stays. Present when the Android backend runs layouts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub android_presentation: Option<crate::layout::PresentationCapabilities>,
 }

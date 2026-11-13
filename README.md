@@ -35,7 +35,7 @@ other call answers `UNSUPPORTED_PLATFORM`.
 | [docs/ios-setup.md](docs/ios-setup.md) | the widget extension, the App Group and pushes of an iOS app |
 | [docs/android-setup.md](docs/android-setup.md) | the AAR, the permissions and the files of an Android app |
 | [docs/framework-integration.md](docs/framework-integration.md) | writing a framework plugin: commands, events, lifecycle, threads |
-| [docs/design/engine-expressiveness](docs/design/engine-expressiveness/PRD.md) | what the engines are about to open, and what this crate does with each |
+| [docs/design/engine-extensions](docs/design/engine-extensions/PRD.md) | what the engines opened in activitykit 0.4 and liveupdate 0.2, what this crate does with it, and what is still planned |
 
 ## The two sides
 
@@ -72,9 +72,12 @@ cargo run -p liveactivity --example features --features testkit
 | [Progress and timer](#progress-and-timer-activities) | `start`, `update`, `end`, `list` | ✓ | ✓ |
 | [Layouts](#layout-activities) | `start_layout`, `update_layout`, `end_layout`, `list_layout` | ✓ | ✓ projected onto a notification |
 | [Buttons and taps](#buttons-and-taps) | a `button` node, `Event::Action` | ✓ | ✓ up to three |
-| [Alerts](#alerts-and-relevance) | `LayoutUpdateInput.alert` | ✓ | silent, reported as `alert` |
+| [Links](#links-accessibility-and-motion) | a `link` node, `Layout.url` | ✓ | through an [Android content](#android-content); named as left out of a layout |
+| [Accessibility, motion, privacy](#links-accessibility-and-motion) | members of a node and of a style | ✓ | a notification has none; motion and privacy are named as left out |
+| [Alerts](#alerts-and-relevance) | `LayoutUpdateInput.alert` | ✓ | ✓ where the device alerts again; else silent, reported as `alert` |
 | [Relevance](#alerts-and-relevance) | `LayoutSnapshot.relevance` | ✓ | ignored |
 | [Android content](#android-content) | `LayoutSnapshot.android` | ignored | ✓ |
+| [A last content that stays](#ending) | `EndPolicy::After` | ✓ up to four hours | ✓ where the device offers it |
 | [Images](#images) | `write_image`, an `image` node | ✓ needs an App Group | ✓ as the large icon |
 | [Pushes](#pushes) | `LayoutStartInput.push`, `push_tokens` | ✓ | none |
 | [Events](#events) | the event sink, `sync_events` | ✓ as they come | ✓ on `sync_events` |
@@ -141,6 +144,7 @@ let layout = Layout {
     island: None,
     background: None,
     keyline: None,
+    url: None,
 };
 let values = values! { "title" => "Delivery 7", "done" => 0.4 }.into_inner();
 let start = LayoutStartInput::new("delivery:7", layout, LayoutSnapshot::new(0, values));
@@ -164,6 +168,51 @@ on Android. Its tap reaches the sink as `Event::Action`, with the `action_id`,
 the activity's `id` and its key. The tap does not change the activity: send an
 update if the button should change something.
 
+### Links, accessibility and motion
+
+Members of the layout, which iOS draws: a URL that a tap opens the application
+with, what VoiceOver reads of a node, how a node comes and goes, and what a
+locked device hides.
+
+```rust
+use liveactivity::activitykit::layout::{link, progress, text, vstack};
+
+let layout = Layout {
+    lock_screen: vstack([
+        // What VoiceOver reads of a node that has no text of its own.
+        progress("done").accessibility(
+            Accessibility::new()
+                .label("Delivery progress")
+                .value(Bound::key("percent")),
+        ),
+        // Hidden on a locked device, when the person asked for that.
+        text(Bound::key("address")).sensitive(),
+        // Shown while `arrived` is true, and how it comes and goes.
+        text("At the door")
+            .when("arrived")
+            .transition(Transition::MoveTop),
+        // A tap on the label opens the application with this URL.
+        link("myapp://delivery/9/map", text("Map")),
+    ]),
+    island: None,
+    background: None,
+    keyline: None,
+    // A tap anywhere else on the activity.
+    url: Some("myapp://delivery/9".into()),
+};
+let record = live.start_layout(start).await?;
+// On Android: layout.transition, layout.link and layout.url.
+println!("left out: {:?}", record.degraded_features);
+```
+
+The application receives a URL as any URL it is opened with (`onOpenURL` on
+iOS); no event reports it. A style's `content_transition` says how its text
+changes with an update, and `IslandExpanded::priority`,
+`IslandExpanded::below_if_too_wide` and `Island::margins` are the Dynamic
+Island's own options. On Android a notification opens the application, so the
+projection shows no link: say where the notification leads with
+[an Android content](#android-content).
+
 ### Alerts and relevance
 
 ```rust
@@ -176,8 +225,10 @@ let record = live.update_layout(update).await?;
 ```
 
 On iOS the device lights up, the Dynamic Island expands and an Apple Watch
-shows the title and the body. Android updates silently and names `alert` in
-`record.degraded_features`. An update without an alert is silent everywhere.
+shows the title and the body. On Android the notification alerts again with
+that update where the device offers it (`android_presentation.alert`);
+elsewhere the update is silent and `record.degraded_features` names `alert`.
+An update without an alert is silent everywhere.
 
 ### Android content
 
@@ -197,7 +248,9 @@ snapshot.android = Some(AndroidContent {
     title: "Delivery 7".into(),
     status: "2 stops away".into(),
     presentation: AndroidPresentation {
-        style: PresentationStyle::Progress(ProgressStyle {
+        // The text of the status chip, at most 7 characters.
+        short_critical_text: Some("8 min".into()),
+        ..AndroidPresentation::new(PresentationStyle::Progress(ProgressStyle {
             progress: 60,
             indeterminate: false,
             styled_by_progress: true,
@@ -210,21 +263,76 @@ snapshot.android = Some(AndroidContent {
             start_icon: None,
             end_icon: None,
             tracker_icon: None,
-        }),
-        // The text of the status chip, at most 7 characters.
-        short_critical_text: Some("8 min".into()),
-        large_icon: None,
-        actions: Vec::new(),
-        samsung_now_bar: None,
+        }))
     },
 });
 live.update_layout(LayoutUpdateInput::new(id, snapshot)).await?;
 ```
 
-Android keeps the style of an activity's first snapshot, and answers
-`UNSUPPORTED_FEATURE` to a content of another style: give a content with every
-snapshot of an activity or with none. The backend needs the app's
-files for it: see [Platform setup](#platform-setup).
+A content may also name a URL that the notification opens, an action that
+opens one, a clock in the header, what a secure lock screen shows and the
+application's own look. The device says which of them it offers, and a content
+that uses one it does not offer is `UNSUPPORTED_FEATURE`:
+
+```rust
+let capabilities = live.capabilities().await?;
+let offered = capabilities.android_presentation.unwrap_or_default();
+
+snapshot.android = Some(AndroidContent {
+    title: "Delivery 7".into(),
+    status: "At the door in 4 minutes".into(),
+    presentation: AndroidPresentation {
+        // A tap on the notification opens this URL in the application.
+        open_url: offered.links.then(|| "myapp://delivery/7".into()),
+        // An action that opens a URL sends no tap.
+        actions: if offered.links {
+            vec![NotificationAction {
+                open_url: Some("myapp://delivery/7/map".into()),
+                ..NotificationAction::new("map", "Map")
+            }]
+        } else {
+            Vec::new()
+        },
+        // A countdown in the header, beside the style.
+        chronometer: offered.chronometer.then(|| TimerStyle {
+            timer: Timer { started_at: ends_at - 240_000, ends_at },
+            counts_down: true,
+        }),
+        // What a secure lock screen shows of an activity that started as private.
+        public_version: offered.public_version.then(|| PublicVersion {
+            title: "Delivery".into(),
+            status: "On the way".into(),
+        }),
+        sub_text: offered.branding.then(|| "Mochi Express".into()),
+        ..AndroidPresentation::new(PresentationStyle::Standard)
+    },
+});
+```
+
+A snapshot without a content is projected from the layout, in the layout's
+own style. A snapshot may have another style than the activity shows where the
+device offers `style_change`; elsewhere that is `UNSUPPORTED_FEATURE`, and the
+activity keeps what it shows. The backend needs the app's files for a content:
+see [Platform setup](#platform-setup). `Timer` is `liveactivity::liveupdate::Timer`.
+
+### Ending
+
+```rust
+// The platform's default: iOS keeps the activity on the Lock Screen for a while, Android removes it.
+live.end_layout(LayoutEndInput::new(id)).await?;
+
+// Or keep the last content on screen until a time, with a final snapshot.
+let mut end = LayoutEndInput::new(id);
+end.policy = EndPolicy::After { at: until };
+end.snapshot = Some(LayoutSnapshot::new(5, values));
+live.end_layout(end).await?;
+```
+
+`LayoutEndInput::immediate(id)` removes the activity at once. With
+`EndPolicy::After` iOS keeps the ended activity for at most four hours. Android
+keeps the last content, no longer ongoing, where the device offers
+`delayed_end`, and answers `UNSUPPORTED_FEATURE` elsewhere, leaving the
+activity as it was. Template activities end the same way, with `EndInput`.
 
 ### Images
 
@@ -292,8 +400,11 @@ if permissions.notifications == PermissionState::Prompt {
 ```
 
 A feature is supported, unsupported or unknown, and unknown never counts as
-supported. On iOS Live Activities are a switch in Settings and there is no
-dialog. On Android the system's dialog needs an Activity, which the host
+supported. On Android `capabilities.android_presentation` also says which
+notification styles the device draws and which extensions it offers: links, a
+header clock, a style that changes, a last content that stays, an update that
+alerts, a public version and branding. On iOS Live Activities are a switch in
+Settings and there is no dialog. On Android the system's dialog needs an Activity, which the host
 shows: see [Supporting it](#supporting-it).
 
 ### Blocking calls

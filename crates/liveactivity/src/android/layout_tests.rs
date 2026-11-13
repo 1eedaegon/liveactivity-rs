@@ -22,6 +22,7 @@ fn projected(layout: &Layout, values: Json) -> Projection {
             app_name: "Mochi",
             samsung_now_bar: false,
             image: &no_image,
+            public: false,
         },
     )
 }
@@ -243,6 +244,7 @@ fn the_first_shown_file_image_that_fits_is_the_large_icon() {
         app_name: "Mochi",
         samsung_now_bar: false,
         image: &image,
+        public: false,
     };
     let picture = |source: Json| json!({ "type": "image", "source": source });
     let tree = layout(json!({ "type": "vstack", "children": [
@@ -307,6 +309,7 @@ fn the_now_bar_gets_the_title_and_the_status_when_configured() {
         app_name: "Mochi",
         samsung_now_bar: true,
         image: &no_image,
+        public: false,
     };
     let tree = layout(json!({ "type": "vstack", "children": [text("Snack"), text("On the way")] }));
     let projection = projected_with(&tree, json!({}), &environment);
@@ -371,6 +374,7 @@ fn degraded_features_follow_liveupdate_then_the_nodes_then_the_layout() {
             app_name: "Mochi",
             samsung_now_bar: false,
             image: &no_image,
+            public: false,
         },
     );
     projection.snapshot.validate().unwrap();
@@ -425,11 +429,84 @@ fn liveupdates_whitespace_counts_as_blank() {
         app_name: " ",
         samsung_now_bar: false,
         image: &no_image,
+        public: false,
     };
     assert_eq!(
         projected_with(&layout(text(feff)), json!({}), &nameless)
             .snapshot
             .title,
         "Live activity"
+    );
+}
+
+#[test]
+fn req_a_004_the_projection_names_what_android_leaves_out_of_the_ios_surface() {
+    // REQ-A-004
+    let tree: Layout = serde_json::from_value(json!({
+        "url": "myapp://rides/7",
+        "lockScreen": { "type": "vstack", "children": [
+            { "type": "text", "value": "Ride", "accessibility": { "label": "Your ride" } },
+            { "type": "text", "bind": "eta", "privacy": "sensitive", "transition": "moveTop" },
+            { "type": "link", "url": "myapp://rides/7/map", "child": text("Map") },
+            { "type": "text", "value": "Later", "if": "never", "privacy": "sensitive", "transition": "slide" },
+        ] },
+    }))
+    .unwrap();
+    let values = json!({ "eta": "4 min", "never": false });
+
+    // A notification that a locked screen hides shows nothing of a sensitive node there: the mark is kept.
+    let hidden = projected(&tree, values.clone());
+    assert_eq!(
+        hidden.degraded,
+        ["layout.transition", "layout.link", "layout.url"]
+    );
+    // The label of a link is no text of the notification and no action; a label for a screen reader is no text.
+    assert_eq!(
+        (
+            hidden.snapshot.title.as_str(),
+            hidden.snapshot.status.as_str()
+        ),
+        ("Ride", "4 min")
+    );
+    assert!(presentation(&hidden).actions.is_empty());
+    assert_eq!(template(&tree), liveupdate::Template::BigText);
+
+    // One that a locked screen shows whole shows the sensitive node too.
+    let public = Environment {
+        app_name: "Mochi",
+        samsung_now_bar: false,
+        image: &no_image,
+        public: true,
+    };
+    assert_eq!(
+        projected_with(&tree, values, &public).degraded,
+        [
+            "layout.transition",
+            "layout.privacy",
+            "layout.link",
+            "layout.url"
+        ]
+    );
+
+    // What labels an action is shown too: a private text inside a button, and how it comes and goes.
+    let button = layout(json!({ "type": "button", "actionId": "call", "child":
+        { "type": "text", "bind": "driver", "privacy": "sensitive", "transition": "opacity" } }));
+    let named = projected_with(&button, json!({ "driver": "Mina" }), &public);
+    assert_eq!(presentation(&named).actions[0].title, "Mina");
+    assert_eq!(named.degraded, ["layout.transition", "layout.privacy"]);
+    assert_eq!(
+        projected(&button, json!({ "driver": "Mina" })).degraded,
+        ["layout.transition"]
+    );
+
+    // A node that is not shown leaves nothing out, and neither does an accessibility member.
+    let plain = layout(json!({ "type": "vstack", "children": [
+        { "type": "text", "value": "Ride", "accessibility": { "hidden": true } },
+        { "type": "link", "url": "myapp://x", "child": text("Map"), "if": "never" },
+    ] }));
+    assert!(
+        projected_with(&plain, json!({ "never": false }), &public)
+            .degraded
+            .is_empty()
     );
 }

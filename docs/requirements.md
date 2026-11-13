@@ -158,18 +158,22 @@ Evidence: `ios::backend::tests::req_e_002_starts_states_and_permissions_reach_th
 On Android the sink receives `State` with `ended`, the activity's id and its key, when an end of the application
 ends an activity: a template or a layout, at once or with a last content that stays. An end sent again and an end
 that fails report nothing. The test kit's backend without a platform does the same. The report comes from
-liveupdate's account of states (REQ-E-005), at the call: so an end of an activity that the person had removed,
-which makes its record `ended`, is reported as that state too.
+liveupdate's account of states (REQ-E-005), at the call: so an end of an activity whose `dismissed` was
+reported, which makes its record `ended`, is reported as that state too.
 
 Evidence: `exchange::req_e_003_an_end_of_the_application_is_reported_on_android` and
 `testkit::memory::tests::req_e_003_the_backend_without_a_platform_reports_its_ends`.
 
 ## REQ-E-005 Each state once on Android
 
-On Android the sink receives `State` for each state of an activity as liveupdate answers it, once: `active` when
-Android shows it, `stale` when its stale time has passed, `active` again after an update, `ended`, `dismissed`.
-It names the id and the key, of a template and of a layout, with or without the app's files. The states are
-reported after the backend's own calls and on `sync_events`; the stored event of a dismissal is no second report.
+On Android the sink receives `State` with the state an activity has when the backend asks liveupdate, if it is
+another than the one the sink was told last, once: `active` when Android shows it, `stale` when its stale time
+has passed, `active` again after an update that makes it fresh, `ended`, `dismissed`. A state that came and went
+between two asks is not reported. It names the id and the key, of a template and of a layout, with or without
+the app's files. The backend asks after each of its own calls that looks at what Android shows (a start, an
+update, an end and a list, of templates and of layouts), when a state is due and a sink is connected, and on
+`sync_events`; the stored event of a dismissal is no second report. A call without a state due asks Android
+nothing more for it.
 
 Evidence: `exchange::req_e_005_each_state_of_an_activity_reaches_the_sink_once`.
 
@@ -179,6 +183,15 @@ The default Android backend says when it is worth asking again: now, soon, at th
 not until an operation or an event.
 
 Evidence: `exchange::req_e_006_the_backend_says_when_to_ask_again`.
+
+## REQ-E-007 One event at a time, in order, on Android
+
+On Android the sink is called for one event at a time, in the order the backend took the events from liveupdate,
+also when several threads ask at once: a state never arrives before the one that preceded it. No lock is held
+while the sink runs, so a sink may call the backend, `sync_events` included. A sink that panics loses the event
+it was handed and no other.
+
+Evidence: `exchange::req_e_007_events_reach_the_sink_one_at_a_time_in_the_order_they_were_taken`.
 
 ## REQ-A-001 Android content of a snapshot
 

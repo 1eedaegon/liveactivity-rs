@@ -593,24 +593,40 @@ and then each state of an activity that the sink was not told yet. On iOS it doe
 
 An activity is over when its state is `ended` or `dismissed`, on either platform. On iOS ActivityKit
 reports every state as it comes: `active`, `stale`, `ended` for every end (the application's, a
-push's or the system's) and `dismissed` when the activity leaves the screen. On Android each state
-is reported once, with the activity's id and key, from the account that liveupdate keeps with its
-receipts, so none is lost with the process and none comes twice:
+push's or the system's) and `dismissed` when the activity leaves the screen. On Android the sink is
+told the state an activity has when the backend asks, if it is another than the one it was told
+last, with the activity's id and key. liveupdate keeps that account with its receipts, so a state
+that comes while the application does not run is reported when it next asks, and none comes twice:
 
 | State | When it is reported on Android |
 | --- | --- |
-| `active` | after a start, once Android shows the notification: at the call, or at the next ask when Android shows it a moment later. Again after an update of a stale activity |
+| `active` | after a start, once Android shows the notification: at the call, or at the next ask when Android shows it a moment later. Again after an update that makes a stale activity fresh |
 | `stale` | at the first ask after the stale time has passed |
-| `ended` | at the application's end, once. An end of an activity that the person had removed makes its record `ended`, which is reported as well |
+| `ended` | at the application's end, once |
 | `dismissed` | at the first ask after the person removed the notification; the event Android stores for it prompts the host to ask |
 
-An ask is `sync_events`, and each start, update and end of the application, which report the
-states they made due. Android tells nobody that a stale time has come, and the backend runs no
-timer. A host with a thread asks the default backend when to ask again
-(`LiveUpdateBackend::next_check`: now, soon, at a time, or not until a call or an event); a host
-without one learns of a stale activity at its next ask, at the latest when the application
-resumes. A last content that [stays after an end](#end) leaves without an event when its time
-comes.
+An ask is `sync_events`, and each call of the application that looks at what Android shows: a
+start, an update, an end and a list, which report the states that are due with them. What the sink
+is told is where an activity stands, not every step it took:
+
+- A state that came and went between two asks is not reported. A stale activity that an update
+  made fresh before anyone asked reports nothing; one that the person removed and the application
+  ended before anyone asked reports `ended` alone.
+- An end of an activity whose `dismissed` was reported makes its record `ended`, and that is
+  reported as well.
+- A state is handed over at most once. One that liveupdate answered as the process died is not
+  answered again: an application that needs to know where every activity stands reads the list
+  when it starts.
+
+The sink is called for one event at a time, in the order the backend took them, also when several
+threads ask at once, and no lock is held while it runs: a sink may call the service. When another
+thread is handing events over, a call returns before its own state arrived.
+
+Android tells nobody that a stale time has come, and the backend runs no timer. A host with a
+thread asks the default backend when to ask again (`LiveUpdateBackend::next_check`: now, soon, at
+a time, or not until a call or an event); a host without one learns of a stale activity at its
+next ask, at the latest when the application resumes. A last content that
+[stays after an end](#end) leaves without an event when its time comes.
 
 The system gives a URL that a tap opens to the application, as any URL it is opened with:
 `onOpenURL` or the scene's URL contexts on iOS, the intent of the activity that declares the URL on

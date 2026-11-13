@@ -57,9 +57,10 @@ pub enum Event {
     /// A layout activity began: one the application started, or one a push started (iOS).
     Started(StartedEvent),
     /// A new lifecycle state of an activity. iOS reports every change while the application runs. Android reports
-    /// each state once when the backend is asked, by `sync_events` or by a start, an update or an end: `Active`
-    /// once Android shows the activity, `Stale` after its stale time, `Ended`, and `Dismissed` when the person
-    /// removed the notification. An activity is over at `Ended` and at `Dismissed`.
+    /// the state an activity has when the backend is asked, by `sync_events` or by a call of the application, if
+    /// it is another than the one it reported last: `Active` once Android shows the activity, `Stale` after its
+    /// stale time, `Ended`, and `Dismissed` when the person removed the notification. An activity is over at
+    /// `Ended` and at `Dismissed`.
     State(StateEvent),
     /// What the person allows, after a change in Settings (iOS).
     Permissions(Permissions),
@@ -71,9 +72,10 @@ pub enum Event {
 ///
 /// On iOS the backend calls the sink from a thread of its own. A tap keeps its intent, and an app the system
 /// launched for it, until `emit` has returned, for at most 4 seconds; the other events wait for nothing. On Android
-/// the sink is called on the thread that runs `sync_events`, while the backend holds its drain: a sink must not
-/// call `sync_events` itself. A state that a start, an update or an end made due is reported on the thread of
-/// that call, after it, with no lock held.
+/// the sink is called by a thread that asked: the one that runs `sync_events`, or a call of the application
+/// that made a state due, after the call's own work. It is called for one event at a time, in the order the
+/// events were taken, and with no lock held, so a sink may call the backend. When two threads ask at once, one
+/// of them hands over what both took, and the other's call returns before its events arrived.
 pub trait EventSink: Send + Sync + 'static {
     /// Takes one event.
     fn emit(&self, event: Event);

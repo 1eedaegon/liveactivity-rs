@@ -406,7 +406,7 @@ LiveUpdateEvents.setListener {
 ```
 
 `LiveUpdateBackend::pump_events()` is the same drain as a direct call. It answers how many events
-it handed over: the stored taps and openings, oldest first, then the states. A host that keeps the
+it took for the sink: the stored taps and openings, oldest first, then the states. A host that keeps the
 backend in an `Arc` can call it from the thread its listener wakes:
 
 ```rust
@@ -418,11 +418,14 @@ let delivered = backend.pump_events()?;
 
 ### States
 
-The sink receives each state of an activity once: `active` once Android shows it, `stale` after
-its stale time, `active` again after an update, `ended`, `dismissed`. A start, an update and an
-end report the states they made due; the others come with a drain. Android tells nobody that a
-stale time has come, and the backend runs no timer, so a host whose thread waits for the
-listener's signal also asks the backend how long to wait:
+The sink is told the state an activity has when the backend asks, if it is another than the one it
+was told last: `active` once Android shows it, `stale` after its stale time, `active` again after
+an update that makes it fresh, `ended`, `dismissed`. A start, an update, an end and a list report
+the states that are due with them; the others come with a drain. A state that came and went
+between two asks is not reported.
+
+Android tells nobody that a stale time has come, and the backend runs no timer, so a host whose
+thread waits for the listener's signal also asks the backend how long to wait:
 
 ```rust
 use liveactivity::liveupdate::NextCheck;
@@ -433,14 +436,17 @@ match backend.next_check()? {
     // Android has not shown a post yet: ask shortly, a little later each time, and give up after a few.
     NextCheck::Soon => wait_a_moment(),
     // The earliest stale time ahead, in epoch milliseconds: sleep until then, or until the signal.
+    // A time that has passed means now.
     NextCheck::At(time) => wait_until(time),
     // Nothing until the next call of the application, signal or resume.
     NextCheck::Never => wait_for_the_signal(),
 }
 ```
 
-A host without such a thread reports a stale activity at its next drain, at the latest when the
-application resumes.
+`next_check` reads what liveupdate stored and asks Android nothing. It does not know that the
+person removed a notification: the listener's signal is what prompts that drain. A host without
+such a thread reports a stale activity at its next drain, at the latest when the application
+resumes.
 
 Rules of the drain:
 
@@ -452,6 +458,11 @@ Rules of the drain:
   layout never declared is dropped. A state carries the key with or without files.
 - A dismissal is one of the states. The event Android stores for it only prompts the drain, which
   reports `dismissed` once, when the notification is gone.
+- The sink is called for one event at a time, in the order the events were taken, with no lock
+  held: it may call the service, a drain included. When two threads drain or call at once, one of
+  them hands over what both took, and the other returns before its events arrived.
+- A state is handed over at most once. When the read of the states fails after the stored events
+  were taken, those reach the sink and the drain fails: drain again.
 
 A tap on a notification of a killed app starts the process and runs the receiver, which stores the
 tap. Android starts no Activity for it. The tap reaches the sink at the next `sync_events`, for

@@ -4,7 +4,8 @@
 
 - `Cargo.toml`: liveupdate 0.3.
 - `android`: `pump_events` and the own calls report from `state_changes`; `next_check`; the lock and the question
-  of 0.3.0's own end report go.
+  of 0.3.0's own end report go. A queue for the sink, filled under one lock and handed over by one thread at a
+  time, replaces the lock that was held for a whole drain.
 - `android::layouts`: a stored dismissal is no event of its own.
 - `testkit::memory`: `active` at a start.
 - Documents: liveupdate's Android package, the AAR of 0.3, the events.
@@ -27,12 +28,20 @@
   at the next `sync_events`.
 - **Order against taps.** A dismissal used to stand among the taps in the order Android stored them. It now
   follows the stored events of the same drain.
+- **At most once.** A state that liveupdate answered as the process died is lost. The record still says where
+  the activity stands: an application that needs every state reads the list when it starts.
+- **A call returns before its state arrived**, when another thread is handing events over. The sink still
+  receives it, in order.
+- **A failed read of the states after a drain.** The stored events of that drain reach the sink, and the call
+  fails, so that the host asks again: the dismissal whose stored event prompted it is found by the next ask.
 
 ## Test plan
 
 - Integration (`tests/exchange.rs`): each row of the sequence table on the default backend, over a driver whose
-  clock the test sets, for a template and a layout; a stored dismissal reports once; `next_check` in each of its
-  four answers.
+  clock the test sets, for a template and a layout; a stored dismissal reports once; a call without a state due
+  asks Android nothing more; `next_check` in each of its four answers, and nothing consumed before a sink is
+  connected; a sink that is busy while another thread ends an activity, a sink that calls the backend, and a
+  sink that panics.
 - Unit: the test kit's backend.
 - Device: an Android phone: a start, a stale time a few seconds ahead, an update, an end, with a listener on the
   state events.

@@ -37,6 +37,8 @@ pub struct MemoryState {
     pub delay_listing: bool,
     /// The posts that are not listed yet, by id.
     pub unlisted: BTreeMap<String, Observation>,
+    /// How often Android was asked what it shows.
+    pub observations: usize,
 }
 
 #[derive(Clone)]
@@ -68,6 +70,7 @@ impl Default for MemoryDriver {
                 now: 0,
                 delay_listing: false,
                 unlisted: BTreeMap::new(),
+                observations: 0,
             })),
         }
     }
@@ -160,7 +163,8 @@ impl Driver for MemoryDriver {
     }
 
     fn observe(&self) -> liveupdate::Result<Vec<Observation>> {
-        let state = self.lock();
+        let mut state = self.lock();
+        state.observations += 1;
         // The lifecycle has no clock: the Android side says that a stale time has come.
         let listed = |observation: &Observation| Observation {
             state: match observation.snapshot.stale_at {

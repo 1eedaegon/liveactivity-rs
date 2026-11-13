@@ -19,8 +19,9 @@ when to ask for the next one.
 
 | Id | Requirement |
 | --- | --- |
-| REQ-E-005 | On Android the sink receives `State` for each state of an activity as liveupdate answers it, once: `active` when Android shows it, `stale` when its stale time has passed, `active` again after an update, `ended`, `dismissed`. It names the id and the key, of a template and of a layout, with or without the app's files. The states are reported after the backend's own calls and on `sync_events`; the stored event of a dismissal is no second report. |
+| REQ-E-005 | On Android the sink receives `State` with the state an activity has when the backend asks liveupdate, if it is another than the one the sink was told last, once: `active` when Android shows it, `stale` when its stale time has passed, `active` again after an update that makes it fresh, `ended`, `dismissed`. A state that came and went between two asks is not reported. It names the id and the key, of a template and of a layout, with or without the app's files. The states are reported after the backend's own calls and on `sync_events`; the stored event of a dismissal is no second report. |
 | REQ-E-006 | The default Android backend says when it is worth asking again: now, soon (a post that Android has not shown yet), at a time (the earliest stale time ahead), or not until an operation or an event. |
+| REQ-E-007 | The sink is called for one event at a time, in the order the backend took the events from liveupdate, also when several threads ask at once, and with no lock held. |
 | REQ-E-003 (changed) | The end of the application's own call is still reported at the call, now from the same account as the other states. |
 
 ## Also in this change

@@ -409,7 +409,7 @@ started as `Event::Started`. The steps are in
 | Event | When | iOS | Android |
 | --- | --- | --- | --- |
 | `Event::Action` | a button or an action was tapped | ✓ | ✓ |
-| `Event::State` | an activity has a new lifecycle state | every change while the app runs | each state once (`active`, `stale`, `ended`, `dismissed`), when the backend is asked |
+| `Event::State` | an activity has a new lifecycle state | every change while the app runs | the state it has when the backend is asked, once (`active`, `stale`, `ended`, `dismissed`) |
 | `Event::Started` | a layout activity began, also one a push started | ✓ | |
 | `Event::Updated` | a push changed the content of a layout activity | ✓ | |
 | `Event::PushToken` | an activity got a push token, or a new one | ✓ | |
@@ -436,10 +436,12 @@ fn over(event: &Event) -> Option<&str> {
 
 iOS delivers events as they come, and a tap keeps the app awake until the sink
 returns, for at most 4 seconds. On Android nothing calls the application: it
-asks. A start, an update and an end report the states they made due, and
-`sync_events` hands over what Android stored, the taps and the openings, and
-every state that the sink was not told yet, such as a stale time that has
-passed or a notification the person removed:
+asks. A start, an update, an end and a list report the states that are due
+with them, and `sync_events` hands over what Android stored, the taps and the
+openings, and the state of every activity that the sink was not told yet, such
+as a stale time that has passed or a notification the person removed. The sink
+is told where an activity stands, once, one event at a time and in order; a
+state that came and went between two asks is not reported:
 
 ```rust
 // When the application starts and resumes. On iOS it does nothing.
@@ -457,7 +459,7 @@ match backend.next_check()? {
     }
     // Android has not shown a post yet: shortly, a little later each time, a few times.
     NextCheck::Soon => {}
-    // The earliest stale time ahead, in epoch milliseconds.
+    // The earliest stale time ahead, in epoch milliseconds. One that has passed means now.
     NextCheck::At(_time) => {}
     // Nothing until the next call, signal or resume.
     NextCheck::Never => {}

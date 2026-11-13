@@ -1632,6 +1632,56 @@ fn req_e_005_each_state_of_an_activity_reaches_the_sink_once() {
     block_on(live.sync_events()).unwrap();
     assert!(events.try_recv().is_err());
 
+    // The sink is told where an activity stands, not every step it took: a state that came and went between two
+    // asks is not reported. A stale time that passed, and an update that made the activity fresh before anyone
+    // asked: nothing.
+    let mut start = StartInput::progress("order:43", "Order 43", "Preparing", 0.1);
+    start.snapshot.stale_at = Some(20_000);
+    let fresh = block_on(live.start(start)).unwrap();
+    shown(&events, &fresh.id);
+    driver.lock().now = 20_000;
+    block_on(live.update(progress(&fresh.id, 1, 90_000))).unwrap();
+    assert!(events.try_recv().is_err());
+    // The person removes it and the application ends it before anyone asked: ended alone.
+    driver.dismiss(&fresh.id, 3);
+    block_on(live.end(EndInput::immediate(&fresh.id))).unwrap();
+    assert_eq!(
+        events.try_recv().unwrap(),
+        state_of(&fresh.id, "order:43", ActivityState::Ended)
+    );
+    block_on(live.sync_events()).unwrap();
+    assert!(events.try_recv().is_err());
+
+    // A list looks at what Android shows as well: what it finds is in its records and reaches the sink with it.
+    let mut start = StartInput::progress("order:44", "Order 44", "Preparing", 0.1);
+    start.snapshot.stale_at = Some(30_000);
+    let listed = block_on(live.start(start)).unwrap();
+    shown(&events, &listed.id);
+    driver.lock().now = 30_000;
+    let records = block_on(live.list()).unwrap();
+    let found = records.iter().find(|record| record.id == listed.id);
+    assert_eq!(found.unwrap().state, ActivityState::Stale);
+    assert_eq!(
+        events.try_recv().unwrap(),
+        state_of(&listed.id, "order:44", ActivityState::Stale)
+    );
+    assert!(events.try_recv().is_err());
+
+    // A call without a state due asks Android nothing more than the call itself does: as much as on a backend
+    // that nobody listens to.
+    let asked = |listening: bool| {
+        let driver = MemoryDriver::default();
+        let backend = Arc::new(LiveUpdateBackend::new(driver.clone()));
+        let _listener = listening.then(|| connect(backend.clone()));
+        let start = StartInput::progress("order:1", "Order 1", "Preparing", 0.1);
+        let order = block_on(backend.start(start)).unwrap();
+        let before = driver.lock().observations;
+        let update = UpdateInput::progress(&order.id, 1, "Order 1", "On the way", 0.6);
+        block_on(backend.update(update)).unwrap();
+        driver.lock().observations - before
+    };
+    assert_eq!(asked(true), asked(false));
+
     // A layout, with the app's files, that Android shows a moment after the post.
     let (live, events, driver) = android_with_files("states");
     driver.lock().delay_listing = true;
@@ -1661,18 +1711,18 @@ fn req_e_006_the_backend_says_when_to_ask_again() {
     use liveactivity::liveupdate::NextCheck;
     let driver = MemoryDriver::default();
     let backend = Arc::new(LiveUpdateBackend::new(driver.clone()));
-    let (live, events) = connect(backend.clone());
     // Nothing runs: nothing is due until an operation or an event.
     assert_eq!(backend.next_check().unwrap(), NextCheck::Never);
 
-    // A post that Android has not shown yet: soon.
-    driver.lock().delay_listing = true;
+    // A state that nobody was told: now. Before a sink is connected it stays due, and a drain takes nothing.
     let mut start = StartInput::progress("order:42", "Order 42", "Preparing", 0.1);
     start.snapshot.stale_at = Some(9_000);
-    let order = block_on(live.start(start)).unwrap();
-    assert_eq!(backend.next_check().unwrap(), NextCheck::Soon);
-    // Android shows it. The ask reports the state, and the next thing ahead is the stale time.
-    driver.show_unlisted();
+    let order = block_on(backend.start(start)).unwrap();
+    assert_eq!(backend.next_check().unwrap(), NextCheck::Now);
+    assert_eq!(backend.pump_events().unwrap(), 0);
+    assert_eq!(backend.next_check().unwrap(), NextCheck::Now);
+    // The sink that comes is told, and the next thing ahead is the stale time.
+    let (live, events) = connect(backend.clone());
     assert_eq!(backend.pump_events().unwrap(), 1);
     assert_eq!(
         events.try_recv().unwrap(),
@@ -1680,14 +1730,140 @@ fn req_e_006_the_backend_says_when_to_ask_again() {
     );
     assert_eq!(backend.next_check().unwrap(), NextCheck::At(9_000));
 
-    // A state that a query already found and nobody was told: now.
+    // The time passes. It asks Android nothing, so it names the time still: the host compares it with its clock
+    // and asks. A stale activity has no stale time ahead.
     driver.lock().now = 9_000;
-    block_on(live.list()).unwrap();
-    assert_eq!(backend.next_check().unwrap(), NextCheck::Now);
+    assert_eq!(backend.next_check().unwrap(), NextCheck::At(9_000));
     assert_eq!(backend.pump_events().unwrap(), 1);
     assert_eq!(
         events.try_recv().unwrap(),
         state_of(&order.id, "order:42", ActivityState::Stale)
     );
     assert_eq!(backend.next_check().unwrap(), NextCheck::Never);
+
+    // A post that Android has not shown yet: soon.
+    driver.lock().delay_listing = true;
+    let start = StartInput::progress("order:43", "Order 43", "Preparing", 0.1);
+    let later = block_on(live.start(start)).unwrap();
+    assert!(events.try_recv().is_err());
+    assert_eq!(backend.next_check().unwrap(), NextCheck::Soon);
+    driver.show_unlisted();
+    assert_eq!(backend.pump_events().unwrap(), 1);
+    assert_eq!(
+        events.try_recv().unwrap(),
+        state_of(&later.id, "order:43", ActivityState::Active)
+    );
+    assert_eq!(backend.next_check().unwrap(), NextCheck::Never);
+}
+
+#[test]
+fn req_e_007_events_reach_the_sink_one_at_a_time_in_the_order_they_were_taken() {
+    // REQ-E-007
+    use std::{
+        sync::{
+            Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::Duration,
+    };
+    let order = |key: &str| StartInput::progress(key, "Order", "Preparing", 0.1);
+
+    // A sink that is busy with its first event until the test lets it go, and notes a second caller.
+    let backend = Arc::new(LiveUpdateBackend::new(MemoryDriver::default()));
+    let (sender, events) = mpsc::channel();
+    let (release, released) = mpsc::channel::<()>();
+    let released = Mutex::new(released);
+    let (inside, overlapped) = (AtomicBool::new(false), Arc::new(AtomicBool::new(false)));
+    let (first, noted) = (AtomicBool::new(true), overlapped.clone());
+    let sink = move |event: Event| {
+        if inside.swap(true, Ordering::SeqCst) {
+            noted.store(true, Ordering::SeqCst);
+        }
+        sender.send(event).unwrap();
+        if first.swap(false, Ordering::SeqCst) {
+            // Until the test lets it go, or gave up.
+            let _ = released.lock().unwrap().recv();
+        }
+        inside.store(false, Ordering::SeqCst);
+    };
+    let live = LiveActivity::builder()
+        .backend(backend.clone())
+        .event_sink(sink)
+        .build()
+        .unwrap();
+    std::thread::scope(|threads| {
+        // Dropped with this closure, so that a failed assertion does not leave the sink waiting.
+        let release = release;
+        let busy = threads.spawn(|| block_on(live.start(order("order:1"))).unwrap());
+        let wait = Duration::from_secs(10);
+        let Event::State(one) = events.recv_timeout(wait).unwrap() else {
+            panic!("the first event is the state of the first start");
+        };
+        // While the sink is busy another thread starts and ends an activity. Its calls return, and the sink is
+        // not entered: what they took waits its turn.
+        let two = block_on(live.start(order("order:2"))).unwrap();
+        block_on(live.end(EndInput::immediate(&two.id))).unwrap();
+        assert!(events.try_recv().is_err());
+        release.send(()).unwrap();
+        assert_eq!(busy.join().unwrap().id, one.activity_id);
+        // The thread that was handing over hands these over too, in the order they were taken.
+        assert_eq!(
+            events.try_iter().collect::<Vec<_>>(),
+            [
+                state_of(&two.id, "order:2", ActivityState::Active),
+                state_of(&two.id, "order:2", ActivityState::Ended),
+            ]
+        );
+    });
+    assert!(!overlapped.load(Ordering::SeqCst));
+
+    // A sink that calls the backend, as no lock is held while it runs: it ends what it is told is shown, and
+    // drains. The end's state follows the one in hand.
+    let backend = Arc::new(LiveUpdateBackend::new(MemoryDriver::default()));
+    let (sender, events) = mpsc::channel();
+    let called = backend.clone();
+    let sink = move |event: Event| {
+        sender.send(event.clone()).unwrap();
+        if let Event::State(change) = event
+            && change.state == ActivityState::Active
+        {
+            block_on(called.end(EndInput::immediate(&change.activity_id))).unwrap();
+            block_on(called.sync_events()).unwrap();
+        }
+    };
+    let live = LiveActivity::builder()
+        .backend(backend)
+        .event_sink(sink)
+        .build()
+        .unwrap();
+    let three = block_on(live.start(order("order:3"))).unwrap();
+    assert_eq!(
+        events.try_iter().collect::<Vec<_>>(),
+        [
+            state_of(&three.id, "order:3", ActivityState::Active),
+            state_of(&three.id, "order:3", ActivityState::Ended),
+        ]
+    );
+
+    // A sink that panics loses the event it was handed, and no other.
+    let (sender, events) = mpsc::channel();
+    let first = AtomicBool::new(true);
+    let sink = move |event: Event| {
+        assert!(!first.swap(false, Ordering::SeqCst), "the sink fails once");
+        sender.send(event).unwrap();
+    };
+    let live = LiveActivity::builder()
+        .backend(LiveUpdateBackend::new(MemoryDriver::default()))
+        .event_sink(sink)
+        .build()
+        .unwrap();
+    let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        block_on(live.start(order("order:4")))
+    }));
+    assert!(failed.is_err());
+    let five = block_on(live.start(order("order:5"))).unwrap();
+    assert_eq!(
+        events.try_iter().collect::<Vec<_>>(),
+        [state_of(&five.id, "order:5", ActivityState::Active)]
+    );
 }

@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-13
+
+- feat: build on activitykit 0.5: toggles, staleness, scheduled and transient starts, alert sounds (#11) (`a2c8977`)
+
 Built on activitykit 0.5, whose vocabulary this crate re-exports, and on liveupdate 0.3.1. Breaking for a Rust
 caller: `ActionEvent`, `Alert` and `LayoutStartInput` have new public members, the re-exported `Element` has the
 variant `Toggle` and `Node` the member `if_stale`. JSON written for 0.4 reads unchanged.

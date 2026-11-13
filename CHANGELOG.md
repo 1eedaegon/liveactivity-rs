@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.5.1 - 2026-11-13
+
+- fix: a progress of a layout is posted on Android 16, with liveupdate 0.3.2 (#12) (`554421a`)
+
 Built on liveupdate 0.3.2.
 
 - A layout with a `progress` and an Android content of the progress style are posted on Android 16. liveupdate's

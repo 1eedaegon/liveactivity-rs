@@ -2,7 +2,7 @@
 
 ## Changes by module
 
-- `Cargo.toml`: activitykit 0.4, liveupdate 0.2.
+- `Cargo.toml`: activitykit 0.4, liveupdate 0.2.1.
 - `layout`: re-exports the new types of both engines (`Accessibility`, `Transition`, `Privacy`,
   `ContentTransition`, `ExpandedRegion`, `RegionPriorities`, `IslandMargins`, `PublicVersion`); the rule of a
   public version at start.
@@ -39,12 +39,13 @@
   the engine's documented behavior.
 - **A URL nothing opens.** liveupdate refuses the post of a content whose URL no activity of the application
   handles (`INVALID_INPUT`). Only a device knows, so the same request is taken on iOS. liveupdate writes its
-  receipt before it posts, for a post that failed to be tried again, so a refused start would keep its key and
-  answer a corrected start as a conflict: the backend ends that receipt at once. A refused update cannot be
-  taken back, since liveupdate has no call for it: the corrected content needs a higher revision, and the
-  record reads `unknown` until one is shown. Both are documented in the contract.
+  receipt before it posts, for a post that failed to be tried again. In 0.2.0 it kept that receipt also when
+  the Android side refused the content, so a corrected start of the key was a conflict and a corrected update
+  needed a higher revision. 0.2.1 returns its receipts to what they were before a post that is refused as
+  invalid, and this crate requires it: nothing of the kind is done here.
 - **Published engines.** The change was developed against the engines' release commits, before liveupdate 0.2.0
-  was on crates.io. The published sources are those commits', and the tests ran again on them.
+  was on crates.io. The published sources are those commits', and the tests ran again on them, and then on
+  liveupdate 0.2.1, whose Android side is that of 0.2.0.
 
 ## Test plan
 

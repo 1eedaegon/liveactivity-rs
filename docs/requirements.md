@@ -218,7 +218,8 @@ text. A start that gives a public version to an activity that is not private is 
 platform. A content that uses a member the device does not offer is `UNSUPPORTED_FEATURE` on Android, except the
 alert, which is left out and named in `degradedFeatures`. A content that Android refuses when it posts it, such
 as one whose URL nothing in the application opens, is `INVALID_INPUT`: a start that is refused leaves no activity
-and its key free, and an update that is refused leaves the activity as it is shown.
+and its key free, and an update that is refused leaves the activity and its record as they were, so that the
+corrected content can use the same revision.
 
 Evidence: `layout::tests::req_a_007_a_content_takes_the_extensions_of_a_presentation`,
 `exchange::req_a_007_the_extensions_of_a_content_reach_android` and

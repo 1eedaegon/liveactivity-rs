@@ -364,9 +364,8 @@ declares an activity that opens it ([Android setup](android-setup.md)).
 - Android refuses a content it cannot post, with `INVALID_INPUT` and nothing shown: a URL that no
   activity of the application opens, or a small icon that is no resource of it. Only the device
   knows, so iOS takes the same request. A start that is refused this way leaves no activity, and
-  its key is free. An update that is refused leaves the activity as it is shown; liveupdate keeps
-  the revision it tried, so the corrected content goes out under a higher revision (the same one
-  is `CONFLICT`), and until then the record's `state` is `unknown`.
+  its key is free. An update that is refused leaves the activity as it is shown, in its record
+  too, and the corrected content goes out under the same revision.
 - `capabilities().androidPresentation` says which styles the device draws and which of these
   members it offers.
 - An icon of the `appFile` kind is a path under the app's files. `write_image(name, png)` writes

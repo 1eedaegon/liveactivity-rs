@@ -758,35 +758,3 @@ fn a_start_with_a_push_is_projected_without_it() {
     assert_eq!(same.id, record.id);
     assert_eq!(f.android.0.lock().unwrap().starts, 1);
 }
-
-#[test]
-fn only_the_receipt_of_the_start_that_was_refused_is_one_never_posted() {
-    // What `forget_refused` ends: the receipt of this start, and no activity that shows something.
-    let f = fixture();
-    let started = f
-        .layouts
-        .start(&f.updates, start("snack:1", values("Snack", 0.2)))
-        .unwrap();
-    let shown = f.updates.list().unwrap().remove(0);
-    assert_eq!(shown.id, started.id);
-    let sent = shown.snapshot.clone();
-    // The activity is on screen: it is no receipt of a refused start, whatever content is compared.
-    assert!(!never_posted(&shown, "snack:1", &sent));
-    let unposted = liveupdate::ActivityRecord {
-        state: liveupdate::ActivityState::Unknown,
-        ..shown.clone()
-    };
-    assert!(never_posted(&unposted, "snack:1", &sent));
-    // Another key, another content, a template activity: none of them is this start.
-    assert!(!never_posted(&unposted, "snack:2", &sent));
-    let other = liveupdate::Snapshot {
-        title: "Another".into(),
-        ..sent.clone()
-    };
-    assert!(!never_posted(&unposted, "snack:1", &other));
-    let template = liveupdate::ActivityRecord {
-        schema_version: 1,
-        ..unposted
-    };
-    assert!(!never_posted(&template, "snack:1", &sent));
-}

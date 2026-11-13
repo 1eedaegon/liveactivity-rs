@@ -73,9 +73,9 @@ for, so nothing is left out there. `accessibility` is not named: the system read
 text, and the projection gives it no other.
 
 A content that Android refuses when it posts it (`INVALID_INPUT`: a URL that nothing in the application opens, a
-small icon that is no resource) leaves a receipt in liveupdate, which keeps what it could not post. For a start
-the backend ends that receipt, so that no activity is left and the key is free. For an update the activity
-stays as it is shown, and the corrected content goes out under a higher revision.
+small icon that is no resource) leaves nothing behind: liveupdate, from 0.2.1, returns its receipts to what they
+were before the post. A refused start leaves no activity and its key free, and a refused update leaves the
+activity and its record as they were, so that the corrected content can use the same revision.
 
 ## Android: alert
 

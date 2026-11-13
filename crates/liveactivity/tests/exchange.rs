@@ -1164,8 +1164,8 @@ fn req_a_007_a_content_that_android_refuses_at_the_post_leaves_nothing_behind() 
     assert_eq!(refused.unwrap_err().code, "INVALID_INPUT");
     assert_eq!(block_on(live.list_layout()).unwrap().len(), 1);
 
-    // A refused update leaves the activity as it is shown. liveupdate keeps the revision it tried, so until a
-    // later one is shown the record's state is unknown, and the corrected content needs the next revision.
+    // A refused update leaves the activity as it is shown, in the record too, and the corrected content goes
+    // out under the same revision.
     let update = layout_update(ride_update(&started.id, 1, Some(opening(&unopened))));
     assert_eq!(
         block_on(live.update_layout(update)).unwrap_err().code,
@@ -1175,28 +1175,19 @@ fn req_a_007_a_content_that_android_refuses_at_the_post_leaves_nothing_behind() 
     let listed = block_on(live.list_layout()).unwrap();
     assert_eq!(
         (listed[0].state, listed[0].snapshot.revision),
-        (ActivityState::Unknown, 0)
+        (ActivityState::Active, 0)
     );
-    let same = layout_update(ride_update(
+    let corrected = layout_update(ride_update(
         &started.id,
         1,
         Some(opening("myapp://rides/1/map")),
     ));
-    assert_eq!(
-        block_on(live.update_layout(same)).unwrap_err().code,
-        "CONFLICT"
-    );
-    let update = layout_update(ride_update(
-        &started.id,
-        2,
-        Some(opening("myapp://rides/1/map")),
-    ));
-    let updated = block_on(live.update_layout(update)).unwrap();
+    let updated = block_on(live.update_layout(corrected)).unwrap();
     assert_eq!(
         (updated.state, updated.snapshot.revision),
-        (ActivityState::Active, 2)
+        (ActivityState::Active, 1)
     );
-    assert_eq!(driver.posted(&started.id).revision, 2);
+    assert_eq!(driver.posted(&started.id).revision, 1);
 
     // A start that failed for a reason of the platform stays, for the same start to try again: the answer may
     // have been lost. When that start is then refused for its content, it is forgotten like any refused start.

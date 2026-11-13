@@ -160,19 +160,9 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         entries.insert(pending.clone(), entry.clone());
         self.store.save(&entries)?;
         // A failure leaves the pending entry: the next reconciliation adopts it when liveupdate posted the activity
-        // after all (an answer lost on the way back), and drops it otherwise. A content that Android refused was
-        // not posted, and that start is forgotten at once.
-        let sent = request.snapshot.clone();
-        let record = match updates.start(request) {
-            Ok(record) => record,
-            Err(error) => {
-                let error = android_liveupdate::error(error);
-                if error.code == "INVALID_INPUT" {
-                    self.forget_refused(updates, &mut entries, &input.activity_key, &sent);
-                }
-                return Err(error);
-            }
-        };
+        // after all (an answer lost on the way back), and drops it otherwise, as after a content that Android
+        // refused to post, of which liveupdate keeps no receipt.
+        let record = updates.start(request).map_err(android_liveupdate::error)?;
         entries.remove(&pending);
         // The same start again answers the running activity, whose entry has the latest values.
         let entry = entries.entry(record.id.clone()).or_insert(entry).clone();
@@ -282,33 +272,6 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                 }
             })
             .collect())
-    }
-
-    /// Forgets a start whose content Android refused to post, such as one with a URL that nothing in the
-    /// application opens. liveupdate keeps the receipt of a start it could not post, for the same start to try
-    /// again, and answers another start of the key as a conflict. Under this contract a refused request leaves
-    /// nothing behind: the receipt is ended, which frees the key. A failure here changes nothing of the refusal
-    /// that the caller is told, and leaves what liveupdate left.
-    fn forget_refused(
-        &self,
-        updates: &liveupdate::LiveUpdate<D>,
-        entries: &mut Entries,
-        key: &str,
-        sent: &liveupdate::Snapshot,
-    ) {
-        entries.remove(&format!("{PENDING}{key}"));
-        let unposted = updates
-            .list()
-            .ok()
-            .into_iter()
-            .flatten()
-            .find(|record| never_posted(record, key, sent));
-        if let Some(record) = unposted {
-            // The store may know the receipt: a start that failed for another reason was adopted under its id.
-            entries.remove(&record.id);
-            let _ = updates.end(&record.id, liveupdate::EndPolicy::Immediate);
-        }
-        let _ = self.store.save(entries);
     }
 
     /// Checks `snapshot` as an update of the activity `id` and sends it, keeping it in the store.
@@ -499,20 +462,6 @@ fn png_size(path: &std::path::Path) -> Option<(u32, u32)> {
     let width = u32::from_be_bytes(header[16..20].try_into().ok()?);
     let height = u32::from_be_bytes(header[20..24].try_into().ok()?);
     Some((width, height))
-}
-
-/// Whether `record` is the receipt of a start of `key` with the content `sent` that Android has not shown: what
-/// liveupdate keeps of a start whose post failed. An activity that is on screen has a state, and one that an
-/// update changed has another snapshot, so neither is one.
-fn never_posted(
-    record: &liveupdate::ActivityRecord,
-    key: &str,
-    sent: &liveupdate::Snapshot,
-) -> bool {
-    record.schema_version == 2
-        && record.activity_key == key
-        && record.state == liveupdate::ActivityState::Unknown
-        && record.snapshot == *sent
 }
 
 /// Whether a device offers one of liveupdate's capabilities beyond the styles.

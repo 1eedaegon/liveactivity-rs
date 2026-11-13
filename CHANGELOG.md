@@ -4,8 +4,8 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
-Built on activitykit 0.4 and liveupdate 0.2, whose vocabularies this crate re-exports. Breaking for Rust callers,
-as before 1.0; JSON written for 0.2 reads unchanged.
+Built on activitykit 0.4 and liveupdate 0.2 (0.2.1 or later), whose vocabularies this crate re-exports. Breaking
+for Rust callers, as before 1.0; JSON written for 0.2 reads unchanged.
 
 - A layout takes what activitykit 0.4 added: `accessibility`, `transition` and `privacy` on a node, the `link`
   node, `Layout.url`, a style's `content_transition` and the Dynamic Island's `priority`, `below_if_too_wide` and
@@ -22,7 +22,7 @@ as before 1.0; JSON written for 0.2 reads unchanged.
   `Capabilities.android_presentation` reports each. A layout is now projected in its own style with every
   snapshot, also after a content of another style.
 - An end sent again for an activity that is over answers its record on Android as on iOS, also with a final
-  content, which is not applied. A start that Android refuses to post leaves no activity and its key free.
+  content, which is not applied.
 - On Android the sink receives `Event::State` with `ended` when an end of the application ends a running
   activity, as it does on iOS; until now Android reported only a dismissal. A sink that took every state event
   on Android for a dismissal reads `state` now. `testkit::MemoryBackend` reports its ends the same way.

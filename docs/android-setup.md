@@ -463,6 +463,9 @@ Rules of the drain:
   them hands over what both took, and the other returns before its events arrived.
 - A state is handed over at most once. When the read of the states fails after the stored events
   were taken, those reach the sink and the drain fails: drain again.
+- A sink does not panic. One that does loses the event it was handed, and the call that was
+  handing over panics with it; what was queued behind reaches the sink with the next call or
+  drain.
 
 A tap on a notification of a killed app starts the process and runs the receiver, which stores the
 tap. Android starts no Activity for it. The tap reaches the sink at the next `sync_events`, for

@@ -75,7 +75,9 @@ pub enum Event {
 /// the sink is called by a thread that asked: the one that runs `sync_events`, or a call of the application
 /// that made a state due, after the call's own work. It is called for one event at a time, in the order the
 /// events were taken, and with no lock held, so a sink may call the backend. When two threads ask at once, one
-/// of them hands over what both took, and the other's call returns before its events arrived.
+/// of them hands over what both took, and the other's call returns before its events arrived. A sink that panics
+/// there loses the event it was handed, and the call that was handing over panics with it; what was queued behind
+/// reaches the sink with the next call.
 pub trait EventSink: Send + Sync + 'static {
     /// Takes one event.
     fn emit(&self, event: Event);

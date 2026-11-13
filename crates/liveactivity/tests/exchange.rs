@@ -675,7 +675,7 @@ fn req_a_002_taps_of_a_content_and_dismissals_reach_the_sink() {
     };
     assert_eq!(events.try_recv().unwrap(), tap("call"));
     assert_eq!(events.try_recv().unwrap(), tap("pet"));
-    // The person removed the notification: a state event, in its place among the taps.
+    // The person removed the notification: a state event, after the stored events of the drain.
     assert_eq!(
         events.try_recv().unwrap(),
         Event::State(liveactivity::StateEvent {
@@ -1667,6 +1667,28 @@ fn req_e_005_each_state_of_an_activity_reaches_the_sink_once() {
     );
     assert!(events.try_recv().is_err());
 
+    // A drain whose question for the states fails: the stored events it took reach the sink and it fails, so
+    // that the host drains again. The states stay due.
+    let driver = MemoryDriver::default();
+    let (live, events) = connect(LiveUpdateBackend::new(driver.clone()));
+    let start = StartInput::progress("order:45", "Order 45", "Preparing", 0.1);
+    let tapped = block_on(live.start(start)).unwrap();
+    shown(&events, &tapped.id);
+    driver.tap(&tapped.id, 1, "track");
+    driver.dismiss(&tapped.id, 2);
+    driver.lock().failing_observations = 1;
+    assert_eq!(
+        block_on(live.sync_events()).unwrap_err().code,
+        "NATIVE_ERROR"
+    );
+    assert!(matches!(events.try_recv().unwrap(), Event::Action(tap) if tap.action_id == "track"));
+    assert!(events.try_recv().is_err());
+    block_on(live.sync_events()).unwrap();
+    assert_eq!(
+        events.try_recv().unwrap(),
+        state_of(&tapped.id, "order:45", ActivityState::Dismissed)
+    );
+
     // A call without a state due asks Android nothing more than the call itself does: as much as on a backend
     // that nobody listens to.
     let asked = |listening: bool| {
@@ -1845,25 +1867,30 @@ fn req_e_007_events_reach_the_sink_one_at_a_time_in_the_order_they_were_taken() 
         ]
     );
 
-    // A sink that panics loses the event it was handed, and no other.
+    // A sink that panics loses the event it was handed, and no other: what was queued behind it reaches the
+    // sink with the next ask. Two activities are shown before anyone listens, so that one drain takes both.
+    let backend = Arc::new(LiveUpdateBackend::new(MemoryDriver::default()));
+    let four = block_on(backend.start(order("order:4"))).unwrap();
+    let five = block_on(backend.start(order("order:5"))).unwrap();
     let (sender, events) = mpsc::channel();
     let first = AtomicBool::new(true);
     let sink = move |event: Event| {
         assert!(!first.swap(false, Ordering::SeqCst), "the sink fails once");
         sender.send(event).unwrap();
     };
-    let live = LiveActivity::builder()
-        .backend(LiveUpdateBackend::new(MemoryDriver::default()))
+    let _live = LiveActivity::builder()
+        .backend(backend.clone())
         .event_sink(sink)
         .build()
         .unwrap();
-    let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        block_on(live.start(order("order:4")))
-    }));
-    assert!(failed.is_err());
-    let five = block_on(live.start(order("order:5"))).unwrap();
-    assert_eq!(
-        events.try_iter().collect::<Vec<_>>(),
-        [state_of(&five.id, "order:5", ActivityState::Active)]
-    );
+    let drained = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.pump_events()));
+    assert!(drained.is_err());
+    assert!(events.try_recv().is_err());
+    assert_eq!(backend.pump_events().unwrap(), 0);
+    let rest: Vec<Event> = events.try_iter().collect();
+    assert!(matches!(
+        rest.as_slice(),
+        [Event::State(change)] if change.state == ActivityState::Active
+            && [&four.id, &five.id].contains(&&change.activity_id)
+    ));
 }

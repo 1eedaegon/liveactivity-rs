@@ -173,7 +173,8 @@ between two asks is not reported. It names the id and the key, of a template and
 the app's files. The backend asks after each of its own calls that looks at what Android shows (a start, an
 update, an end and a list, of templates and of layouts), when a state is due and a sink is connected, and on
 `sync_events`; the stored event of a dismissal is no second report. A call without a state due asks Android
-nothing more for it.
+nothing more for it. A drain whose question for the states fails hands over the stored events it took and
+fails; the states stay due.
 
 Evidence: `exchange::req_e_005_each_state_of_an_activity_reaches_the_sink_once`.
 
@@ -189,7 +190,7 @@ Evidence: `exchange::req_e_006_the_backend_says_when_to_ask_again`.
 On Android the sink is called for one event at a time, in the order the backend took the events from liveupdate,
 also when several threads ask at once: a state never arrives before the one that preceded it. No lock is held
 while the sink runs, so a sink may call the backend, `sync_events` included. A sink that panics loses the event
-it was handed and no other.
+it was handed and no other: what was queued behind it reaches the sink with the next ask.
 
 Evidence: `exchange::req_e_007_events_reach_the_sink_one_at_a_time_in_the_order_they_were_taken`.
 

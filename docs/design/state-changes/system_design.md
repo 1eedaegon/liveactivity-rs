@@ -46,7 +46,9 @@ and that thread hands them over too.
 - In one drain the stored events come first, then the states.
 - A state is handed over at most once. liveupdate marks it answered before the backend has it; one that was
   answered as the process died, or that a sink panicked on, is not answered again.
-- A sink that panics ends that hand-over; the next ask goes on with the rest of the queue.
+- A sink that panics ends that hand-over, and the call that was handing over panics with it, whatever it had
+  to answer. What was queued behind the event waits for the next ask, which goes on with the rest of the queue;
+  `next_check` does not know of it.
 
 ## `next_check`
 

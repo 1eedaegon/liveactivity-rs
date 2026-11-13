@@ -12,7 +12,7 @@ use super::{
 use crate::{
     ActionEvent, Backend, EndPolicy, Error, Event, LayoutActivityRecord, LayoutEndInput,
     LayoutSnapshot, LayoutStartInput, LayoutUpdateInput, OpenedEvent, Result, Visibility,
-    layout::{Alert, AndroidOptions, AndroidPlacement, AndroidVisibility, Element, Node, Value},
+    layout::{Alert, AndroidOptions, AndroidPlacement, AndroidVisibility, Element, Node},
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, io::Read, path::PathBuf, sync::Mutex};
@@ -709,41 +709,35 @@ fn with_actions(kept: Vec<String>, snapshot: &LayoutSnapshot) -> Vec<String> {
 /// Whether the activity declared `action_id`: a button or a toggle of its layout, or an action of an Android
 /// content it has shown.
 fn declares(entry: &Entry, action_id: &str) -> bool {
-    control(&entry.origin.layout.lock_screen, action_id).is_some()
+    control(&entry.origin.layout.lock_screen, action_id)
         || entry.actions.iter().any(|id| id == action_id)
 }
 
-/// The state that a tap on the action `action_id` asks for: for a toggle of the layout, the other one than the
-/// value in the latest snapshot. A button asks for none, and neither does an action of an Android content, which
-/// is what the notification shows in place of the layout.
+/// The state that a tap on the action `action_id` asks for: for a toggle's action, the other one than the value in
+/// the latest snapshot, as the notification of that snapshot shows it. A button asks for none, and neither does
+/// an action of an Android content, which is what the notification shows in place of the layout.
 fn asked_for(entry: &Entry, action_id: &str) -> Option<bool> {
     if entry.snapshot.android.is_some() {
         return None;
     }
-    match control(&entry.origin.layout.lock_screen, action_id)? {
-        Element::Toggle { bind, .. } => match entry.snapshot.values.get(bind) {
-            Some(Value::Bool(on)) => Some(!on),
-            _ => None,
-        },
-        _ => None,
-    }
+    android_layout::asked_for(&entry.origin.layout, &entry.snapshot.values, action_id)
 }
 
-/// The first button or toggle of the tree that has `action_id`.
-fn control<'a>(node: &'a Node, action_id: &str) -> Option<&'a Element> {
+/// Whether a button or a toggle of the tree has `action_id`, shown or not.
+fn control(node: &Node, action_id: &str) -> bool {
     match &node.element {
         Element::Button { action_id: id, .. } | Element::Toggle { action_id: id, .. }
             if id == action_id =>
         {
-            Some(&node.element)
+            true
         }
         Element::Button { child, .. } | Element::Toggle { child, .. } => control(child, action_id),
         Element::Vstack { children, .. }
         | Element::Hstack { children, .. }
         | Element::Zstack { children, .. } => {
-            children.iter().find_map(|child| control(child, action_id))
+            children.iter().any(|child| control(child, action_id))
         }
-        _ => None,
+        _ => false,
     }
 }
 

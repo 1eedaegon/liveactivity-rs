@@ -4,9 +4,9 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
-Built on activitykit 0.5, whose vocabulary this crate re-exports. Breaking for a Rust caller: `ActionEvent`,
-`Alert` and `LayoutStartInput` have new public members, the re-exported `Element` has the variant `Toggle` and
-`Node` the member `if_stale`. JSON written for 0.4 reads unchanged.
+Built on activitykit 0.5, whose vocabulary this crate re-exports, and on liveupdate 0.3.1. Breaking for a Rust
+caller: `ActionEvent`, `Alert` and `LayoutStartInput` have new public members, the re-exported `Element` has the
+variant `Toggle` and `Node` the member `if_stale`. JSON written for 0.4 reads unchanged.
 
 - A layout takes the `toggle` node: a switch that shows a boolean value. Its tap reaches the sink as `Action`
   with `on`, the state the person asked for; `ActionEvent.on` is absent for a button. On Android a toggle is an
@@ -22,6 +22,10 @@ Built on activitykit 0.5, whose vocabulary this crate re-exports. Breaking for a
   (iOS 18). Android keeps nothing of them.
 - An alert takes `sound`, the file name of a sound of the application (`Alert::with_sound`), with an update and
   with a scheduled start. Android alerts with the sound of its channel and names `alert.sound`.
+- liveupdate 0.3.1 writes the stopwatch and the countdown of a metric as its Android side reads them
+  (`startedAt`, `endsAt`): an Android content with one could not be posted before. Take its AAR of 0.3.1.
+- Known: on Android 16, liveupdate's AAR up to 0.3.1 cannot post a progress of a layout or of an Android content
+  (`NATIVE_ERROR`); the templates and other Android versions are not touched. The correction is liveupdate's.
 
 ## 0.4.0 - 2026-11-13
 

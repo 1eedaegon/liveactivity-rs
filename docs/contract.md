@@ -299,7 +299,7 @@ does not keep them. In Rust: `IosOptions::new(transient)`.
 
 ```json
 "scheduled": {
-  "at": 1790000000000,
+  "at": 1900000000000,
   "alert": { "title": "Your ride", "body": "It starts now", "sound": "chime.aiff" }
 }
 ```
@@ -1015,7 +1015,7 @@ standard style. A node that Android cannot draw and that has a label or a value 
 | first shown `progress` | the progress bar, clamped to 0..1; 0 while the node is hidden |
 | first shown `timerText` | the chronometer, counting down to `end`, or up from `start` with `countsDown: false`; the tree's first timer while none is shown. Beside a progress it is the clock in the header, where the device offers `chronometer` |
 | `button`s and `link`s, three in all | actions, in the order of the tree. A button's tap reaches the sink; a link's action opens its URL, where the device offers `links`, and its id is `link:<n>`, `n` counting the links of the tree from 1, hidden ones too. The title is the first shown text inside, cut to 64; without a text, the label of the first node inside that has one; then the button's or the link's own label |
-| a `toggle` | one of those three actions, in its place in the tree. Its title is its label, found as a button's title is, with `✓` before it while the bound value is on. Its tap reaches the sink with `on`, the other state than the value in the activity's latest snapshot |
+| a `toggle` | one of those three actions, in its place in the tree. Its title is its label, found as a button's title is, with `✓` before it while the bound value is on. Its tap reaches the sink with `on`, the other state than the value in the activity's latest snapshot. When a button and a toggle have the same `actionId`, the action is the first shown one's that has a title, and so is what its tap asks |
 | a shown `symbol`, `path`, `gauge`, `custom`, `spacer`, `divider` or asset `image` with an `accessibility` label, a value or both | a text, in its place among the texts: the label, the value, or `label, value`. A bound member reads as a text shows its value, and says nothing while the value is empty. A second progress or timer is named, whatever it says |
 | a node of those kinds with `accessibility.hidden` | nothing: it is decoration, and it is not named |
 | first shown `image` with a `file` source | the large icon, when the stored PNG is at most 1024 pixels a side and 1 MiB |

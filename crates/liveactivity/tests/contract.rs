@@ -381,7 +381,7 @@ fn req_i_006_a_wrong_schedule_reaches_no_backend() {
     // REQ-I-006
     let alert = json!({"title":"Your ride","body":"It starts now"});
     for right in [
-        json!({"scheduled":{"at":1_790_000_000_000_u64,"alert":alert}}),
+        json!({"scheduled":{"at":1_900_000_000_000_u64,"alert":alert}}),
         json!({"ios":{"transient":true}}),
         json!({"ios":{"transient":false},"scheduled":{"at":0,"alert":alert}}),
     ] {
@@ -393,11 +393,11 @@ fn req_i_006_a_wrong_schedule_reaches_no_backend() {
     }
     for wrong in [
         // A schedule needs its alert, and a time of the contract.
-        json!({"scheduled":{"at":1_790_000_000_000_u64}}),
+        json!({"scheduled":{"at":1_900_000_000_000_u64}}),
         json!({"scheduled":{"at":8_640_000_000_000_001_u64,"alert":alert}}),
         json!({"scheduled":{"at":-1,"alert":alert}}),
-        json!({"scheduled":{"at":1_790_000_000_000_u64,"alert":{"title":"","body":"It starts now"}}}),
-        json!({"scheduled":{"at":1_790_000_000_000_u64,"alert":alert,"repeat":true}}),
+        json!({"scheduled":{"at":1_900_000_000_000_u64,"alert":{"title":"","body":"It starts now"}}}),
+        json!({"scheduled":{"at":1_900_000_000_000_u64,"alert":alert,"repeat":true}}),
         json!({"scheduled":null}),
         // The iOS options are read strictly, as Android's are.
         json!({"ios":{}}),
@@ -413,7 +413,7 @@ fn req_i_006_a_wrong_schedule_reaches_no_backend() {
 fn req_i_007_a_wrong_sound_reaches_no_backend() {
     // REQ-I-007
     let scheduled = |sound: serde_json::Value| {
-        json!({"scheduled":{"at":1_790_000_000_000_u64,
+        json!({"scheduled":{"at":1_900_000_000_000_u64,
             "alert":{"title":"Your ride","body":"It starts now","sound":sound}}})
     };
     let update = |sound: serde_json::Value| {
@@ -451,4 +451,46 @@ fn req_i_007_a_wrong_sound_reaches_no_backend() {
             "{wrong}"
         );
     }
+}
+
+#[test]
+fn a_running_metric_of_a_content_is_written_as_androids_side_reads_it() {
+    // liveupdate's Android side reads `startedAt` and `endsAt`. liveupdate up to 0.3.0 wrote the Rust names, so a
+    // content with a stopwatch or a countdown could not be posted.
+    use liveactivity::{
+        AndroidContent, AndroidPresentation, LayoutSnapshot, LayoutUpdateInput, Metric,
+        MetricStyle, MetricValue, PresentationStyle,
+    };
+    let metric = |label: &str, value: MetricValue| Metric {
+        label: label.into(),
+        value,
+        semantic_style: None,
+    };
+    let style = PresentationStyle::Metric(MetricStyle {
+        metrics: vec![
+            metric("Lap", MetricValue::Stopwatch { started_at: 1_000 }),
+            metric("Left", MetricValue::Countdown { ends_at: 9_000 }),
+        ],
+        critical_metric: None,
+    });
+    let mut snapshot = LayoutSnapshot::new(1, Default::default());
+    snapshot.android = Some(AndroidContent {
+        title: "Run".into(),
+        status: "Lap 3".into(),
+        presentation: AndroidPresentation::new(style),
+    });
+    let written = serde_json::to_value(LayoutUpdateInput::new("a", snapshot)).unwrap();
+    let text = written.to_string();
+    assert!(
+        text.contains(r#""startedAt":1000"#) && text.contains(r#""endsAt":9000"#),
+        "{text}"
+    );
+    // The request is read back as it is written, and in no other spelling.
+    assert_eq!(validate_request("update_layout", written.clone()), Ok(()));
+    let renamed: serde_json::Value =
+        serde_json::from_str(&text.replace("startedAt", "started_at")).unwrap();
+    assert_eq!(
+        validate_request("update_layout", renamed).unwrap_err().code,
+        "INVALID_INPUT"
+    );
 }

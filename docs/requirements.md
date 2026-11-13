@@ -344,8 +344,10 @@ Evidence: `exchange::req_a_012_a_start_may_ask_for_the_foreground_placement`.
 
 On Android a toggle is an action of the notification. Its title is the toggle's label, found as a button's is,
 with a check mark before it while the value is on. Its tap reaches the sink with `on`, the other state than the
-value in the activity's latest snapshot; a tap on a button or on an action of an Android content has none. A
-toggle without a title or without a place among the actions is left out and named `layout.toggle`.
+value in the activity's latest snapshot; a tap on a button or on an action of an Android content has none. An
+action id is a toggle's when a toggle is the control the notification shows under it: the first shown one with
+that id that has a title. A toggle without a title or without a place among the actions is left out and named
+`layout.toggle`.
 
 Evidence: `exchange::req_a_013_a_toggle_is_an_action_on_android_and_its_tap_says_what_was_asked` and
 `android::layout::tests::req_a_013_a_toggle_is_titled_by_its_label_and_its_value`.

@@ -1,4 +1,7 @@
-use super::{fake::FakeKit, *};
+use super::{
+    fake::{self, FakeKit},
+    *,
+};
 use crate::{
     block_on,
     layout::{LayoutPush, Value},
@@ -938,15 +941,24 @@ fn req_i_005_a_node_that_follows_staleness_reaches_the_kit() {
 fn req_i_006_a_scheduled_and_a_transient_start_reach_the_kit() {
     // REQ-I-006
     let text = || json!({"type":"text","bind":"status"});
-    let later = |at: u64, transient: bool| {
+    let later = |key: &str, at: u64, transient: bool| {
         start_showing(
             text(),
-            json!({"scheduled":{"at":at,"alert":{"title":"Your ride","body":"It starts now"}},
+            json!({"activityKey":key,
+                "scheduled":{"at":at,"alert":{"title":"Your ride","body":"It starts now"}},
                 "ios":{"transient":transient}}),
         )
     };
+    let fresh = |id: &str| {
+        LayoutUpdateInput::new(
+            id,
+            serde_json::from_value(json!({"revision":1,"values":{"status":"Soon","muted":false}}))
+                .unwrap(),
+        )
+    };
     let (apple, kit) = apple();
-    let record = block_on(apple.start_layout(later(1_790_000_000_000, true))).unwrap();
+    let ahead = fake::NOW + 600_000;
+    let record = block_on(apple.start_layout(later("ride:7", ahead, true))).unwrap();
     {
         let book = kit.book();
         let sent = &book.starts[0];
@@ -954,31 +966,39 @@ fn req_i_006_a_scheduled_and_a_transient_start_reach_the_kit() {
         assert_eq!(
             sent.scheduled,
             Some(crate::ScheduledStart::new(
-                1_790_000_000_000,
+                ahead,
                 crate::Alert::new("Your ride", "It starts now")
             ))
         );
     }
-    // Until its time the activity waits: it is pending, takes no update and can be ended.
+    // Until its time the activity waits: it is pending and takes no update.
     assert_eq!(record.state, ActivityState::Pending);
-    let early = LayoutUpdateInput::new(
-        &record.id,
-        serde_json::from_value(json!({"revision":1,"values":{"status":"Soon","muted":false}}))
-            .unwrap(),
+    assert_eq!(
+        code(block_on(apple.update_layout(fresh(&record.id)))),
+        "CONFLICT"
     );
-    assert_eq!(code(block_on(apple.update_layout(early))), "CONFLICT");
     // When and how an activity begins is no part of what makes two starts the same activity.
-    let again = block_on(apple.start_layout(later(1_790_000_900_000, false))).unwrap();
+    let again = block_on(apple.start_layout(later("ride:7", ahead + 900_000, false))).unwrap();
     assert_eq!(again.id, record.id);
     assert_eq!(kit.book().starts.len(), 1);
-    let ended = block_on(apple.end_layout(end(&record.id, EndPolicy::Immediate {}, None)));
+    // The system begins it: it is active, and takes updates.
+    kit.set_state(&record.id, State::Active);
+    let begun = block_on(apple.update_layout(fresh(&record.id))).unwrap();
+    assert_eq!(begun.state, ActivityState::Active);
+
+    // A pending activity can be ended, and a time that has passed starts an activity at once.
+    let waiting = block_on(apple.start_layout(later("ride:8", ahead, false))).unwrap();
+    let ended = block_on(apple.end_layout(end(&waiting.id, EndPolicy::Immediate {}, None)));
     assert_eq!(ended.unwrap().state, ActivityState::Ended);
+    let passed = block_on(apple.start_layout(later("ride:9", fake::NOW - 1, false))).unwrap();
+    assert_eq!(passed.state, ActivityState::Active);
 
     // A start without them asks for neither.
     block_on(apple.start_layout(start("demo:1", "green"))).unwrap();
     let book = kit.book();
-    assert!(!book.starts[1].transient);
-    assert_eq!(book.starts[1].scheduled, None);
+    let plain = book.starts.last().unwrap();
+    assert!(!plain.transient);
+    assert_eq!(plain.scheduled, None);
 }
 
 #[test]
@@ -1003,7 +1023,7 @@ fn req_i_007_the_sound_of_an_alert_reaches_the_kit() {
     // The alert of a scheduled start keeps its sound too.
     let scheduled = start_showing(
         json!({"type":"text","bind":"status"}),
-        json!({"scheduled":{"at":1_790_000_000_000u64,
+        json!({"scheduled":{"at":fake::NOW + 600_000,
             "alert":{"title":"Your ride","body":"It starts now","sound":"start.caf"}}}),
     );
     block_on(apple.start_layout(scheduled)).unwrap();

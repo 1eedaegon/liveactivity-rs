@@ -803,6 +803,44 @@ fn req_a_013_a_toggle_is_titled_by_its_label_and_its_value() {
     );
     let projection = projected(&hidden, json!({ "muted": true, "shown": false }));
     assert!(presentation(&projection).actions.is_empty());
+
+    // The state a tap asks for is that of the control whose action it is: the first shown one with the id that
+    // has a title. An id is no toggle's when a button took it, when the toggle is hidden, or when nothing has it.
+    let asked =
+        |tree: &Layout, values: Json, id: &str| asked_for(tree, &snapshot(values).values, id);
+    let shared = || json!({ "muted": false, "shared": true, "label": "Share" });
+    assert_eq!(asked(&tree, shared(), "mute"), Some(true));
+    assert_eq!(asked(&tree, shared(), "share"), Some(false));
+    assert_eq!(asked(&tree, shared(), "none"), None);
+    let twins = layout(json!({ "type": "vstack", "children": [
+        { "type": "toggle", "actionId": "m", "bind": "muted", "if": "switch", "child": text("Mute") },
+        { "type": "button", "actionId": "m", "child": text("Menu") },
+        { "type": "button", "actionId": "n", "ifStale": true, "child": text("Never") },
+        toggle("n", "muted", json!({ "type": "symbol", "name": "bell" })),
+        toggle("n", "muted", text("Notify")),
+    ] }));
+    let with = |switch: bool| json!({ "muted": true, "switch": switch });
+    assert_eq!(
+        titles(&projected(&twins, with(false))),
+        [pair("m", "Menu"), pair("n", "✓ Notify")]
+    );
+    assert_eq!(asked(&twins, with(false), "m"), None);
+    assert_eq!(asked(&twins, with(true), "m"), Some(false));
+    // Neither the button that only stale content shows nor the toggle without a title took `n`.
+    assert_eq!(asked(&twins, with(false), "n"), Some(false));
+    assert_eq!(
+        asked(&hidden, json!({ "muted": true, "shown": false }), "mute"),
+        None
+    );
+    // A toggle that comes after a button of its id is left out, and the id stays the button's.
+    let taken = layout(json!({ "type": "hstack", "children": [
+        { "type": "button", "actionId": "x", "child": text("Exit") },
+        toggle("x", "muted", text("Extra")),
+    ] }));
+    let projection = projected(&taken, json!({ "muted": true }));
+    assert_eq!(titles(&projection), [pair("x", "Exit")]);
+    assert_eq!(projection.degraded, ["layout.toggle"]);
+    assert_eq!(asked(&taken, json!({ "muted": true }), "x"), None);
 }
 
 #[test]
@@ -841,4 +879,21 @@ fn req_a_014_a_layout_is_drawn_as_while_fresh_and_its_staleness_is_named() {
     // A layout without such nodes names nothing.
     let plain = layout(text("Ride"));
     assert_eq!(projected(&plain, json!({})).degraded, Vec::<String>::new());
+
+    // A link that only stale content shows is none of the notification's: the links are counted without it,
+    // whether the node around it is shown or hidden.
+    let link = |url: &str, label: &str| json!({ "type": "link", "url": url, "child": text(label) });
+    let mut stale = link("myapp://stale", "Retry");
+    stale["ifStale"] = json!(true);
+    let linked = layout(json!({ "type": "vstack", "children": [
+        { "type": "hstack", "if": "shown", "children": [stale, link("myapp://first", "First")] },
+        link("myapp://second", "Second"),
+    ] }));
+    let ids = |shown: bool| -> Vec<String> {
+        let projection = projected_with(&linked, json!({ "shown": shown }), &offering());
+        let actions = &presentation(&projection).actions;
+        actions.iter().map(|action| action.id.clone()).collect()
+    };
+    assert_eq!(ids(true), ["link:1", "link:2"]);
+    assert_eq!(ids(false), ["link:2"]);
 }

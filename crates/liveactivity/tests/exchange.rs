@@ -1990,6 +1990,32 @@ fn req_a_013_a_toggle_is_an_action_on_android_and_its_tap_says_what_was_asked() 
     block_on(live.sync_events()).unwrap();
     assert_eq!(events.try_recv().unwrap(), tap("mute", None));
     assert!(events.try_recv().is_err());
+
+    // An id is asked a state for when the action it names is a toggle's: here a button shows under the id while
+    // the toggle is hidden, and the toggle once it shows.
+    let request = serde_json::json!({ "activityKey": "ride:8", "schemaVersion": 2, "fallback": "notification",
+        "layout": { "lockScreen": { "type": "vstack", "children": [
+            { "type": "toggle", "actionId": "m", "bind": "muted", "if": "switch",
+                "child": { "type": "text", "value": "Mute" } },
+            { "type": "button", "actionId": "m", "child": { "type": "text", "value": "Menu" } },
+        ] } },
+        "snapshot": { "revision": 0, "values": { "muted": true, "switch": false } } });
+    let start = liveactivity::parse_request("start_layout", request).unwrap();
+    let twins = block_on(live.start_layout(start)).unwrap();
+    shown(&events, &twins.id);
+    let asked = |sequence: u64| {
+        driver.tap(&twins.id, sequence, "m");
+        block_on(live.sync_events()).unwrap();
+        match events.try_recv().unwrap() {
+            Event::Action(tap) => tap.on,
+            other => panic!("a tap, not {other:?}"),
+        }
+    };
+    assert_eq!(asked(5), None);
+    let switch = layout_update(serde_json::json!({ "id": twins.id,
+        "snapshot": { "revision": 1, "values": { "muted": true, "switch": true } } }));
+    block_on(live.update_layout(switch)).unwrap();
+    assert_eq!(asked(6), Some(false));
 }
 
 #[test]
@@ -2040,7 +2066,7 @@ fn req_a_014_android_names_what_it_leaves_of_staleness_and_sounds_and_refuses_a_
 
     // A scheduled start is refused and leaves nothing: nothing is posted, and its key starts an activity.
     let posts = driver.lock().posts;
-    let schedule = serde_json::json!({ "scheduled": { "at": 1_790_000_000_000_u64,
+    let schedule = serde_json::json!({ "scheduled": { "at": 1_900_000_000_000_u64,
         "alert": { "title": "Your ride", "body": "It starts now" } } });
     let refused = block_on(live.start_layout(muted_ride("ride:8", schedule)));
     assert_eq!(refused.unwrap_err().code, "UNSUPPORTED_FEATURE");

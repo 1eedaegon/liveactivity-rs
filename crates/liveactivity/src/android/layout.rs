@@ -198,11 +198,29 @@ pub(crate) fn project(
     }
 }
 
+/// The state that a tap on the action `action_id` asks for, in the notification of these values: the other one
+/// than the value of the toggle whose action it is. An id is a toggle's when a toggle is the control that the
+/// projection gives the action to: the first shown one with that id that has a title. `None` for a button's
+/// action and for an id that no shown control has.
+pub(crate) fn asked_for(
+    layout: &Layout,
+    values: &BTreeMap<String, Value>,
+    action_id: &str,
+) -> Option<bool> {
+    // Links are left aside: they have ids of their own, and without them no control loses its place.
+    let mut shown = Shown::default();
+    walk(&layout.lock_screen, values, &mut shown);
+    let toggle = shown.toggles.iter().find(|(id, _)| id == action_id);
+    toggle.map(|(_, on)| !on)
+}
+
 /// The shown nodes of a lock screen, as the projection takes them.
 #[derive(Default)]
 struct Shown {
     texts: Vec<String>,
     actions: Vec<liveupdate::NotificationAction>,
+    /// The actions that stand for a toggle, by id, with the value each shows.
+    toggles: Vec<(String, bool)>,
     files: Vec<String>,
     /// The first shown progress, clamped to 0..1.
     progress: Option<f64>,
@@ -267,16 +285,15 @@ fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
             child,
         } => {
             let (label, inside) = action_title(node, child, values, shown.public);
-            let mark = if truthy(values.get(bind)) {
-                ON_MARK
-            } else {
-                ""
-            };
+            let on = truthy(values.get(bind));
+            let mark = if on { ON_MARK } else { "" };
             let action = label.map(|label| {
                 let title = cut(&format!("{mark}{label}"), MAX_ACTION_TITLE);
                 liveupdate::NotificationAction::new(action_id.clone(), title)
             });
-            act(shown, action, &inside, "toggle");
+            if act(shown, action, &inside, "toggle") {
+                shown.toggles.push((action_id.clone(), on));
+            }
         }
         Element::Link { url, child } => {
             shown.links_seen += 1;
@@ -316,15 +333,15 @@ fn say(shown: &mut Shown, words: String) {
     }
 }
 
-/// Adds `action`, the action of a button, a toggle or a link, and names what stands beside its title. liveupdate takes three
-/// actions and each id once: an action without a title, without room or with an id that is taken is left out and
-/// named as `kind`.
+/// Adds `action`, the action of a button, a toggle or a link, and names what stands beside its title. liveupdate
+/// takes three actions and each id once: an action without a title, without room or with an id that is taken is
+/// left out and named as `kind`. Answers whether the action was added.
 fn act(
     shown: &mut Shown,
     action: Option<liveupdate::NotificationAction>,
     inside: &[&'static str],
     kind: &str,
-) {
+) -> bool {
     let room = shown.actions.len() < MAX_ACTIONS;
     match action {
         Some(action) if room && shown.actions.iter().all(|other| other.id != action.id) => {
@@ -332,8 +349,12 @@ fn act(
             inside
                 .iter()
                 .for_each(|kind| note(&mut shown.degraded, kind));
+            true
         }
-        _ => note(&mut shown.degraded, kind),
+        _ => {
+            note(&mut shown.degraded, kind);
+            false
+        }
     }
 }
 

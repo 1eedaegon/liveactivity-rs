@@ -181,6 +181,9 @@ impl FakeKit {
     }
 }
 
+/// The fake's clock, in epoch milliseconds: it stands still.
+pub(crate) const NOW: u64 = 1_800_000_000_000;
+
 fn take(book: &mut Book, call: String) -> Result<(), Error> {
     book.calls.push(call);
     book.fail.take().map_or(Ok(()), Err)
@@ -274,10 +277,10 @@ impl Kit for FakeKit {
             guard.entries.push(Entry {
                 id: id.clone(),
                 start: start.clone(),
-                // A scheduled activity waits for its time.
-                state: match start.scheduled {
-                    Some(_) => State::Pending,
-                    None => State::Active,
+                // A scheduled activity waits for its time; one whose time has passed begins at once.
+                state: match &start.scheduled {
+                    Some(scheduled) if scheduled.at > NOW => State::Pending,
+                    _ => State::Active,
                 },
                 values: start.values.clone(),
                 revision: start.revision,

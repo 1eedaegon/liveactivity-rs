@@ -18,7 +18,7 @@
     }
   },
   "snapshot": { "revision": 0, "values": { "status": "On the way", "muted": false } },
-  "scheduled": { "at": 1790000000000, "alert": { "title": "Your ride", "body": "It starts now", "sound": "chime.aiff" } },
+  "scheduled": { "at": 1900000000000, "alert": { "title": "Your ride", "body": "It starts now", "sound": "chime.aiff" } },
   "ios": { "transient": true }
 }
 ```
@@ -55,3 +55,8 @@ Android stores a tap with its action id. The backend knows the layout and the la
 id that is a toggle's gets `on`, the opposite of the bound value there. A tap that comes after an update has
 changed the value reads the new value: the application is told which state to move to from what it showed last.
 An action of an Android content has no `on`, whatever its id.
+
+activitykit does not ask action ids to be unique. The notification gives an id to the first shown control that
+has a title, and the backend asks the same question again with the latest snapshot: the id is a toggle's when
+that control is a toggle. A hidden toggle before a shown button of the same id does not make the button's tap a
+toggle's.

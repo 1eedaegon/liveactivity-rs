@@ -110,6 +110,7 @@ pub(crate) fn layout(template: Template) -> (Layout, BTreeMap<String, Style>) {
             compact_leading: Some(leading),
             compact_trailing: Some(trailing),
             minimal: Some(minimal),
+            margins: None,
         }),
         // The system's secondary background, in light and dark.
         background: Some(
@@ -120,6 +121,7 @@ pub(crate) fn layout(template: Template) -> (Layout, BTreeMap<String, Style>) {
             .into(),
         ),
         keyline: None,
+        url: None,
     };
     (layout, styles())
 }

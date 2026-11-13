@@ -1,15 +1,15 @@
 use crate::{
     ActionEvent, ActivityRecord, ActivityState, Backend, BackendContext, BackendFuture,
     Capabilities, EndInput, EndPolicy, Error, Event, Fallback, FeatureSupport, LiveActivityBackend,
-    PermissionKind, PermissionState, Permissions, PromotionState, Result, StartInput, UpdateInput,
-    Visibility,
+    PermissionKind, PermissionState, Permissions, PromotionState, Result, StartInput, StateEvent,
+    UpdateInput, Visibility,
 };
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 /// A backend that keeps its activities in memory and shows nothing.
 ///
 /// It runs the progress and timer templates under the rules that [`conformance`](super::conformance) checks, stores
-/// the names of written images and reports a tap to the event sink when asked to.
+/// the names of written images, reports an end to the event sink, and reports a tap when asked to.
 #[derive(Default)]
 pub struct MemoryBackend {
     events: OnceLock<BackendContext>,
@@ -151,14 +151,26 @@ impl MemoryBackend {
                 "This backend does not keep an ended activity on screen.",
             ));
         }
-        let mut state = self.lock();
-        let activity = state
-            .activities
-            .iter_mut()
-            .find(|activity| activity.record.id == input.id)
-            .ok_or_else(not_found)?;
-        activity.record.state = ActivityState::Ended;
-        Ok(activity.record.clone())
+        let (record, was_running) = {
+            let mut state = self.lock();
+            let activity = state
+                .activities
+                .iter_mut()
+                .find(|activity| activity.record.id == input.id)
+                .ok_or_else(not_found)?;
+            let was_running = !terminal(&activity.record);
+            activity.record.state = ActivityState::Ended;
+            (activity.record.clone(), was_running)
+        };
+        // An end is reported as a platform reports it, once, and outside the lock: a sink may call the backend.
+        if was_running && let Some(events) = self.events.get() {
+            events.emit(Event::State(StateEvent {
+                activity_id: record.id.clone(),
+                activity_key: Some(record.activity_key.clone()),
+                state: ActivityState::Ended,
+            }));
+        }
+        Ok(record)
     }
 }
 
@@ -234,5 +246,39 @@ impl LiveActivityBackend for MemoryBackend {
             self.lock().images.push(name);
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{LiveActivity, block_on};
+    use std::sync::mpsc;
+
+    #[test]
+    fn req_e_003_the_backend_without_a_platform_reports_its_ends() {
+        // REQ-E-003
+        let (sender, events) = mpsc::channel();
+        let live = LiveActivity::builder()
+            .backend(MemoryBackend::new())
+            .event_sink(move |event: Event| sender.send(event).unwrap())
+            .build()
+            .unwrap();
+        let start = StartInput::progress("order:42", "Order 42", "Preparing", 0.1);
+        let order = block_on(live.start(start)).unwrap();
+        assert!(events.try_recv().is_err());
+        block_on(live.end(EndInput::new(&order.id))).unwrap();
+        assert_eq!(
+            events.try_recv().unwrap(),
+            Event::State(StateEvent {
+                activity_id: order.id.clone(),
+                activity_key: Some("order:42".into()),
+                state: ActivityState::Ended,
+            })
+        );
+        // An end again answers the record and reports nothing, and neither does an end that fails.
+        block_on(live.end(EndInput::new(&order.id))).unwrap();
+        assert!(block_on(live.end(EndInput::new("unknown"))).is_err());
+        assert!(events.try_recv().is_err());
     }
 }

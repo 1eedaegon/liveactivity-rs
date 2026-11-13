@@ -23,9 +23,10 @@ pub use activitykit::Value;
 pub use activitykit::contract::PushWire as LayoutPush;
 pub use activitykit::contract::{Island, IslandExpanded, weight};
 pub use activitykit::layout::{
-    Alignment, Bindable, Bound, ButtonStyle, Color, ColorName, ContentMode, Dimension, Element,
-    Font, FontDesign, FontWeight, Frame, HorizontalAlignment, ImageSource, IndicatorKind, Node,
-    Padding, Style, SymbolRendering, VerticalAlignment,
+    Accessibility, Alignment, Bindable, Bound, ButtonStyle, Color, ColorName, ContentMode,
+    ContentTransition, Dimension, Element, ExpandedRegion, Font, FontDesign, FontWeight, Frame,
+    HorizontalAlignment, ImageSource, IndicatorKind, IslandMargins, Node, Padding, Privacy,
+    RegionPriorities, Style, SymbolRendering, Transition, VerticalAlignment,
 };
 
 /// Android's notification styles, for the [`AndroidContent`] of a snapshot. A [`TimerStyle`] takes liveupdate's
@@ -33,7 +34,7 @@ pub use activitykit::layout::{
 pub use liveupdate::{
     AndroidPresentation, BigTextStyle, IconSource, Metric, MetricStyle, MetricValue,
     NotificationAction, PresentationCapabilities, PresentationStyle, ProgressPoint,
-    ProgressSegment, ProgressStyle, SamsungNowBar, SemanticStyle, TimerStyle,
+    ProgressSegment, ProgressStyle, PublicVersion, SamsungNowBar, SemanticStyle, TimerStyle,
 };
 
 /// Lock screen visibility of the Android notification.
@@ -49,6 +50,19 @@ pub enum AndroidVisibility {
     Secret,
 }
 
+/// How Android keys the notification of an activity.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AndroidPlacement {
+    /// A notification of its own, beside the application's others (the default).
+    Tagged,
+    /// The notification that a foreground service of the application holds, so that the service shows no second
+    /// one. One running activity has this placement at a time. The service is the application's: it attaches
+    /// itself with liveupdate's `LiveUpdateForeground` on the Android side.
+    Foreground,
+}
+
 /// Options of a start that only Android reads. iOS ignores them. More may come: build it with
 /// [`AndroidOptions::new`].
 #[non_exhaustive]
@@ -57,21 +71,36 @@ pub enum AndroidVisibility {
 pub struct AndroidOptions {
     /// Lock screen visibility of the notification.
     pub visibility: AndroidVisibility,
+    /// What a secure lock screen shows in place of the content, for a private activity. It goes with every
+    /// snapshot that has no public version of its own. Where the device offers none, the record names
+    /// `publicVersion` in `degradedFeatures`.
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
+    pub public_version: Option<PublicVersion>,
+    /// How Android keys the notification; tagged when absent. A device that does not offer the foreground
+    /// placement answers `UNSUPPORTED_FEATURE`.
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
+    pub placement: Option<AndroidPlacement>,
 }
 
 impl AndroidOptions {
-    /// The options with this lock screen visibility.
+    /// The options with this lock screen visibility, and nothing else.
     pub fn new(visibility: AndroidVisibility) -> Self {
-        Self { visibility }
+        Self {
+            visibility,
+            public_version: None,
+            placement: None,
+        }
     }
 }
 
 /// What Android shows for a snapshot, in Android's own terms, in place of the projection of the layout: a
-/// progress with segments and points, metrics, the text of the status chip, icons of actions. iOS ignores it.
+/// progress with segments and points, metrics, the text of the status chip, icons of actions, the URL a tap
+/// opens, a clock in the header. iOS ignores it.
 ///
-/// Android keeps the notification style of an activity's first snapshot: a later content of another style is
-/// `UNSUPPORTED_FEATURE` there, so an activity gives its content with every snapshot or with none. A tap on one
-/// of its actions reaches the event sink like a tap on a button node.
+/// A content of another notification style than the one the activity shows needs a device that changes styles
+/// (`styleChange` in the capabilities); on another device it is `UNSUPPORTED_FEATURE`, and the activity keeps what
+/// it shows. A tap on one of its actions reaches the event sink like a tap on a button node, unless the action
+/// opens a URL.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AndroidContent {
@@ -84,9 +113,10 @@ pub struct AndroidContent {
 }
 
 /// An alert that comes with an update: on iOS the device lights up, the Dynamic Island expands (or, without one,
-/// the Lock Screen presentation shows as a banner), and an Apple Watch shows the title and the body. Android
-/// updates silently and reports `alert` in the record's `degradedFeatures`. More may come, such as a sound: build
-/// it with [`Alert::new`].
+/// the Lock Screen presentation shows as a banner), and an Apple Watch shows the title and the body. On Android
+/// the notification alerts again with that revision, with its own title and text, where the device offers it
+/// (`alert` in the capabilities); elsewhere the update is silent and the record reports `alert` in
+/// `degradedFeatures`. More may come, such as a sound: build it with [`Alert::new`].
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -107,8 +137,8 @@ impl Alert {
     }
 }
 
-/// The member `layout` of a start: one tree per region and the two tints. The layout is fixed when the activity
-/// starts; only a bound `background` or `keyline` follows the values.
+/// The member `layout` of a start: one tree per region, the two tints and the URL a tap opens. The layout is fixed
+/// when the activity starts; only a bound `background`, `keyline` or `url` follows the values.
 pub type Layout = wire::LayoutRegions;
 
 /// Reads a member that may be absent but never `null`.
@@ -170,7 +200,7 @@ pub struct LayoutStartInput {
     pub schema_version: u8,
     /// What to do when the platform cannot give the activity its native presentation.
     pub fallback: Fallback,
-    /// One tree per region and the two tints, fixed at start.
+    /// One tree per region, the two tints and the URL a tap opens, fixed at start.
     pub layout: Layout,
     /// Styles by token; nodes name them with `style`.
     #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
@@ -426,10 +456,47 @@ impl LayoutStartInput {
     }
 }
 
+impl LayoutStartInput {
+    /// Whether `snapshot` may be content of the activity this start begins, as far as its public version goes. A
+    /// public version is what a locked screen shows in place of a private notification's content, so only an
+    /// activity that started as private, as one does unless it says otherwise, takes a snapshot with one.
+    pub(crate) fn takes_public_version_of(&self, snapshot: &LayoutSnapshot) -> bool {
+        let private = self
+            .android
+            .as_ref()
+            .is_none_or(|android| android.visibility == AndroidVisibility::Private);
+        let public_version = snapshot
+            .android
+            .as_ref()
+            .and_then(|content| content.presentation.public_version.as_ref());
+        private || public_version.is_none()
+    }
+}
+
+impl LayoutStartInput {
+    /// The rule of the public version among the Android options: liveupdate's bounds for its two texts, and a
+    /// private activity, since a locked screen shows the content of any other or nothing of it.
+    fn public_version_of_the_start_fits(&self) -> bool {
+        let Some(android) = &self.android else {
+            return true;
+        };
+        let Some(public_version) = &android.public_version else {
+            return true;
+        };
+        let bounded = AndroidPresentation {
+            public_version: Some(public_version.clone()),
+            ..AndroidPresentation::new(PresentationStyle::Standard)
+        };
+        android.visibility == AndroidVisibility::Private && bounded.validate().is_ok()
+    }
+}
+
 impl Validate for LayoutStartInput {
     fn validate(&self) -> Result<()> {
         self.validate_contract()?;
         self.snapshot.beside_the_layout()?;
+        require(self.takes_public_version_of(&self.snapshot))?;
+        require(self.public_version_of_the_start_fits())?;
         unmarked(&self.snapshot)
     }
 }
@@ -571,332 +638,5 @@ pub(crate) fn parse<T: DeserializeOwned + Validate>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn start() -> serde_json::Value {
-        json!({"activityKey":"demo:1","schemaVersion":2,"fallback":"notification",
-            "layout":{"lockScreen":{"type":"text","bind":"status","style":"s"},"keyline":{"bind":"tone"}},
-            "styles":{"s":{"color":{"bind":"tone"},"font":"headline"}},
-            "snapshot":{"revision":0,"values":{"status":"On time","tone":"green"},"staleAt":5,"timestamp":7},
-            "android":{"visibility":"private"}})
-    }
-    #[test]
-    fn a_request_reads_into_the_contracts_types_and_writes_back_the_same_json() {
-        let input: LayoutStartInput = parse("start_layout", start()).unwrap();
-        assert_eq!(serde_json::to_value(&input).unwrap(), start());
-        assert_eq!(input.snapshot.values["tone"], Value::Text("green".into()));
-        assert_eq!(input.snapshot.timestamp, Some(7));
-        // activitykit is shown the request without what only Android reads.
-        let mut shown = start();
-        shown.as_object_mut().unwrap().remove("android");
-        assert_eq!(serde_json::to_value(input.wire()).unwrap(), shown);
-        let end = json!({"id":"a","policy":{"kind":"after","at":3},"snapshot":{"revision":1,"values":{}}});
-        let typed: LayoutEndInput = parse("end_layout", end.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&typed).unwrap(), end);
-        assert_eq!(serde_json::to_value(typed.wire()).unwrap(), end);
-        let plain: LayoutEndInput =
-            parse("end_layout", json!({"id":"a","policy":{"kind":"default"}})).unwrap();
-        assert_eq!(plain.snapshot, None);
-        assert_eq!(
-            serde_json::to_value(plain.wire()).unwrap(),
-            json!({"id":"a","policy":{"kind":"default"}})
-        );
-        let immediate = LayoutEndInput {
-            id: "a".into(),
-            policy: EndPolicy::Immediate {},
-            snapshot: None,
-        };
-        assert_eq!(
-            serde_json::to_value(immediate.wire()).unwrap()["policy"]["kind"],
-            "immediate"
-        );
-    }
-    #[test]
-    fn parse_is_activitykits_strict_check_and_the_types_validate_the_same() {
-        let mut nulled = start();
-        nulled["snapshot"]["timestamp"] = json!(null);
-        assert_eq!(
-            parse::<LayoutStartInput>("start_layout", nulled),
-            Err(Error::invalid())
-        );
-        let mut unknown = start();
-        unknown["extra"] = json!(1);
-        assert_eq!(
-            parse::<LayoutStartInput>("start_layout", unknown),
-            Err(Error::invalid())
-        );
-        // Valid for activitykit, but not this type.
-        assert_eq!(
-            parse::<LayoutStartInput>("end_layout", json!({"id":"a","policy":{"kind":"default"}})),
-            Err(Error::invalid())
-        );
-        let input: LayoutStartInput = serde_json::from_value(start()).unwrap();
-        assert_eq!(input.validate(), Ok(()));
-        assert_eq!(input.snapshot.validate(), Ok(()));
-        let mut late = input.snapshot.clone();
-        late.timestamp = Some(8_640_000_000_000_001);
-        assert_eq!(late.validate(), Err(Error::invalid()));
-        let update = LayoutUpdateInput::new("a", input.snapshot.clone());
-        assert_eq!(
-            (update.validate(), input.validate_update(&update)),
-            (Ok(()), Ok(()))
-        );
-        let mut crimson = update.clone();
-        crimson
-            .snapshot
-            .values
-            .insert("tone".into(), Value::Text("crimson".into()));
-        assert_eq!(input.validate_update(&crimson), Err(Error::invalid()));
-        let end = LayoutEndInput {
-            id: "a".into(),
-            policy: EndPolicy::Default {},
-            snapshot: Some(crimson.snapshot),
-        };
-        assert_eq!(
-            (end.validate(), input.validate_end(&end)),
-            (Ok(()), Err(Error::invalid()))
-        );
-        let bare = LayoutEndInput {
-            snapshot: None,
-            ..end
-        };
-        assert_eq!(input.validate_end(&bare), Ok(()));
-    }
-    fn code<T>(result: Result<T>) -> Option<String> {
-        result.err().map(|error| error.code)
-    }
-
-    #[test]
-    fn req_c_005_a_request_is_read_strictly_in_this_crates_types() {
-        // REQ-C-005
-        // What activitykit's contract does not carry is taken, and reads back as the same JSON.
-        let mut rich = start();
-        rich["snapshot"]["relevance"] = json!(80);
-        rich["snapshot"]["android"] = json!({"title":"On time","status":"Gate 4","presentation":{
-            "style":{"kind":"progress","value":{"progress":40,"styledByProgress":true,
-                "segments":[{"length":60},{"length":40}],"points":[{"position":60}]}},
-            "shortCriticalText":"4 min"}});
-        let input: LayoutStartInput = parse("start_layout", rich.clone()).unwrap();
-        assert_eq!(input.snapshot.relevance, Some(80.0));
-        let content = input.snapshot.android.as_ref().unwrap();
-        assert_eq!(
-            content.presentation.short_critical_text.as_deref(),
-            Some("4 min")
-        );
-        assert!(same(&serde_json::to_value(&input).unwrap(), &rich));
-        // The presentation is read as liveupdate reads it: a default may be written out.
-        let mut spelled = rich.clone();
-        spelled["snapshot"]["android"]["presentation"]["style"]["value"]["indeterminate"] =
-            json!(false);
-        spelled["snapshot"]["android"]["presentation"]["actions"] = json!([]);
-        let same_input: LayoutStartInput = parse("start_layout", spelled).unwrap();
-        assert_eq!(same_input, input);
-        let update = json!({"id":"a","snapshot":{"revision":1,"values":{"status":"Late","tone":"red"}},
-            "alert":{"title":"Gate changed","body":"Now gate 12"}});
-        let typed: LayoutUpdateInput = parse("update_layout", update.clone()).unwrap();
-        assert_eq!(typed.alert.as_ref().unwrap().title, "Gate changed");
-        assert_eq!(serde_json::to_value(&typed).unwrap(), update);
-
-        // Strictly: no unknown member at any level, no `null`, nothing that serde would correct.
-        let refused = |edit: fn(&mut serde_json::Value)| {
-            let mut request = start();
-            edit(&mut request);
-            code(parse::<LayoutStartInput>("start_layout", request))
-        };
-        let invalid = Some("INVALID_INPUT".to_owned());
-        assert_eq!(refused(|request| request["ios"] = json!({})), invalid);
-        assert_eq!(
-            refused(|request| request["snapshot"]["extra"] = json!(1)),
-            invalid
-        );
-        assert_eq!(
-            refused(|request| request["android"]["presentation"] = json!({})),
-            invalid
-        );
-        assert_eq!(
-            refused(|request| {
-                request["snapshot"]["android"] = json!({"title":"On time","status":"Gate 4",
-                    "presentation":{"style":{"kind":"standard"},"sound":"loud"}});
-            }),
-            invalid
-        );
-        assert_eq!(
-            refused(|request| request["snapshot"]["relevance"] = json!(null)),
-            invalid
-        );
-        assert_eq!(
-            refused(|request| request["snapshot"]["android"] = json!(null)),
-            invalid
-        );
-        assert_eq!(
-            refused(|request| request["layout"]["lockScreen"]["surprise"] = json!(true)),
-            invalid
-        );
-        // The presentation is liveupdate's, and as strict: a default may be written out, but a `null` is no
-        // default and an array is no object.
-        assert_eq!(
-            refused(|request| {
-                request["snapshot"]["android"] = json!({"title":"On time","status":"Gate 4",
-                    "presentation":{"style":{"kind":"standard"},"largeIcon":null}});
-            }),
-            invalid
-        );
-        assert_eq!(
-            refused(|request| {
-                request["snapshot"]["android"] = json!({"title":"On time","status":"Gate 4",
-                    "presentation":[{"kind":"standard"},"4 min",null,[],null]});
-            }),
-            invalid
-        );
-        assert_eq!(
-            refused(|request| {
-                request["snapshot"]["android"] = json!({"title":"On time","status":"Gate 4",
-                    "presentation":{"style":{"kind":"standard"},"actions":[],
-                        "shortCriticalText":"4 min"}});
-            }),
-            None
-        );
-        // A struct that serde also reads from an array does not encode back to the array.
-        assert_eq!(
-            refused(|request| request["android"] = json!(["private"])),
-            invalid
-        );
-        // JSON nested deeper than a request can be is refused unread.
-        let deep = (0..40).fold(json!(1), |inner, _| json!([inner]));
-        assert_eq!(
-            refused(|request| request["snapshot"]["values"]["status"] = json!("x")),
-            None
-        );
-        let mut nested = start();
-        nested["snapshot"]["values"]["status"] = deep;
-        assert_eq!(
-            code(parse::<LayoutStartInput>("start_layout", nested)),
-            invalid
-        );
-
-        // A request is read as the request of its command: a start is no update, whatever the caller's type.
-        assert_eq!(
-            code(parse::<LayoutStartInput>("update_layout", start())),
-            invalid
-        );
-        assert_eq!(code(parse::<LayoutStartInput>("start", start())), invalid);
-    }
-
-    #[test]
-    fn req_c_006_what_a_request_says_beside_the_layout_is_checked() {
-        // REQ-C-006
-        let invalid = Some("INVALID_INPUT".to_owned());
-        let input: LayoutStartInput = serde_json::from_value(start()).unwrap();
-        let with = |edit: fn(&mut LayoutSnapshot)| {
-            let mut snapshot = input.snapshot.clone();
-            edit(&mut snapshot);
-            snapshot
-        };
-        let content = |title: &str, chip: &str| AndroidContent {
-            title: title.into(),
-            status: "Gate 4".into(),
-            presentation: AndroidPresentation {
-                style: PresentationStyle::Standard,
-                short_critical_text: Some(chip.into()),
-                large_icon: None,
-                actions: Vec::new(),
-                samsung_now_bar: None,
-            },
-        };
-
-        // A relevance is a number.
-        assert_eq!(code(with(|s| s.relevance = Some(-3.5)).validate()), None);
-        assert_eq!(
-            code(with(|s| s.relevance = Some(f64::NAN)).validate()),
-            invalid
-        );
-        assert_eq!(
-            code(with(|s| s.relevance = Some(f64::NEG_INFINITY)).validate()),
-            invalid
-        );
-        // An Android content is one liveupdate takes: here a title, and a chip text of at most 7 characters.
-        let good = LayoutSnapshot {
-            android: Some(content("On time", "4 min")),
-            ..input.snapshot.clone()
-        };
-        assert_eq!(code(good.validate()), None);
-        for wrong in [content(" ", "4 min"), content("On time", "four minutes")] {
-            let snapshot = LayoutSnapshot {
-                android: Some(wrong),
-                ..input.snapshot.clone()
-            };
-            assert_eq!(code(snapshot.validate()), invalid);
-            // In a start, an update and an end alike.
-            let start = LayoutStartInput {
-                snapshot: snapshot.clone(),
-                ..input.clone()
-            };
-            assert_eq!(code(start.validate()), invalid);
-            assert_eq!(
-                code(LayoutUpdateInput::new("a", snapshot.clone()).validate()),
-                invalid
-            );
-            let end = LayoutEndInput {
-                id: "a".into(),
-                policy: EndPolicy::Default {},
-                snapshot: Some(snapshot),
-            };
-            assert_eq!(code(end.validate()), invalid);
-        }
-        // An alert has a title and a body within their lengths.
-        let alert = |title: &str, body: &str| LayoutUpdateInput {
-            alert: Some(Alert {
-                title: title.into(),
-                body: body.into(),
-            }),
-            ..LayoutUpdateInput::new("a", input.snapshot.clone())
-        };
-        assert_eq!(code(alert("Gate changed", "Now gate 12").validate()), None);
-        assert_eq!(code(alert("", "Now gate 12").validate()), invalid);
-        assert_eq!(code(alert("Gate changed", " ").validate()), invalid);
-        assert_eq!(code(alert(&"a".repeat(121), "b").validate()), invalid);
-        assert_eq!(code(alert("a", &"b".repeat(241)).validate()), invalid);
-    }
-
-    #[test]
-    fn the_template_marker_is_no_value_key_of_a_layout_request() {
-        let code = |result: Result<()>| result.map_err(|error| error.code);
-        let invalid = Err("INVALID_INPUT".to_owned());
-        let mut marked = start();
-        marked["snapshot"]["values"]["liveActivityTemplate"] = json!("progress");
-        // The commands' check, and the Rust API's.
-        assert_eq!(
-            code(crate::validate_request("start_layout", marked.clone())),
-            invalid
-        );
-        let typed: LayoutStartInput = serde_json::from_value(marked).unwrap();
-        assert_eq!(code(typed.validate()), invalid);
-        let update =
-            json!({"id":"a","snapshot":{"revision":1,"values":{"liveActivityTemplate":"timer"}}});
-        assert_eq!(
-            code(crate::validate_request("update_layout", update.clone())),
-            invalid
-        );
-        let typed: LayoutUpdateInput = serde_json::from_value(update).unwrap();
-        assert_eq!(code(typed.validate()), invalid);
-        let end = json!({"id":"a","policy":{"kind":"immediate"},
-            "snapshot":{"revision":1,"values":{"liveActivityTemplate":"timer"}}});
-        assert_eq!(
-            code(crate::validate_request("end_layout", end.clone())),
-            invalid
-        );
-        let typed: LayoutEndInput = serde_json::from_value(end).unwrap();
-        assert_eq!(code(typed.validate()), invalid);
-        // Only that key: a longer one is a value like any other, and an end without content has none.
-        let mut similar = start();
-        similar["snapshot"]["values"]["liveActivityTemplates"] = json!("progress");
-        assert_eq!(
-            code(crate::validate_request("start_layout", similar)),
-            Ok(())
-        );
-        let bare = json!({"id":"a","policy":{"kind":"immediate"}});
-        assert_eq!(code(crate::validate_request("end_layout", bare)), Ok(()));
-    }
-}
+#[path = "layout_tests.rs"]
+mod tests;

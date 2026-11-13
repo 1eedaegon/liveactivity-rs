@@ -165,9 +165,10 @@ The policy is `{ "kind": "immediate" }`, `{ "kind": "default" }` or
 | --- | --- | --- |
 | `immediate` | removes the activity at once | removes the notification |
 | `default` | keeps it on the Lock Screen for up to four hours | removes the notification |
-| `after` | keeps it until `at` or four hours after the end, whichever comes first; a past time removes it at once | `UNSUPPORTED_FEATURE` |
+| `after` | keeps it until `at` or four hours after the end, whichever comes first; a past time removes it at once | keeps the last content, no longer ongoing, until `at`, where the device offers `delayedEnd`; `UNSUPPORTED_FEATURE` elsewhere, and the activity stays |
 
-The answer is the record with `"state": "ended"`. A template end takes no final content.
+The answer is the record with `"state": "ended"`. A template end takes no final content. On Android
+an end without a time, sent again, removes a last content that is still shown.
 
 ### list
 
@@ -249,17 +250,35 @@ The answer is a `LayoutActivityRecord`. It has no `template` and does not repeat
 
 | Member | Rule |
 | --- | --- |
-| `layout` | Required. One tree per region and two optional tints: see [Layout](#layout) |
+| `layout` | Required. One tree per region, two optional tints and an optional URL: see [Layout](#layout) |
 | `styles` | Optional. 1 to 24 styles by token: see [Styles](#styles) |
 | `snapshot.values` | 0 to 32 values by key: see [Values](#values) |
 | `snapshot.staleAt` | Optional time. Each snapshot has its own; one without it clears the date |
 | `snapshot.timestamp` | Optional time: when the content was made. Without it iOS takes the time the content is sent. ActivityKit (iOS 17.2) drops content older than what it shows, while the request still succeeds |
 | `snapshot.relevance` | Optional finite number. Which of the application's activities the Dynamic Island shows first: the highest wins. Without it the activity keeps its score, 0 at first. Android ignores it, and an Android record does not repeat it |
 | `snapshot.android` | Optional. What Android shows for this snapshot instead of the projection of the layout: see [An Android content](#an-android-content). iOS ignores it, and an iOS record does not repeat it |
-| `android` | Optional. `{ "visibility": "public" \| "private" \| "secret" }`, the lock screen visibility of the notification; `private` when absent. iOS ignores it |
+| `android` | Optional. What only Android reads of a start: see [Options of a start on Android](#options-of-a-start-on-android). iOS ignores it |
 | `push` | Optional. `"token"` or `{ "channel": "<base64 id>" }` (iOS 18): what the activity asks ActivityKit for. Android ignores it. In Rust it is `LayoutPush::Token` or `LayoutPush::Channel(id)` |
 
 The layout and the styles are fixed at start. An update sends values only.
+
+#### Options of a start on Android
+
+```json
+"android": {
+  "visibility": "private",
+  "publicVersion": { "title": "Delivery", "status": "On the way" },
+  "placement": "foreground"
+}
+```
+
+| Member | Rule |
+| --- | --- |
+| `visibility` | Required in `android`. `public`, `private` or `secret`: what a locked screen shows of the notification. A start without `android` is `private` |
+| `publicVersion` | Optional. `{ "title", "status" }`, 1 to 120 and 1 to 240 code points: what a secure lock screen shows in place of the content. Only with `visibility` `private`; otherwise `INVALID_INPUT`, on every platform. It goes with every snapshot that has no public version of its own. On a device that does not offer `publicVersion` the snapshot is shown without it and the record names `publicVersion` |
+| `placement` | Optional. `tagged`, which it is when absent, or `foreground`: the notification is the one that a foreground service of the application holds, so that the service shows no second one. One running activity has it at a time; a second is `SYSTEM_LIMIT`. On a device that does not offer `foregroundPlacement` the start is `UNSUPPORTED_FEATURE`. The placement is part of the request: another one under a running key is `CONFLICT`. The service is the application's ([Android setup](android-setup.md#a-foreground-service)) |
+
+In Rust: `AndroidOptions::new(visibility)`, then set `public_version` or `placement`.
 
 ### update_layout
 
@@ -288,9 +307,11 @@ An update may bring an alert:
 | `alert.body` | 1 to 240 code points, at least one of them not whitespace |
 
 On iOS the device lights up, the Dynamic Island expands (without one, the Lock Screen presentation
-shows as a banner), and an Apple Watch shows the title and the body. Android updates silently and
-names `alert` in the record's `degradedFeatures` until the next snapshot. Without `alert` an update
-is silent everywhere. In Rust: `LayoutUpdateInput::new(id, snapshot)`, then set `alert`.
+shows as a banner), and an Apple Watch shows the title and the body. On Android the notification
+alerts again with that revision, with its own title and text, where the device offers `alert`;
+elsewhere the update is silent and the record names `alert` in `degradedFeatures` until the next
+snapshot. Without `alert` an update is silent everywhere. In Rust:
+`LayoutUpdateInput::new(id, snapshot)`, then set `alert`.
 
 ### An Android content
 
@@ -322,19 +343,49 @@ the notification shows, in Android's own terms:
 | --- | --- |
 | `title` | The notification's title, 1 to 120 code points |
 | `status` | The notification's text, 1 to 240 code points |
-| `presentation` | liveupdate's `AndroidPresentation`, re-exported with its types: a `style` (`standard`, `bigText`, `progress` with up to 32 segments and points and three icons, `timer`, `metric` with up to three metrics), a `shortCriticalText` of at most 7 code points for the status chip, a `largeIcon`, up to three `actions` with an optional icon, and `samsungNowBar` texts |
+| `presentation` | liveupdate's `AndroidPresentation`, re-exported with its types: a `style` (`standard`, `bigText`, `progress` with up to 32 segments and points and three icons, `timer`, `metric` with up to three metrics), a `shortCriticalText` of at most 7 code points for the status chip, a `largeIcon`, up to three `actions` with an optional icon, `samsungNowBar` texts, and the members of the next table |
+
+What liveupdate 0.2 added to a presentation, each optional and each behind a capability of its own.
+A content is shown as given or not at all: one that uses a member on a device that does not offer
+its capability is `UNSUPPORTED_FEATURE` on Android, at a start and in an update. The alert is the
+exception, since a revision can be shown without alerting: there it is left out and the record
+names `alert`.
+
+| Member | Value | Capability |
+| --- | --- | --- |
+| `openUrl` | The URL a tap on the notification opens in the application. Without it a tap opens the launch activity | `links` |
+| `actions[].openUrl` | The URL the action opens in the application. Such an action sends no tap | `links` |
+| `chronometer` | `{ "timer": { "startedAt", "endsAt" }, "countsDown" }`: a clock in the header, beside any style but `timer`, which is that clock alone | `chronometer` |
+| `alert` | `true`: this revision alerts again. An [alert of the update](#update_layout) sets it for both platforms | `alert` |
+| `publicVersion` | `{ "title", "status" }`: what a secure lock screen shows of a private activity, with the bounds of the content's own | `publicVersion` |
+| `smallIcon` | `{ "kind": "resource", "value": name }`: a drawable of the application | `branding` |
+| `accentColor` | An unsigned ARGB number: the color of the icon and the header | `branding` |
+| `subText` | The third text of the header, at most 64 code points | `branding` |
+
+A URL here is liveupdate's: 1 to 2048 printable ASCII characters with a lowercase scheme, and none
+of the schemes `intent`, `content`, `file`, `javascript`, `data` and `android-app`. The application
+declares an activity that opens it ([Android setup](android-setup.md)).
 
 - The content is checked on every platform, by liveupdate's own rules, so a wrong one is
   `INVALID_INPUT` on iOS too.
 - It is read strictly, like the rest of a request, with one allowance that liveupdate's own
   encoding makes: a member at its default, `false` or an empty array, may be written or left out.
-- Android keeps the style of an activity's first snapshot, which is its content's, or else the one
-  the layout projects to. A later content of another style is a valid request that Android cannot
-  show: `UNSUPPORTED_FEATURE`, on Android only, and the activity keeps what it shows. So an activity
-  gives its content with every snapshot or with none.
-- A snapshot without a content is projected from the layout.
+- A `publicVersion` is of a private activity. A start that gives one with `android.visibility`
+  `public` or `secret` is `INVALID_INPUT` on every platform. In an update or an end only Android
+  knows how the activity started, and refuses there.
+- A snapshot without a content is projected from the layout, in the style the layout projects to.
+- A snapshot may have another style than the one the activity shows: a content of another style,
+  or a projection after a content. A device that offers `styleChange` shows it. On one that does
+  not it is a valid request that the device cannot show: `UNSUPPORTED_FEATURE`, on Android only,
+  and the activity keeps what it shows.
 - A tap on one of `actions` reaches the sink as `Event::Action`, like a tap on a button node.
-- `capabilities().androidPresentation` says which styles the device draws.
+- Android refuses a content it cannot post, with `INVALID_INPUT` and nothing shown: a URL that no
+  activity of the application opens, or a small icon that is no resource of it. Only the device
+  knows, so iOS takes the same request. A start that is refused this way leaves no activity, and
+  its key is free. An update that is refused leaves the activity as it is shown, in its record
+  too, and the corrected content goes out under the same revision.
+- `capabilities().androidPresentation` says which styles the device draws and which of these
+  members it offers.
 - An icon of the `appFile` kind is a path under the app's files. `write_image(name, png)` writes
   to `<image_folder>/<name>`, which is `liveactivity/images/<name>` unless the host chose another
   folder.
@@ -349,7 +400,8 @@ the notification shows, in Android's own terms:
 
 `policy` is the same as for `end`. `snapshot` is optional: the final content, checked as an update,
 with its own `relevance` and Android content when given. Without it the activity ends with its last
-accepted values.
+accepted values. An activity that is over takes no content: an end sent again answers its record,
+with or without a `snapshot`, which is neither checked against the start nor applied.
 
 ### list_layout
 
@@ -398,16 +450,23 @@ extension shares; on Android to the app's private files.
 ```
 
 On Android, when the backend has the app's files, the capabilities also say which notification
-styles the device draws, for [an Android content](#an-android-content):
+styles the device draws and what else it offers, for [an Android content](#an-android-content)
+and for the rules that follow a device:
 
 ```json
 "androidPresentation": {
   "standard": true, "bigText": true, "timer": true, "progressStyle": true, "metricStyle": false,
-  "actions": true, "images": true, "events": true, "samsungNowBar": false
+  "actions": true, "images": true, "events": true, "samsungNowBar": false,
+  "chronometer": true, "links": true, "styleChange": true, "delayedEnd": true,
+  "foregroundPlacement": true, "alert": true, "publicVersion": true, "branding": true
 }
 ```
 
-`progressStyle` needs Android 16 and `metricStyle` Android 17. Elsewhere the member is absent.
+`progressStyle` needs Android 16 and `metricStyle` Android 17. `styleChange` lets a snapshot have
+another style than the activity shows, `delayedEnd` is the `after` policy, `alert` an update that
+alerts, and `foregroundPlacement` the `placement` of a start. `links` and `chronometer` also decide
+what [a layout shows](#what-android-shows). A member that the Android side does not report is
+false. Elsewhere `androidPresentation` is absent.
 
 A feature is `supported`, `unsupported` or `unknown`, and unknown never counts as supported. On iOS
 `actions` follows the device's support for buttons. On Android `layout` and `actions` are supported
@@ -452,8 +511,8 @@ Android backend cannot ask (`UNSUPPORTED_FEATURE`); a host that has an Activity 
 - **Revision.** A higher revision replaces the content. A lower one is `STALE_REVISION`. The same
   revision with the same content changes nothing and answers the record; with other content it is
   `CONFLICT`.
-- **End.** Ending an ended activity again answers its record. An ended activity takes no update:
-  `NOT_FOUND`. An unknown `id` is `NOT_FOUND`.
+- **End.** Ending an ended activity again answers its record; a final content that comes with it is
+  not applied. An ended activity takes no update: `NOT_FOUND`. An unknown `id` is `NOT_FOUND`.
 - **Order of checks.** The contract is checked first. A request outside it never reaches a backend.
 
 `testkit::conformance` checks these rules on any backend.
@@ -466,7 +525,7 @@ code is one of the 12 in `ERROR_CODES`. The message is for a developer.
 | Code | When |
 | --- | --- |
 | `UNSUPPORTED_PLATFORM` | The platform has no Live Activities: not iOS or Android, or an iOS version below the minimum |
-| `UNSUPPORTED_FEATURE` | The backend does not provide what the request asks for: a method it does not implement, `fallback: none` where the native presentation is not available, the `after` policy on Android, layouts or images on an Android backend without the app's files, a permission kind the platform cannot ask for, or an iOS feature that needs a later iOS (the message names the feature and the version) |
+| `UNSUPPORTED_FEATURE` | The backend does not provide what the request asks for: a method it does not implement, `fallback: none` where the native presentation is not available, the `after` policy or another notification style on an Android device that does not offer it, layouts or images on an Android backend without the app's files, a permission kind the platform cannot ask for, or an iOS feature that needs a later iOS (the message names the feature and the version) |
 | `PERMISSION_DENIED` | The person or the system does not allow it: Live Activities are off in Settings on iOS, notifications are not allowed on Android |
 | `NOT_FOREGROUND` | ActivityKit refused a start because the app was not in the foreground |
 | `CONFIGURATION_REQUIRED` | The app is not set up: see [iOS setup](ios-setup.md#troubleshooting) |
@@ -490,8 +549,9 @@ match with a `_` arm.
 | `Event::PushToStartToken` | `PushToStartTokenEvent` | iOS: the app's push-to-start token, new or changed |
 | `Event::Updated` | `UpdatedEvent` | iOS: content that a push delivered to a layout activity |
 | `Event::Started` | `StartedEvent` | iOS: a layout activity began, one the application started or one a push started |
-| `Event::State` | `StateEvent` | iOS: a new lifecycle state of any activity, while the application runs. Android: the person dismissed the notification |
+| `Event::State` | `StateEvent` | iOS: a new lifecycle state of any activity, while the application runs. Android: `ended` when an end of the application ends a running activity, and `dismissed` when the person removes the notification |
 | `Event::Permissions` | `Permissions` | iOS: what the person allows, after a change in Settings |
+| `Event::Opened` | `OpenedEvent` | Android: the person opened the application from a notification, as the host reported it |
 
 ```json
 { "actionId": "track", "activityId": "9B1D4C70-...", "activityKey": "delivery:7" }
@@ -530,6 +590,28 @@ activities that got one (`TOKENS_KEPT`), in the order their first tokens came. A
 iOS delivers events as they come. Android stores taps and dismissals; `live.sync_events()` hands
 the stored ones to the sink, oldest first. On iOS it does nothing.
 
+An activity is over when its state is `ended` or `dismissed`, on either platform. On iOS ActivityKit
+reports `ended` for every end, the application's, a push's or the system's, and `dismissed` when
+the activity leaves the screen. On Android only the application ends an activity, and the backend
+reports that end itself, on the thread of the call and once: an end sent again, an end of an
+activity the person already removed and an end that fails report nothing. A last content that
+[stays after an end](#end) leaves without an event when its time comes. Android reports no
+`active` and no `stale`: a start is the application's own call, and a stale date is read when the
+record is asked for.
+
+The system gives a URL that a tap opens to the application, as any URL it is opened with:
+`onOpenURL` or the scene's URL contexts on iOS, the intent of the activity that declares the URL on
+Android. On iOS that is all. On Android the host can hand the opening intent to liveupdate
+([Android setup](android-setup.md#links)), and the sink then receives `Event::Opened` on the next
+`sync_events`:
+
+```json
+{ "activityId": "9B1D4C70-...", "activityKey": "delivery:7", "actionId": "link:1" }
+```
+
+`actionId` is absent when the person tapped the notification itself. It is the id of an action of
+an Android content, or `link:<n>` for the nth `link` of the layout's lock screen tree.
+
 ## The layout DSL
 
 ### Layout
@@ -543,12 +625,17 @@ the stored ones to the sink, oldest first. On iOS it does nothing.
     },
     "compactLeading": Node,
     "compactTrailing": Node,
-    "minimal": Node
+    "minimal": Node,
+    "margins": { ... }             // optional; see "Options of the Dynamic Island"
   },
   "background": Color | Binding,   // optional; tint of the activity background
-  "keyline": Color | Binding       // optional; tint of the Dynamic Island keyline
+  "keyline": Color | Binding,      // optional; tint of the Dynamic Island keyline
+  "url": Url | Binding             // optional; what a tap on the activity opens the app with
 }
 ```
+
+Without `url` a tap opens the app without a URL. [Links and URLs](#links-and-urls) has the rule of
+a URL.
 
 On iOS an island part that the layout leaves out is drawn with a default: `expanded` is the lock
 screen tree in the bottom region; `compactLeading` and `minimal` are the first `symbol` node of the
@@ -566,9 +653,19 @@ A value is truthy when it is `true`, a number other than 0, or a non-empty strin
 
 ### Nodes
 
-Every node is an object with a `type`. Any node may also carry `style`, a style token, and one of
-`if` and `unless`, a value key: with `if` the node and its subtree are drawn only when the value is
-truthy, with `unless` only when it is not. `?` marks an optional member.
+Every node is an object with a `type`. Any node may also carry:
+
+- `style`, a style token;
+- one of `if` and `unless`, a value key: with `if` the node and its subtree are drawn only when the
+  value is truthy, with `unless` only when it is not;
+- `accessibility`: what assistive technologies read of the node, see [Accessibility](#accessibility);
+- `transition`: how the node comes and goes when its `if` or `unless` shows or hides it: `opacity`,
+  `slide`, `moveTop`, `moveBottom`, `moveLeading`, `moveTrailing`, `pushTop`, `pushBottom`,
+  `pushLeading` or `pushTrailing`. Without it the system chooses. iOS runs these and no others;
+- `privacy`: `sensitive` marks what the node and its subtree show as private. iOS hides it on a
+  locked device and in the always-on display when the person has asked for that.
+
+`?` marks an optional member.
 
 | `type` | Members |
 | --- | --- |
@@ -585,6 +682,7 @@ truthy, with `unless` only when it is not. `?` marks an optional member.
 | `gauge` | `bind`: a value key of a number; `min`?, `max`?: numbers, 0 and 1 when left out, `min` below `max`; `kind`?: `linear` `circular` |
 | `timerText` | `start`, `end`: value keys of times in epoch milliseconds, the `end` value after the `start` value; `countsDown`?: boolean, true when left out |
 | `button` | `actionId`: `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`; `child`: Node |
+| `link` | `url`: a URL or a binding, see [Links and URLs](#links-and-urls); `child`: Node |
 | `custom` | `name`: `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, a view the app registers on iOS; `props`?: 1 to 16 entries, each a string of 0 to 200 code points, a number, a boolean or a binding |
 
 `d` is SVG path data with the commands `M L H V C S Q T Z` in upper or lower case, no arcs, and `M`
@@ -593,17 +691,99 @@ or `m` first.
 Limits of a tree:
 
 - Depth at most 8. The root of a region has depth 1; a node in `children` or the `child` of a
-  button is one deeper.
+  button or a link is one deeper.
 - Nodes per region, containers included: `lockScreen` 40, each expanded region 12,
   `compactLeading`, `compactTrailing` and `minimal` 3 each.
-- Buttons only in `lockScreen` and the expanded regions, never inside another button, at most 4 per
-  region.
+- Buttons and links only in `lockScreen` and the expanded regions, never inside a button or a link,
+  at most 4 per region, buttons and links together.
 
 References are checked at start, and again with the new values on every update:
 
 - every `bind`, `if`, `unless`, `variableBind`, `start` and `end` names a key of `snapshot.values`;
 - `progress.bind`, `gauge.bind`, `variableBind`, `timerText.start` and `timerText.end` name a number;
-- every `style` names a token of `styles`.
+- every `style` names a token of `styles`;
+- every bound `label`, `value` and `hint` of an `accessibility` names a key, of any type;
+- a bound `url`, of the layout or of a link, names a string that is a URL.
+
+### Accessibility
+
+```jsonc
+{ "type": "progress", "bind": "done",
+  "accessibility": { "label": "Delivery progress", "value": { "bind": "percent" } } }
+{ "type": "symbol", "name": "sparkles", "accessibility": { "hidden": true } }
+```
+
+`accessibility` tells assistive technologies such as VoiceOver what a node is. It has at least one
+of these members:
+
+| Member | Value |
+| --- | --- |
+| `label` | what the node is: text of 1 to 200 code points, or a binding |
+| `value` | what it shows now, such as `40 percent`: text of 1 to 200 code points, or a binding |
+| `hint` | what happens when the person acts on it: text of 1 to 200 code points, or a binding |
+| `hidden` | boolean; `true` hides the node and its subtree, and then stands alone |
+
+- A bound member is read as a `text` node shows that value. A value that is missing or empty leaves
+  the member out.
+- On a stack or a `custom` node a `label`, `value` or `hint` makes the node one element that stands
+  for what is inside; a button or a link inside stays an action of it.
+- Without the member the system reads its own: the text of a `text`, the title of a button, the
+  name of an SF Symbol. A `path`, an `image` and a `custom` view have none: label them or hide them.
+
+Android reads the title and the text of the notification and has no label per node. The projection
+uses the words where the notification would otherwise show nothing of a node: a node it cannot draw
+becomes a text, and a button or a link without a text gets its title
+([What Android shows](#what-android-shows)).
+
+### Links and URLs
+
+```jsonc
+"layout": {
+  "lockScreen": { "type": "link", "url": "myapp://delivery/7",
+                  "child": { "type": "text", "value": "Open" } },
+  "url": { "bind": "target" } }
+```
+
+`layout.url` is what a tap on the activity opens the app with, on the Lock Screen and in every
+presentation of the Dynamic Island. A `link` node does the same for a tap on its `child`, on the
+Lock Screen and in the expanded island.
+
+A URL is a string of 1 to 1024 bytes: a scheme (`^[A-Za-z][A-Za-z0-9+.-]*:`) and at least one more
+character, all of them characters of RFC 3986, with a `%` only before two hex digits. A space, a
+quote, `<`, `>`, `\`, `^`, a backtick, `{`, `|`, `}`, a control character or a character outside
+ASCII is `INVALID_INPUT`: percent-encode it.
+
+- Only the form is checked. iOS gives the URL to the application that owns the activity and opens
+  nothing else, so the application decides what it follows. With pushes a server writes the URL:
+  treat it as any URL the application is opened with.
+- A binding names a string value that is a URL, at start and on every update.
+- The application receives the URL as any other; the contract reports no event for it.
+- On Android, where the device offers `links`, `layout.url` is what a tap on the notification
+  opens and a `link` is an action that opens its URL. liveupdate takes a URL with a lowercase
+  scheme, none of `intent`, `content`, `file`, `javascript`, `data` and `android-app`, and
+  printable ASCII; another one is left out and named. The application declares an activity for
+  the URL's scheme ([Android setup](android-setup.md#links)). When none opens a URL, which only
+  the device knows, the request does not fail: the snapshot is shown without its links, and the
+  record names `layout.url` and `layout.link`.
+
+### Options of the Dynamic Island
+
+```jsonc
+"island": {
+  "expanded": { "leading": Node, "trailing": Node, "bottom": Node,
+                "priority": { "leading": 1 }, "belowIfTooWide": ["trailing"] },
+  "minimal": Node,
+  "margins": { "expanded": 8, "compactLeading": [0, 4, 0, 4] }
+}
+```
+
+| Member | Value |
+| --- | --- |
+| `expanded.priority` | an object with at least one of `leading`, `trailing`, `center`, `bottom`: a number from 0 to 100 for a region the layout has. The region with the higher one gets the width first; a region without one has 0 |
+| `expanded.belowIfTooWide` | 1 or 2 of `leading` and `trailing`, each once and each a region the layout has: the region goes below the camera when it is too wide to stand beside it |
+| `margins` | an object with at least one of `expanded`, `compactLeading`, `compactTrailing`, `minimal`: the margins of that presentation as a style's `padding`. A presentation without them keeps the system's |
+
+The options are no region and no part: `expanded` still needs a region, and `island` a part.
 
 ### Buttons and actions
 
@@ -634,6 +814,7 @@ activity: update it from the application if the button should change.
 | `opacity` | 0 to 1; or a binding |
 | `tint` | Color, for buttons, progress and gauges; or a binding |
 | `buttonStyle` | `automatic` `bordered` `borderedProminent` `plain` |
+| `contentTransition` | `numericText` `numericTextDown` `opacity` `interpolate` `identity`: how text and symbols with the style change when an update gives them another value. `numericText` rolls the digits upward, `numericTextDown` the other way |
 
 ### Colors
 
@@ -656,11 +837,13 @@ time the activity is drawn, so an update changes it. These take a binding:
 | `opacity` | a number from 0 to 1 |
 | `cornerRadius` | a number from 0 to 64 |
 | `weight` | a string: one of the nine weight names |
+| `layout.url`, the `url` of a `link` | a string that is a URL |
+| `label`, `value`, `hint` of an `accessibility` | a value of any type, read as text |
 
 The value must be one the member takes as a literal, at start and on every update; otherwise the
 request is `INVALID_INPUT`. A bound color cannot be a light and dark pair. A style that no node
-uses is checked all the same. The other style members and the members of nodes take no binding: to
-change them, end the activity and start a new one.
+uses is checked all the same. The other style members and the other members of nodes take no
+binding: to change them, end the activity and start a new one.
 
 ### Images
 
@@ -697,19 +880,24 @@ the Android backend projects the `lockScreen` tree onto one of Android's notific
 reports what it left out. It reads only the lock screen tree, in
 document order, depth first, with the current values and the `if` and `unless` conditions applied.
 
-The style of the notification is fixed when the activity starts. It is chosen from the tree,
-conditions aside: a `progress` anywhere gives the progress style; else a `timerText` the timer
-style; else two or more texts outside buttons the big text style; else the standard style.
+The style of the projection is the layout's, the same with every snapshot. It is chosen from the
+tree, conditions aside: a `progress` anywhere gives the progress style; else a `timerText` the
+timer style; else two or more texts outside buttons and links the big text style; else the
+standard style. A node that Android cannot draw and that has a label or a value counts as a text.
 
 | Layout | Notification |
 | --- | --- |
 | first shown `text` | the title, cut to 120 code points; the app's name when the layout shows no text or a blank one |
 | second shown `text` | the status line, cut to 240. Without it the status is the chip text, then the title |
 | first shown `progress` | the progress bar, clamped to 0..1; 0 while the node is hidden |
-| first shown `timerText` | the chronometer, counting down to `end`, or up from `start` with `countsDown: false`; the tree's first timer while none is shown |
-| up to three `button`s | actions, titled with the first shown text inside the button, cut to 64 |
+| first shown `timerText` | the chronometer, counting down to `end`, or up from `start` with `countsDown: false`; the tree's first timer while none is shown. Beside a progress it is the clock in the header, where the device offers `chronometer` |
+| `button`s and `link`s, three in all | actions, in the order of the tree. A button's tap reaches the sink; a link's action opens its URL, where the device offers `links`, and its id is `link:<n>`, `n` counting the links of the tree from 1, hidden ones too. The title is the first shown text inside, cut to 64; without a text, the label of the first node inside that has one; then the button's or the link's own label |
+| a shown `symbol`, `path`, `gauge`, `custom`, `spacer`, `divider` or asset `image` with an `accessibility` label, a value or both | a text, in its place among the texts: the label, the value, or `label, value`. A bound member reads as a text shows its value, and says nothing while the value is empty. A second progress or timer is named, whatever it says |
+| a node of those kinds with `accessibility.hidden` | nothing: it is decoration, and it is not named |
 | first shown `image` with a `file` source | the large icon, when the stored PNG is at most 1024 pixels a side and 1 MiB |
+| `layout.url` | the URL a tap on the notification opens, where the device offers `links` |
 | `android.visibility` | the lock screen visibility: `public`, `private` (also when absent) or `secret` |
+| `android.publicVersion` | what a secure lock screen shows in place of the content, where the device offers `publicVersion` |
 
 A text that is cut ends with `…`. The status chip text is the percentage, such as `65%`, when a
 progress is shown and no timer. A bound text shows its value as text.
@@ -719,13 +907,22 @@ progress is shown and no timer. A bound text shows its value as text.
 1. what the engine reports of the notification itself, such as `nativeLiveActivity` when Android
    did not promote it;
 2. `layout.<type>` for every shown node that was left out, once per type: a third text
-   (`layout.text`), a second progress or timer, a timer under the progress style
-   (`layout.timerText`), a button without a shown text, a fourth button or a repeated `actionId`
-   (`layout.button`), every node inside a button other than its first text, an asset image, a second
-   file image or a file that is missing or too large (`layout.image`), and every `symbol`, `spacer`,
-   `divider`, `path`, `gauge` and `custom` node;
+   (`layout.text`), a second progress or timer, a timer under the progress style on a device
+   without `chronometer` (`layout.timerText`), a button or a link without a title, beyond the
+   three actions or with an id that is taken (`layout.button`, `layout.link`), a link on a device
+   without `links` or with a URL that liveupdate does not take or nothing opens (`layout.link`),
+   every node inside a button or a link other than the one that titles it, an asset image, a second
+   file image or a file that is missing or too large (`layout.image`), and every `symbol`,
+   `spacer`, `divider`, `path`, `gauge` and `custom` node that says nothing in words. Among them,
+   in the order of the nodes: `layout.transition` for a shown node with a `transition`, and
+   `layout.privacy` for a shown node with `privacy` when `android.visibility` is `public`. A
+   notification that a locked screen hides shows nothing private there, so the mark leaves nothing
+   out;
 3. `layout.island`, `layout.styles`, `layout.background` and `layout.keyline`, when the request has
-   them. A notification draws no styles, so a bound color changes nothing on Android.
+   them, and `layout.url` when the notification does not open it. A notification draws no styles,
+   so a bound color changes nothing on Android;
+4. `alert` when an update asked for one on a device that does not offer it, and `publicVersion`
+   when the start gave one on a device that shows none.
 
 A node hidden by its condition is not listed. The list is computed from the current values, so it
 can change with an update. The record carries the layout snapshot the application sent, not the
@@ -736,8 +933,7 @@ the activity's layout nor an Android content it has shown declared is dropped. A
 the action ids of its last contents, up to 32, because a stored tap may come after a later content
 replaced its action.
 
-With an Android content nothing is projected, so the record lists no `layout.*` feature. An update
-that asked for an alert lists `alert`.
+With an Android content nothing is projected, so the record lists no `layout.*` feature.
 
 The template activities of version 1 need no projection: progress is a progress notification and
 timer a countdown. They have no buttons.

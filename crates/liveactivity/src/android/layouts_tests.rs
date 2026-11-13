@@ -32,6 +32,8 @@ impl liveupdate::Driver for FakeDriver {
                 images: true,
                 events: true,
                 samsung_now_bar: true,
+                // The extensions of liveupdate 0.2 are not offered: the rules for a device without them.
+                ..liveupdate::PresentationCapabilities::default()
             },
         })
     }
@@ -628,10 +630,7 @@ fn an_ended_id_is_not_found_before_the_revision_rules() {
         .unwrap();
     let same = snapshot(0, values("Snack", 0.2));
     assert_eq!(
-        code(
-            f.layouts
-                .update(&f.updates, update(&record.id, same.clone()))
-        ),
+        code(f.layouts.update(&f.updates, update(&record.id, same))),
         "NOT_FOUND"
     );
     assert_eq!(
@@ -641,13 +640,18 @@ fn an_ended_id_is_not_found_before_the_revision_rules() {
         )),
         "NOT_FOUND"
     );
+    // An end again answers the ended record, as on iOS: a final content, here one of a later revision, is not
+    // applied to an activity that is over.
     let again = LayoutEndInput {
         id: record.id.clone(),
         policy: EndPolicy::Immediate {},
-        snapshot: Some(same),
+        snapshot: Some(snapshot(5, values("Snack", 0.9))),
     };
-    assert_eq!(code(f.layouts.end(&f.updates, again)), "NOT_FOUND");
-    // A plain end again answers the ended record.
+    let answered = f.layouts.end(&f.updates, again).unwrap();
+    assert_eq!(
+        (answered.state, answered.snapshot.revision),
+        (crate::ActivityState::Ended, 0)
+    );
     let plain = LayoutEndInput {
         id: record.id,
         policy: EndPolicy::Immediate {},

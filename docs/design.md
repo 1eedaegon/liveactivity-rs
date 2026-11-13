@@ -58,11 +58,18 @@ application or framework plugin
    suite can replace another without a change in the caller.
 6. **What one platform reads stays with it.** Android options and content
    never reach the iOS engine; a relevance and a push request are no part of
-   what Android keeps. What a platform would show if it could, such as an
-   alert on Android, is named in the record's `degradedFeatures`.
+   what Android keeps. What a platform would show if it could, such as a
+   link of a layout on Android, is named in the record's `degradedFeatures`.
+7. **A device decides what its engine reports.** Where an engine offers
+   something on some devices only (another notification style in an update,
+   an update that alerts, a last content that stays), the backend asks the
+   engine's capabilities and answers `UNSUPPORTED_FEATURE` or a degraded
+   feature where the device has none.
 
-What the engines are about to open, and what this crate does with each, is in
-[design/engine-expressiveness](design/engine-expressiveness/PRD.md).
+What the engines opened and what this crate does with each is in
+[design/engine-expressiveness](design/engine-expressiveness/PRD.md) and
+[design/engine-extensions](design/engine-extensions/PRD.md), which also lists
+what is still planned.
 
 ## Open
 

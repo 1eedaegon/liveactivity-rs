@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "activitykit"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c869b452611c6f8c1ded3cd6443366f097c7cd9e92be212c3417ec8e8e5fd166"
+checksum = "cd457935df79ba0937610d3c9630b59c5478f0838a7657aa469a67fe4459a4b6"
 dependencies = [
  "async-channel",
  "serde",
@@ -271,9 +271,9 @@ dependencies = [
 
 [[package]]
 name = "liveupdate"
-version = "0.1.3"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97f20f7dda98c7cdb2aeb9a3cdd8093d09d8d770f8d57bfff37706c6962ddf37"
+checksum = "68d22a351e8ee9c442bf3a6545d746e25bfffd94e95850280b5ab23d8853c516"
 dependencies = [
  "jni",
  "ndk-context",

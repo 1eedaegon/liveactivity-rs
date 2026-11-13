@@ -12,6 +12,7 @@ pub(crate) fn start_request(input: StartInput) -> liveupdate::StartRequest {
         fallback: fallback(input.fallback),
         visibility: liveupdate::Visibility::Private,
         snapshot: live_snapshot(input.snapshot),
+        placement: liveupdate::Placement::Tagged,
     }
 }
 
@@ -74,7 +75,7 @@ pub(crate) fn capabilities(value: liveupdate::Capabilities, layouts: bool) -> Ca
         max_payload_bytes: 4096,
         layout: support(layouts),
         push: FeatureSupport::Unsupported,
-        // An Android content goes through the layout commands.
+        // An Android content and the options of a start go through the layout commands.
         android_presentation: layouts.then_some(value.presentation),
     }
 }

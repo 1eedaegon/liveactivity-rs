@@ -1,7 +1,7 @@
 # Android setup
 
 On Android `liveactivity` runs on the [liveupdate](https://github.com/1eedaegon/liveupdate-rs)
-crate (0.1.3). An activity is an ongoing notification, which Android 16 and later can promote to a
+crate (0.2.1 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
 Live Update. liveupdate keeps the lifecycle, the revisions and the receipts in Rust; a small AAR
 talks to Android's `NotificationManager`.
 
@@ -19,20 +19,21 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.1.3.aar` from liveupdate's
+Put `liveupdate-android-0.2.1.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too:
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.1.3.aar"))
+    implementation(files("libs/liveupdate-android-0.2.1.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
 }
 ```
 
 Use the AAR of the liveupdate version this crate depends on. `liveactivity::liveupdate` re-exports
-that crate.
+that crate. The AAR of 0.1 does not fit: liveupdate 0.2 renamed its Android package, and the JNI
+transport looks for the new name.
 
 ## 2. The manifest
 
@@ -48,9 +49,10 @@ There is nothing to write. The AAR merges these into the application's manifest:
 </application>
 ```
 
-The receivers belong to the AAR's namespace, `io.github.eedaegon.liveupdate`. One stores taps on a
-notification's actions, the other dismissals. Neither is exported. The AAR installs no foreground
-service and no background work.
+The receivers belong to the AAR's namespace, `io.github.gon.liveupdate` (`io.github.eedaegon.liveupdate`
+before liveupdate 0.2: rename it where Kotlin or a manifest of the application names a class of the
+AAR). One stores taps on a notification's actions, the other dismissals. Neither is exported. The
+AAR installs no foreground service and no background work.
 
 ## 3. Choose a transport
 
@@ -178,7 +180,9 @@ snapshot.android = Some(AndroidContent {
     title: "Delivery 7".into(),
     status: "2 stops away".into(),
     presentation: AndroidPresentation {
-        style: PresentationStyle::Progress(ProgressStyle {
+        short_critical_text: Some("8 min".into()),
+        // Every member that is not named stays unset.
+        ..AndroidPresentation::new(PresentationStyle::Progress(ProgressStyle {
             progress: 60,
             indeterminate: false,
             styled_by_progress: true,
@@ -190,21 +194,133 @@ snapshot.android = Some(AndroidContent {
             start_icon: None,
             end_icon: None,
             tracker_icon: None,
-        }),
-        short_critical_text: Some("8 min".into()),
-        large_icon: None,
-        actions: Vec::new(),
-        samsung_now_bar: None,
+        }))
     },
 });
 live.update_layout(LayoutUpdateInput::new(&record.id, snapshot)).await?;
 ```
 
-Ask `live.capabilities().await?.android_presentation` which styles the device draws before
-choosing one: the progress style needs Android 16, the metric style Android 17. Android keeps the
-style of the first snapshot and answers `UNSUPPORTED_FEATURE` to a content of another style, so
-give a content with every snapshot of an activity or with none.
+Ask `live.capabilities().await?.android_presentation` what the device draws and offers before
+choosing: the progress style needs Android 16, the metric style Android 17. A snapshot may have
+another style than the one the activity shows where the device offers `style_change`, which the
+AAR of 0.2 does; elsewhere that is `UNSUPPORTED_FEATURE`.
 The rules are in [the contract](contract.md#an-android-content).
+
+### Links
+
+A layout's `url` is what a tap on the notification opens, and each of its `link` nodes is an
+action that opens its URL: nothing to write for Android, where the device offers `links`. A
+content may name them itself, the URL of the notification and an action that opens one instead
+of sending a tap:
+
+```rust
+snapshot.android = Some(AndroidContent {
+    title: "Delivery 7".into(),
+    status: "2 stops away".into(),
+    presentation: AndroidPresentation {
+        open_url: Some("myapp://delivery/7".into()),
+        actions: vec![NotificationAction {
+            open_url: Some("myapp://delivery/7/map".into()),
+            ..NotificationAction::new("map", "Map")
+        }],
+        ..AndroidPresentation::new(PresentationStyle::Standard)
+    },
+});
+```
+
+liveupdate opens the URL with `ACTION_VIEW` inside the application's own package only, so one of
+its activities, exported or not, needs an intent filter for it:
+
+```xml
+<activity android:name=".MainActivity" android:exported="true">
+    <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:scheme="myapp" />
+    </intent-filter>
+</activity>
+```
+
+The activity reads the URL from its intent, as for any deep link. Without such an activity
+liveupdate refuses to post a URL. For a content the request then fails with `INVALID_INPUT`, and
+nothing is posted. For a layout it does not fail: the snapshot is shown without its links, the
+notification opens the launch activity as before, and the record names `layout.url` and
+`layout.link` in `degradedFeatures`. That costs a second post with every snapshot, so declare the
+scheme.
+
+To learn in Rust that the person opened the application from a notification, hand the opening
+intent to liveupdate in that activity. The sink then receives `Event::Opened`, with the
+activity's id and key and the action that opened it, on the next `sync_events`:
+
+```kotlin
+import io.github.gon.liveupdate.LiveUpdateEvents
+
+override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    // A new intent, not one the system restored.
+    if (savedInstanceState == null) LiveUpdateEvents.opened(this, intent)
+}
+
+override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    LiveUpdateEvents.opened(this, intent)
+}
+```
+
+### A last content that stays, a header clock, a lock screen version, branding
+
+They are members of the content too, each behind a capability of its own:
+[the table in the contract](contract.md#an-android-content). An end with the `after` policy keeps
+the last content on screen, no longer ongoing and no longer promoted, until its time.
+
+A layout gets two of them without a content. A timer beside a progress is the clock in the
+header. And a start may say what a secure lock screen shows of a private activity:
+
+```rust
+let mut options = AndroidOptions::new(AndroidVisibility::Private);
+options.public_version = Some(PublicVersion {
+    title: "Delivery".into(),
+    status: "On the way".into(),
+});
+start.android = Some(options);
+```
+
+### A foreground service
+
+Android shows one notification for a foreground service. An application that updates an activity
+from such a service, in the background, lets the service hold the activity's notification instead
+of a second one. The start asks for it:
+
+```rust
+let mut options = AndroidOptions::new(AndroidVisibility::Private);
+options.placement = Some(AndroidPlacement::Foreground);
+start.android = Some(options);
+let record = live.start_layout(start).await?;
+```
+
+The service, its type and its permission are the application's; liveupdate's AAR declares none.
+Start the activity first and the service second, and attach the service in Kotlin:
+
+```kotlin
+import io.github.gon.liveupdate.LiveUpdateForeground
+
+class DeliveryService : Service() {
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // The activity's notification becomes this service's. False when no activity has the placement.
+        if (!LiveUpdateForeground.attach(this, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)) stopSelf()
+        return START_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}
+
+// Once, for example in Application.onCreate: an end takes the service out of the foreground.
+LiveUpdateForeground.setListener { stopService(Intent(this, DeliveryService::class.java)) }
+```
+
+One running activity has the placement at a time: a second start with it is `SYSTEM_LIMIT`. A
+device that does not offer `foregroundPlacement` answers `UNSUPPORTED_FEATURE`. Without a service
+the notification is an ordinary one.
 
 ## 5. Permissions
 
@@ -280,7 +396,7 @@ Call it:
 For the signal, the AAR calls one listener after each stored event:
 
 ```kotlin
-import io.github.eedaegon.liveupdate.LiveUpdateEvents
+import io.github.gon.liveupdate.LiveUpdateEvents
 
 LiveUpdateEvents.setListener {
     // Called on the receiver's thread. Keep it short: tell Rust to drain, from another thread.
@@ -349,10 +465,24 @@ fn main() {
   framework call. Keep it off the UI thread.
 - **One backend per process.** Build one `LiveActivity` and keep it, so that operations share one
   serialization boundary.
-- **End policies.** `immediate` and `default` both remove the notification. `after` answers
+- **End policies.** `immediate` and `default` both remove the notification. `after` keeps the last
+  content until its time, as an ordinary notification that the person can remove; a second end
+  without a time removes it early. A device that does not offer `delayedEnd` answers
   `UNSUPPORTED_FEATURE`.
+- **Alerts.** An update with an `alert` is posted on a second channel of high importance, "Live
+  update alerts", which liveupdate creates with the first one. A person who blocked that channel
+  gets the update silently.
+- **Updates need the process.** Android has no push that updates a notification. In the
+  background an application updates from a foreground service or from a data message that wakes
+  it. A start with the foreground placement lets such a service hold the notification
+  ([A foreground service](#a-foreground-service)).
 - **Limits.** liveupdate keeps at most 32 active records and 128 ended ones, templates and layouts
   together. One more active activity answers `SYSTEM_LIMIT`.
+- **An update of the application.** Android removes an application's notifications when the
+  application is updated. After an update from liveupdate 0.1 to 0.2 the activities that were
+  running are also gone from the lists and their ids are `NOT_FOUND`: liveupdate 0.2 keeps its
+  receipts under its new package name and does not read those of 0.1. Their keys start new
+  activities.
 - **Pushes.** Android has none. A layout start's `push` is dropped, `push_tokens()` is empty and
   `capabilities().push` is `unsupported`.
 - **Visibility.** Records keep `visibility: unknown`. Asking for private content on the lock screen
@@ -380,7 +510,15 @@ it with `with_files` (step 4). A builder without a backend never has them.
 **`request_permissions` answers `UNSUPPORTED_FEATURE`.** The default backend cannot show a dialog.
 Wrap it (step 5).
 
-**`end` answers `UNSUPPORTED_FEATURE`.** The policy is `after`, which Android does not support.
+**`end` answers `UNSUPPORTED_FEATURE`.** The policy is `after` and the device does not offer
+`delayedEnd`: the AAR is older than 0.2, or the host's own Android side does not report it.
+
+**An update answers `UNSUPPORTED_FEATURE`.** Its snapshot has another notification style than the
+activity shows, and the device does not offer `styleChange`.
+
+**A start or an update with a content answers `INVALID_INPUT` on Android only.** The content names
+a URL that no activity of the application opens, a small icon that is no resource of it, or a
+public version for an activity that did not start as private.
 
 **The notification is not promoted.** `promotionState` is `notPromoted`. Promotion needs
 Android 16 or later, enabled notifications, the person's promotion setting and the device's system
@@ -393,8 +531,14 @@ backend has files and the layout does not declare the tapped `actionId`.
 not written before the start or update, or it is larger than 1024 pixels a side or 1 MiB. Only the
 first shown `image` with a `file` source is used.
 
-**Parts of a layout are missing.** A notification shows a title, a status line, one progress or
-timer, up to three actions and one icon. The record's `degradedFeatures` names the rest.
+**Parts of a layout are missing.** A notification shows a title, a status line, a progress, a
+timer, up to three actions and one icon. The record's `degradedFeatures` names the rest. A picture
+with an accessibility label is shown as that text, and a button whose label is a picture needs
+one to become an action.
+
+**A layout's links do not open.** The record names `layout.url` or `layout.link`: no activity of
+the application declares the URL's scheme, or liveupdate does not take the URL (a scheme with a
+capital letter, or one of `intent`, `content`, `file`, `javascript`, `data`, `android-app`).
 
 **A start answers `SYSTEM_LIMIT`.** 32 activities are active. End the ones that are done.
 

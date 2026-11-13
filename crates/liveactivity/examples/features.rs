@@ -8,27 +8,51 @@
 //! ```
 
 use liveactivity::{
-    Alert, AndroidContent, AndroidPresentation, Bound, EndInput, Event, FeatureSupport, Layout,
-    LayoutEndInput, LayoutPush, LayoutSnapshot, LayoutStartInput, LayoutUpdateInput, LiveActivity,
-    LiveActivityBackend, PermissionKind, PermissionState, PresentationStyle, ProgressSegment,
-    ProgressStyle, Result, StartInput, UpdateInput,
+    Accessibility, ActivityState, Alert, AndroidContent, AndroidOptions, AndroidPlacement,
+    AndroidPresentation, AndroidVisibility, Bound, EndInput, EndPolicy, Event, FeatureSupport,
+    Layout, LayoutEndInput, LayoutPush, LayoutSnapshot, LayoutStartInput, LayoutUpdateInput,
+    LiveActivity, LiveActivityBackend, NotificationAction, PermissionKind, PermissionState,
+    PresentationStyle, ProgressSegment, ProgressStyle, PublicVersion, Result, StartInput,
+    TimerStyle, Transition, UpdateInput,
     activitykit::{
-        layout::{button, progress, text, vstack},
+        layout::{button, link, progress, text, vstack},
         values,
     },
+    liveupdate::Timer,
 };
 
 /// Connect. One builder: the application names where events go, and whatever is not named is the default.
 fn connect(backend: impl LiveActivityBackend) -> Result<LiveActivity> {
     LiveActivity::builder()
         .backend(backend) // leave this out for the platform's own backend
-        .event_sink(|event: Event| match event {
-            Event::Action(tap) => println!("tapped {} on {}", tap.action_id, tap.activity_id),
-            Event::State(change) => println!("{} is {:?}", change.activity_id, change.state),
-            Event::PushToken(token) => println!("send {} to the server", token.token),
-            _ => {}
+        .event_sink(|event: Event| {
+            if let Some(id) = over(&event) {
+                println!("{id} is over");
+            }
+            match event {
+                Event::Action(tap) => println!("tapped {} on {}", tap.action_id, tap.activity_id),
+                Event::State(change) => println!("{} is {:?}", change.activity_id, change.state),
+                Event::PushToken(token) => println!("send {} to the server", token.token),
+                _ => {}
+            }
         })
         .build()
+}
+
+/// Events: an activity is over when a state event says that it ended or that the person dismissed it. This is
+/// the id of the activity that `event` says is over.
+fn over(event: &Event) -> Option<&str> {
+    match event {
+        Event::State(change)
+            if matches!(
+                change.state,
+                ActivityState::Ended | ActivityState::Dismissed
+            ) =>
+        {
+            Some(&change.activity_id)
+        }
+        _ => None,
+    }
 }
 
 /// Progress and timer activities: a title, a status, and a progress from 0 to 1 or a countdown.
@@ -75,6 +99,7 @@ async fn layout(live: &LiveActivity) -> Result<String> {
         island: None,
         background: None,
         keyline: None,
+        url: None,
     };
     let values = values! { "title" => "Delivery 7", "done" => 0.4 }.into_inner();
     let start = LayoutStartInput::new("delivery:7", layout, LayoutSnapshot::new(0, values));
@@ -87,8 +112,47 @@ async fn layout(live: &LiveActivity) -> Result<String> {
     Ok(record.id)
 }
 
-/// An alert with an update, and a relevance. iOS lights up and shows the alert; Android updates silently and
-/// names `alert` in the record's `degraded_features`.
+/// Links, accessibility, motion and privacy: members of the layout, which iOS draws. On Android the notification
+/// and its actions open the URLs, a label is the text of what a notification cannot draw, and the record names
+/// what was left out.
+async fn links_accessibility_and_motion(live: &LiveActivity) -> Result<()> {
+    let layout = Layout {
+        lock_screen: vstack([
+            // What VoiceOver reads of a node that has no text of its own.
+            progress("done").accessibility(
+                Accessibility::new()
+                    .label("Delivery progress")
+                    .value(Bound::key("percent")),
+            ),
+            // Hidden on a locked device, when the person asked for that.
+            text(Bound::key("address")).sensitive(),
+            // Shown while `arrived` is true, and how it comes and goes.
+            text("At the door")
+                .when("arrived")
+                .transition(Transition::MoveTop),
+            // A tap on the label opens the application with this URL.
+            link("myapp://delivery/9/map", text("Map")),
+        ]),
+        island: None,
+        background: None,
+        keyline: None,
+        // A tap anywhere else on the activity.
+        url: Some("myapp://delivery/9".into()),
+    };
+    let values = values! {
+        "done" => 0.4, "percent" => "40 percent", "address" => "12 Hill Street", "arrived" => false,
+    }
+    .into_inner();
+    let start = LayoutStartInput::new("delivery:9", layout, LayoutSnapshot::new(0, values));
+    let record = live.start_layout(start).await?;
+    // On Android the links open too, and the record names layout.transition.
+    println!("left out: {:?}", record.degraded_features);
+    Ok(())
+}
+
+/// An alert with an update, and a relevance. iOS lights up and shows the alert. Android alerts again with the
+/// notification where the device offers that; elsewhere it updates silently and names `alert` in the record's
+/// `degraded_features`.
 async fn alert_and_relevance(live: &LiveActivity, id: &str) -> Result<()> {
     let values = values! { "title" => "Delivery 7", "done" => 1.0 }.into_inner();
     let mut snapshot = LayoutSnapshot::new(2, values);
@@ -115,7 +179,9 @@ async fn android_content(live: &LiveActivity, id: &str) -> Result<()> {
         title: "Delivery 7".into(),
         status: "2 stops away".into(),
         presentation: AndroidPresentation {
-            style: PresentationStyle::Progress(ProgressStyle {
+            // The text of the status chip, at most 7 characters.
+            short_critical_text: Some("8 min".into()),
+            ..AndroidPresentation::new(PresentationStyle::Progress(ProgressStyle {
                 progress: 60,
                 indeterminate: false,
                 styled_by_progress: true,
@@ -128,16 +194,81 @@ async fn android_content(live: &LiveActivity, id: &str) -> Result<()> {
                 start_icon: None,
                 end_icon: None,
                 tracker_icon: None,
-            }),
-            // The text of the status chip, at most 7 characters.
-            short_critical_text: Some("8 min".into()),
-            large_icon: None,
-            actions: Vec::new(),
-            samsung_now_bar: None,
+            }))
         },
     });
     live.update_layout(LayoutUpdateInput::new(id, snapshot))
         .await?;
+    Ok(())
+}
+
+/// What else an Android content can say: a URL the notification opens, an action that opens one, a clock in the
+/// header, what a secure lock screen shows, and the application's own look. Each is behind a capability.
+async fn android_links_and_extras(live: &LiveActivity, id: &str, ends_at: u64) -> Result<()> {
+    let capabilities = live.capabilities().await?;
+    let offered = capabilities.android_presentation.unwrap_or_default();
+    let values = values! { "title" => "Delivery 7", "done" => 0.8 }.into_inner();
+    let mut snapshot = LayoutSnapshot::new(4, values);
+    snapshot.android = Some(AndroidContent {
+        title: "Delivery 7".into(),
+        status: "At the door in 4 minutes".into(),
+        presentation: AndroidPresentation {
+            // A tap on the notification opens this URL in the application.
+            open_url: offered.links.then(|| "myapp://delivery/7".into()),
+            // An action that opens a URL sends no tap.
+            actions: if offered.links {
+                vec![NotificationAction {
+                    open_url: Some("myapp://delivery/7/map".into()),
+                    ..NotificationAction::new("map", "Map")
+                }]
+            } else {
+                Vec::new()
+            },
+            // A countdown in the header, beside the style.
+            chronometer: offered.chronometer.then(|| TimerStyle {
+                timer: Timer {
+                    started_at: ends_at - 240_000,
+                    ends_at,
+                },
+                counts_down: true,
+            }),
+            // What a secure lock screen shows of an activity that started as private.
+            public_version: offered.public_version.then(|| PublicVersion {
+                title: "Delivery".into(),
+                status: "On the way".into(),
+            }),
+            sub_text: offered.branding.then(|| "Mochi Express".into()),
+            ..AndroidPresentation::new(PresentationStyle::Standard)
+        },
+    });
+    live.update_layout(LayoutUpdateInput::new(id, snapshot))
+        .await?;
+    Ok(())
+}
+
+/// Android options: what only Android reads of a start. A public version is what a secure lock screen shows in
+/// place of the content of a private activity. The foreground placement makes the notification the one that a
+/// foreground service of the application holds.
+async fn android_options(live: &LiveActivity, mut start: LayoutStartInput) -> Result<()> {
+    let capabilities = live.capabilities().await?;
+    let offered = capabilities.android_presentation.unwrap_or_default();
+    let mut options = AndroidOptions::new(AndroidVisibility::Private);
+    options.public_version = Some(PublicVersion {
+        title: "Delivery".into(),
+        status: "On the way".into(),
+    });
+    if offered.foreground_placement {
+        options.placement = Some(AndroidPlacement::Foreground);
+    }
+    start.android = Some(options);
+    let record = live.start_layout(start).await?;
+    if record
+        .degraded_features
+        .iter()
+        .any(|left| left == "publicVersion")
+    {
+        println!("this device shows no public version");
+    }
     Ok(())
 }
 
@@ -191,6 +322,17 @@ async fn end_and_sync(live: &LiveActivity, id: &str) -> Result<()> {
     live.sync_events().await
 }
 
+/// An end that keeps the last content on screen until a time, with a final snapshot. iOS keeps it for at most
+/// four hours. Android keeps it where the device offers that, and answers `UNSUPPORTED_FEATURE` elsewhere.
+async fn end_with_a_last_content(live: &LiveActivity, id: &str, until: u64) -> Result<()> {
+    let values = values! { "title" => "Delivered", "done" => 1.0 }.into_inner();
+    let mut end = LayoutEndInput::new(id);
+    end.policy = EndPolicy::After { at: until };
+    end.snapshot = Some(LayoutSnapshot::new(5, values));
+    live.end_layout(end).await?;
+    Ok(())
+}
+
 /// The error code of a call, or `ok`.
 fn code<T>(result: Result<T>) -> String {
     result.map_or_else(|error| error.code, |_| "ok".to_owned())
@@ -223,12 +365,21 @@ fn main() -> Result<()> {
         // The rest needs a platform that draws layouts: here each answers its error code.
         println!("layout: {}", code(layout(&live).await));
         println!(
+            "links, accessibility and motion: {}",
+            code(links_accessibility_and_motion(&live).await)
+        );
+        println!(
             "alert and relevance: {}",
             code(alert_and_relevance(&live, "id").await)
         );
         println!(
             "android content: {}",
             code(android_content(&live, "id").await)
+        );
+        let in_four_minutes = 1_800_000_240_000;
+        println!(
+            "android links and extras: {}",
+            code(android_links_and_extras(&live, "id", in_four_minutes).await)
         );
         println!("image: {}", code(image(&live, b"not a png").await));
         let start = LayoutStartInput::new(
@@ -238,11 +389,20 @@ fn main() -> Result<()> {
                 island: None,
                 background: None,
                 keyline: None,
+                url: None,
             },
             LayoutSnapshot::new(0, Default::default()),
         );
+        println!(
+            "android options: {}",
+            code(android_options(&live, start.clone()).await)
+        );
         println!("pushes: {}", code(pushes(&live, start).await));
         println!("end and sync: {}", code(end_and_sync(&live, "id").await));
+        println!(
+            "end with a last content: {}",
+            code(end_with_a_last_content(&live, "id", in_four_minutes).await)
+        );
         Ok(())
     })
 }

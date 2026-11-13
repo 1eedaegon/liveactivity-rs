@@ -22,6 +22,9 @@ fn projected(layout: &Layout, values: Json) -> Projection {
             app_name: "Mochi",
             samsung_now_bar: false,
             image: &no_image,
+            public: false,
+            links: false,
+            chronometer: false,
         },
     )
 }
@@ -243,6 +246,9 @@ fn the_first_shown_file_image_that_fits_is_the_large_icon() {
         app_name: "Mochi",
         samsung_now_bar: false,
         image: &image,
+        public: false,
+        links: false,
+        chronometer: false,
     };
     let picture = |source: Json| json!({ "type": "image", "source": source });
     let tree = layout(json!({ "type": "vstack", "children": [
@@ -307,6 +313,9 @@ fn the_now_bar_gets_the_title_and_the_status_when_configured() {
         app_name: "Mochi",
         samsung_now_bar: true,
         image: &no_image,
+        public: false,
+        links: false,
+        chronometer: false,
     };
     let tree = layout(json!({ "type": "vstack", "children": [text("Snack"), text("On the way")] }));
     let projection = projected_with(&tree, json!({}), &environment);
@@ -371,6 +380,9 @@ fn degraded_features_follow_liveupdate_then_the_nodes_then_the_layout() {
             app_name: "Mochi",
             samsung_now_bar: false,
             image: &no_image,
+            public: false,
+            links: false,
+            chronometer: false,
         },
     );
     projection.snapshot.validate().unwrap();
@@ -425,6 +437,9 @@ fn liveupdates_whitespace_counts_as_blank() {
         app_name: " ",
         samsung_now_bar: false,
         image: &no_image,
+        public: false,
+        links: false,
+        chronometer: false,
     };
     assert_eq!(
         projected_with(&layout(text(feff)), json!({}), &nameless)
@@ -432,4 +447,269 @@ fn liveupdates_whitespace_counts_as_blank() {
             .title,
         "Live activity"
     );
+}
+
+#[test]
+fn req_a_004_the_projection_names_what_android_leaves_out_of_the_ios_surface() {
+    // REQ-A-004
+    let tree: Layout = serde_json::from_value(json!({
+        "url": "myapp://rides/7",
+        "lockScreen": { "type": "vstack", "children": [
+            { "type": "text", "value": "Ride", "accessibility": { "label": "Your ride" } },
+            { "type": "text", "bind": "eta", "privacy": "sensitive", "transition": "moveTop" },
+            { "type": "link", "url": "myapp://rides/7/map", "child": text("Map") },
+            { "type": "text", "value": "Later", "if": "never", "privacy": "sensitive", "transition": "slide" },
+        ] },
+    }))
+    .unwrap();
+    let values = json!({ "eta": "4 min", "never": false });
+
+    // A notification that a locked screen hides shows nothing of a sensitive node there: the mark is kept.
+    let hidden = projected(&tree, values.clone());
+    assert_eq!(
+        hidden.degraded,
+        ["layout.transition", "layout.link", "layout.url"]
+    );
+    // The label of a link is no text of the notification and no action; a label for a screen reader is no text.
+    assert_eq!(
+        (
+            hidden.snapshot.title.as_str(),
+            hidden.snapshot.status.as_str()
+        ),
+        ("Ride", "4 min")
+    );
+    assert!(presentation(&hidden).actions.is_empty());
+    assert_eq!(template(&tree), liveupdate::Template::BigText);
+
+    // One that a locked screen shows whole shows the sensitive node too.
+    let public = Environment {
+        app_name: "Mochi",
+        samsung_now_bar: false,
+        image: &no_image,
+        public: true,
+        links: false,
+        chronometer: false,
+    };
+    assert_eq!(
+        projected_with(&tree, values, &public).degraded,
+        [
+            "layout.transition",
+            "layout.privacy",
+            "layout.link",
+            "layout.url"
+        ]
+    );
+
+    // What labels an action is shown too: a private text inside a button, and how it comes and goes.
+    let button = layout(json!({ "type": "button", "actionId": "call", "child":
+        { "type": "text", "bind": "driver", "privacy": "sensitive", "transition": "opacity" } }));
+    let named = projected_with(&button, json!({ "driver": "Mina" }), &public);
+    assert_eq!(presentation(&named).actions[0].title, "Mina");
+    assert_eq!(named.degraded, ["layout.transition", "layout.privacy"]);
+    assert_eq!(
+        projected(&button, json!({ "driver": "Mina" })).degraded,
+        ["layout.transition"]
+    );
+
+    // A node that is not shown leaves nothing out, and neither does an accessibility member.
+    let plain = layout(json!({ "type": "vstack", "children": [
+        { "type": "text", "value": "Ride", "accessibility": { "hidden": true } },
+        { "type": "link", "url": "myapp://x", "child": text("Map"), "if": "never" },
+    ] }));
+    assert!(
+        projected_with(&plain, json!({ "never": false }), &public)
+            .degraded
+            .is_empty()
+    );
+}
+
+/// A device that offers what a projection can use beyond the styles.
+fn offering() -> Environment<'static> {
+    Environment {
+        app_name: "Mochi",
+        samsung_now_bar: false,
+        image: &no_image,
+        public: false,
+        links: true,
+        chronometer: true,
+    }
+}
+
+#[test]
+fn req_a_008_links_of_a_layout_become_what_the_notification_opens() {
+    // REQ-A-008
+    let tree: Layout = serde_json::from_value(json!({
+        "url": { "bind": "target" },
+        "lockScreen": { "type": "vstack", "children": [
+            text("Ride"),
+            { "type": "link", "url": "myapp://rides/7/map", "child": text("Map") },
+            { "type": "button", "actionId": "call", "child": text("Call") },
+            { "type": "link", "url": { "bind": "receipt" }, "child": { "type": "hstack", "children": [
+                { "type": "symbol", "name": "doc" }, text("Receipt") ] } },
+            { "type": "link", "url": "myapp://rides/7/help", "child": text("Help") },
+            { "type": "link", "url": "myapp://rides/7/later", "child": text("Later"), "if": "never" },
+        ] },
+    }))
+    .unwrap();
+    let values = json!({
+        "target": "myapp://rides/7", "receipt": "https://example.com/r/7", "never": false,
+    });
+
+    // The layout's URL is what a tap opens, and a link is an action that opens its URL, in its place among the
+    // buttons. Its id counts the links of the tree, so that it is the same with every snapshot.
+    let projection = projected_with(&tree, values.clone(), &offering());
+    let shown = presentation(&projection);
+    assert_eq!(shown.open_url.as_deref(), Some("myapp://rides/7"));
+    let actions: Vec<_> = shown
+        .actions
+        .iter()
+        .map(|action| {
+            (
+                action.id.as_str(),
+                action.title.as_str(),
+                action.open_url.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        actions,
+        [
+            ("link:1", "Map", Some("myapp://rides/7/map")),
+            ("call", "Call", None),
+            ("link:2", "Receipt", Some("https://example.com/r/7")),
+        ]
+    );
+    // What stands beside a link's label is left out, and so is a link beyond the three actions.
+    assert_eq!(projection.degraded, ["layout.symbol", "layout.link"]);
+    // A link is no text of the notification.
+    assert_eq!(projection.snapshot.title, "Ride");
+    assert_eq!(template(&tree), liveupdate::Template::Standard);
+
+    // A URL that liveupdate does not take is left out and named: a scheme with a capital, a scheme it refuses.
+    let odd: Layout = serde_json::from_value(json!({
+        "url": "MyApp://rides/7",
+        "lockScreen": { "type": "link", "url": "file:///rides/7", "child": text("Map") },
+    }))
+    .unwrap();
+    let projection = projected_with(&odd, json!({}), &offering());
+    assert_eq!(presentation(&projection).open_url, None);
+    assert!(presentation(&projection).actions.is_empty());
+    assert_eq!(projection.degraded, ["layout.link", "layout.url"]);
+
+    // A device without links shows the buttons alone, as before.
+    let projection = projected(&tree, values);
+    assert_eq!(presentation(&projection).open_url, None);
+    assert_eq!(presentation(&projection).actions.len(), 1);
+    assert_eq!(projection.degraded, ["layout.link", "layout.url"]);
+
+    // A link keeps its number while one before it is hidden.
+    let second = layout(json!({ "type": "vstack", "children": [
+        { "type": "vstack", "if": "never", "children": [
+            { "type": "link", "url": "myapp://first", "child": text("First") } ] },
+        { "type": "link", "url": "myapp://second", "child": text("Second") },
+    ] }));
+    let projection = projected_with(&second, json!({ "never": false }), &offering());
+    assert_eq!(presentation(&projection).actions[0].id, "link:2");
+}
+
+#[test]
+fn req_a_009_a_timer_beside_a_progress_is_the_header_clock() {
+    // REQ-A-009
+    let tree = layout(json!({ "type": "vstack", "children": [
+        text("Ride"),
+        { "type": "progress", "bind": "done" },
+        { "type": "timerText", "start": "from", "end": "until", "countsDown": false },
+    ] }));
+    let values = json!({ "done": 0.4, "from": 1000, "until": 5000 });
+
+    let projection = projected_with(&tree, values.clone(), &offering());
+    let shown = presentation(&projection);
+    assert!(matches!(
+        shown.style,
+        liveupdate::PresentationStyle::Progress(_)
+    ));
+    assert_eq!(
+        shown.chronometer,
+        Some(liveupdate::TimerStyle {
+            timer: liveupdate::Timer {
+                started_at: 1000,
+                ends_at: 5000,
+            },
+            counts_down: false,
+        })
+    );
+    assert!(projection.degraded.is_empty());
+
+    // Elsewhere the timer is left out and named, as before.
+    let projection = projected(&tree, values);
+    assert_eq!(presentation(&projection).chronometer, None);
+    assert_eq!(projection.degraded, ["layout.timerText"]);
+
+    // A layout whose style is the timer has its clock there, and no second one.
+    let alone = layout(json!({ "type": "vstack", "children": [
+        text("Tea"),
+        { "type": "timerText", "start": "from", "end": "until" },
+    ] }));
+    let projection = projected_with(&alone, json!({ "from": 1000, "until": 5000 }), &offering());
+    assert!(matches!(
+        presentation(&projection).style,
+        liveupdate::PresentationStyle::Timer(_)
+    ));
+    assert_eq!(presentation(&projection).chronometer, None);
+}
+
+#[test]
+fn req_a_010_labels_are_the_text_of_what_android_cannot_draw() {
+    // REQ-A-010
+    let tree = layout(json!({ "type": "vstack", "children": [
+        { "type": "symbol", "name": "car.fill",
+          "accessibility": { "label": "Driver", "value": { "bind": "driver" } } },
+        { "type": "gauge", "bind": "battery", "accessibility": { "value": "40 percent" } },
+        { "type": "divider", "accessibility": { "hidden": true } },
+        { "type": "button", "actionId": "call", "child": { "type": "hstack", "children": [
+            { "type": "path", "d": "M0 0L1 1", "box": [1, 1] },
+            { "type": "symbol", "name": "phone.fill", "accessibility": { "label": "Call" } },
+            { "type": "gauge", "bind": "battery" } ] } },
+        { "type": "button", "actionId": "stop", "accessibility": { "label": "Stop the ride" },
+          "child": { "type": "hstack", "children": [
+            { "type": "spacer" }, { "type": "divider", "accessibility": { "hidden": true } } ] } },
+        { "type": "path", "d": "M0 0L1 1", "box": [1, 1] },
+    ] }));
+    let projection = projected(&tree, json!({ "driver": "Mina", "battery": 0.4 }));
+
+    // What says in words what it is becomes a text, in its place among the texts.
+    assert_eq!(projection.snapshot.title, "Driver, Mina");
+    assert_eq!(projection.snapshot.status, "40 percent");
+    assert_eq!(template(&tree), liveupdate::Template::BigText);
+    // A button whose label is a picture is titled by the picture's label, or by its own.
+    let titles: Vec<_> = presentation(&projection)
+        .actions
+        .iter()
+        .map(|action| (action.id.as_str(), action.title.as_str()))
+        .collect();
+    assert_eq!(titles, [("call", "Call"), ("stop", "Stop the ride")]);
+    // Decoration is left out without a word, in the tree and inside a button, and so is the picture that titles
+    // a button. What has no words is named: what stands beside the picture that titles, the spacer beside a
+    // button's own label, and the path.
+    assert_eq!(
+        projection.degraded,
+        ["layout.path", "layout.gauge", "layout.spacer"]
+    );
+
+    // The notification has one progress: a second one is named, whatever it says in words.
+    let twice = layout(json!({ "type": "vstack", "children": [
+        { "type": "progress", "bind": "done" },
+        { "type": "progress", "bind": "done", "accessibility": { "label": "Again" } },
+        { "type": "progress", "bind": "done", "accessibility": { "hidden": true } },
+    ] }));
+    let projection = projected(&twice, json!({ "done": 0.4 }));
+    assert_eq!(projection.snapshot.title, "Mochi");
+    assert_eq!(projection.degraded, ["layout.progress"]);
+
+    // A label bound to a value that is empty says nothing: the node is named, as before.
+    let silent = layout(json!({ "type": "symbol", "name": "car.fill",
+        "accessibility": { "label": { "bind": "driver" } } }));
+    let projection = projected(&silent, json!({ "driver": "" }));
+    assert_eq!(projection.snapshot.title, "Mochi");
+    assert_eq!(projection.degraded, ["layout.symbol"]);
 }

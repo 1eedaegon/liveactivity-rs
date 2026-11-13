@@ -26,6 +26,22 @@ pub struct StateEvent {
     pub state: ActivityState,
 }
 
+/// The person opened the application from the notification of an activity (Android), as the host reported it to
+/// liveupdate with the opening intent. The application receives the URL itself, from that intent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenedEvent {
+    /// The handle of the activity.
+    pub activity_id: String,
+    /// Absent when the backend no longer knows that activity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_key: Option<String>,
+    /// The action that opened the application, when the person tapped one and not the notification itself: an
+    /// action of an Android content, or `link:<n>` for the nth link of a layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_id: Option<String>,
+}
+
 /// What a platform reports of the application's activities. More kinds may come: match with a `_` arm.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
@@ -40,11 +56,14 @@ pub enum Event {
     Updated(UpdatedEvent),
     /// A layout activity began: one the application started, or one a push started (iOS).
     Started(StartedEvent),
-    /// A new lifecycle state of an activity. iOS reports every change while the application runs; Android reports
-    /// that the person dismissed the notification.
+    /// A new lifecycle state of an activity. iOS reports every change while the application runs. Android reports
+    /// `Ended` when an end of the application ends a running activity, and `Dismissed` when the person removes
+    /// the notification. An activity is over at either.
     State(StateEvent),
     /// What the person allows, after a change in Settings (iOS).
     Permissions(Permissions),
+    /// The person opened the application from a notification (Android).
+    Opened(OpenedEvent),
 }
 
 /// Where a backend's events go: implemented by a framework plugin, or any closure.
@@ -52,7 +71,7 @@ pub enum Event {
 /// On iOS the backend calls the sink from a thread of its own. A tap keeps its intent, and an app the system
 /// launched for it, until `emit` has returned, for at most 4 seconds; the other events wait for nothing. On Android
 /// the sink is called on the thread that runs `sync_events`, while the backend holds its drain: a sink must not
-/// call `sync_events` itself.
+/// call `sync_events` itself. An end is reported on the thread that runs the end, after it, with no lock held.
 pub trait EventSink: Send + Sync + 'static {
     /// Takes one event.
     fn emit(&self, event: Event);

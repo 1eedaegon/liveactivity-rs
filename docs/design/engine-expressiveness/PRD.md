@@ -42,8 +42,9 @@ the test that is its evidence.
 
 ## Planned, when an engine opens it
 
-Not built here. Each row is added to `docs/requirements.md` with its test when the engine release it depends on
-is out.
+Not built in this change. Each row is added to `docs/requirements.md` with its test when the engine release it
+depends on is out. activitykit 0.4 and liveupdate 0.2 are out: [engine extensions](../engine-extensions/PRD.md)
+says which of these rows are built on them and which still wait.
 
 | Feature | Engine release | What this crate does then |
 | --- | --- | --- |

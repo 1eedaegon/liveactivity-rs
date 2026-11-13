@@ -640,8 +640,11 @@ iOS delivers events as they come. On Android nothing calls the application: it a
 and then each state of an activity that the sink was not told yet. On iOS it does nothing.
 
 An activity is over when its state is `ended` or `dismissed`, on either platform. On iOS ActivityKit
-reports every state as it comes: `active`, `stale`, `ended` for every end (the application's, a
-push's or the system's) and `dismissed` when the activity leaves the screen. On Android the sink is
+reports the states as it has them: `active`, `stale`, `ended` for an end (the application's, a
+push's or the system's) and `dismissed` when the activity leaves the screen. It does not always
+report each: after an end that removed the activity at once, an iPhone on iOS 18 reported
+`dismissed` and no `ended`, and `stale` comes some time after the date, not at it. Take either of
+`ended` and `dismissed` as the end. On Android the sink is
 told the state an activity has when the backend asks, if it is another than the one it was told
 last, with the activity's id and key. liveupdate keeps that account with its receipts, so a state
 that comes while the application does not run is reported when it next asks, and none comes twice:

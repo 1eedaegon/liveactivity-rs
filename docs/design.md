@@ -68,8 +68,11 @@ application or framework plugin
 
 What the engines opened and what this crate does with each is in
 [design/engine-expressiveness](design/engine-expressiveness/PRD.md) and
-[design/engine-extensions](design/engine-extensions/PRD.md), which also lists
-what is still planned.
+[design/engine-extensions](design/engine-extensions/PRD.md). What a layout shows
+on Android is in [design/layout-on-android](design/layout-on-android/PRD.md),
+and how the sink learns of an activity's states there in
+[design/end-events](design/end-events/PRD.md) and
+[design/state-changes](design/state-changes/PRD.md).
 
 ## Open
 

@@ -304,7 +304,9 @@ Call it:
 - once at startup, after `build()`;
 - on every resume of the application;
 - when the Android side signals a stored event (liveupdate's AAR calls a listener after each one:
-  see [Android setup](android-setup.md#6-deliver-taps)).
+  see [Android setup](android-setup.md#6-deliver-taps-and-states));
+- at the time the default Android backend names with `next_check`, when the framework has a thread
+  to wait on: Android tells nobody that a stale time has come, and `sync_events` is what reports it.
 
 On iOS `sync_events` does nothing, so the same code runs on both.
 

@@ -4,6 +4,22 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.3.
+
+- On Android the sink receives each state of an activity once, as on iOS: `active` once Android shows it,
+  `stale` after its stale time, `active` again after an update, `ended` and `dismissed`. The states come from the
+  account liveupdate keeps with its receipts, after a start, an update and an end and on `sync_events`. A state
+  event now names the key also for a template and on a backend without the app's files. Until now Android
+  reported `ended` and `dismissed` only; a sink that expected nothing after a start reads `active` there.
+- `LiveUpdateBackend::next_check` says when it is worth asking again: now, soon, at the earliest stale time
+  ahead, or not until a call or an event. The crate runs no timer.
+- A stored dismissal of an activity that liveupdate does not know is no longer reported. An end of an activity
+  that the person had removed reports `ended` after the `dismissed`.
+- `testkit::MemoryBackend` reports `active` at a start.
+- liveupdate 0.3 took its Android package back to `io.github.eedaegon.liveupdate`: take its AAR of 0.3, and name
+  that package where Kotlin or a manifest names one of its classes. It reads what 0.1 stored and not what 0.2
+  stored.
+
 ## 0.3.0 - 2026-11-13
 
 - ci: tag the release commit in the run that prepared it (#8) (`febb247`)

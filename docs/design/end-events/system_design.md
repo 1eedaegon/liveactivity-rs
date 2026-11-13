@@ -13,7 +13,8 @@ For `end` and `end_layout` on the default Android backend:
 | --- | --- |
 | an end of a running activity, any policy | `State` with `ended` |
 | a delayed end | `State` with `ended` at the call; nothing when the last content goes |
-| an end again, or of an activity the person dismissed | none: `dismissed` was reported when it happened |
+| an end again | none |
+| an end of an activity the person dismissed | `ended`, after the `dismissed` that was reported when it happened: the record's state becomes `ended` (since liveupdate 0.3, whose account of states the backend reports) |
 | an end that fails (`NOT_FOUND`, `UNSUPPORTED_FEATURE`, a final content that is refused) | none |
 
 Two ends of one activity at the same time report once: the backend runs the three steps one end at a time.

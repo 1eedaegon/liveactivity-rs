@@ -18,7 +18,8 @@ use liveactivity::{
         layout::{button, link, progress, text, vstack},
         values,
     },
-    liveupdate::Timer,
+    android::LiveUpdateBackend,
+    liveupdate::{Driver, NextCheck, Timer},
 };
 
 /// Connect. One builder: the application names where events go, and whatever is not named is the default.
@@ -311,6 +312,25 @@ async fn capabilities_and_permissions(live: &LiveActivity) -> Result<()> {
         // Android shows the system's dialog through the host; iOS has a switch in Settings and no dialog.
         live.request_permissions(PermissionKind::Notifications)
             .await?;
+    }
+    Ok(())
+}
+
+/// Events on Android: nobody tells the application that a stale time has come, and the backend runs no timer. A
+/// host that has a thread and the default Android backend asks it when to ask again.
+#[allow(dead_code)]
+fn when_to_ask_again<D: Driver + 'static>(backend: &LiveUpdateBackend<D>) -> Result<()> {
+    match backend.next_check()? {
+        // A state is due: hand it over.
+        NextCheck::Now => {
+            backend.pump_events()?;
+        }
+        // Android has not shown a post yet: shortly, a little later each time, a few times.
+        NextCheck::Soon => {}
+        // The earliest stale time ahead, in epoch milliseconds.
+        NextCheck::At(_time) => {}
+        // Nothing until the next call, signal or resume.
+        NextCheck::Never => {}
     }
     Ok(())
 }

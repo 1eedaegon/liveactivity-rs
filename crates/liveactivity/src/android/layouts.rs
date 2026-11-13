@@ -10,9 +10,8 @@ use super::{
     layout::{self as android_layout, Environment},
 };
 use crate::{
-    ActionEvent, ActivityState, Backend, EndPolicy, Error, Event, LayoutActivityRecord,
-    LayoutEndInput, LayoutSnapshot, LayoutStartInput, LayoutUpdateInput, OpenedEvent, Result,
-    StateEvent, Visibility,
+    ActionEvent, Backend, EndPolicy, Error, Event, LayoutActivityRecord, LayoutEndInput,
+    LayoutSnapshot, LayoutStartInput, LayoutUpdateInput, OpenedEvent, Result, Visibility,
     layout::{AndroidOptions, AndroidPlacement, AndroidVisibility, Element, Node},
 };
 use serde::{Deserialize, Serialize};
@@ -263,8 +262,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
     }
 
     /// The events in liveupdate's queue, as the backend passes them on, oldest first: the taps, with the
-    /// activity's key and without those on action ids that the activity never declared, the dismissals and the
-    /// openings.
+    /// activity's key and without those on action ids that the activity never declared, and the openings.
     pub(crate) fn events(&self, updates: &liveupdate::LiveUpdate<D>) -> Result<Vec<Event>> {
         // The entries are read before the queue is drained, under the lock, so that a start settles first and a
         // tap on its activity finds the entry; a store that cannot be read loses no event, only the keys.
@@ -288,11 +286,6 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                             activity_key,
                         }))
                     }
-                    liveupdate::EventKind::Dismissed => Some(Event::State(StateEvent {
-                        activity_id: event.activity_id,
-                        activity_key,
-                        state: ActivityState::Dismissed,
-                    })),
                     // An opening is the host's report of an intent that liveupdate made and checked: its
                     // action is passed on as it is, declared by the activity's present content or not.
                     liveupdate::EventKind::Opened { action_id } => {
@@ -302,7 +295,8 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                             action_id,
                         }))
                     }
-                    // A kind that a later liveupdate adds, and the contract has no event for.
+                    // A dismissal is reported with the other states, by the backend: its stored event is the
+                    // prompt to ask. And a kind that a later liveupdate adds, which the contract has no event for.
                     _ => None,
                 }
             })

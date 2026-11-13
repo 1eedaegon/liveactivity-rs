@@ -156,12 +156,29 @@ Evidence: `ios::backend::tests::req_e_002_starts_states_and_permissions_reach_th
 ## REQ-E-003 An end is reported on Android
 
 On Android the sink receives `State` with `ended`, the activity's id and its key, when an end of the application
-ends a running activity: a template or a layout, at once or with a last content that stays. An end of an activity
-that is already over and an end that fails report nothing. The test kit's backend without a platform does the
-same.
+ends an activity: a template or a layout, at once or with a last content that stays. An end sent again and an end
+that fails report nothing. The test kit's backend without a platform does the same. The report comes from
+liveupdate's account of states (REQ-E-005), at the call: so an end of an activity that the person had removed,
+which makes its record `ended`, is reported as that state too.
 
 Evidence: `exchange::req_e_003_an_end_of_the_application_is_reported_on_android` and
 `testkit::memory::tests::req_e_003_the_backend_without_a_platform_reports_its_ends`.
+
+## REQ-E-005 Each state once on Android
+
+On Android the sink receives `State` for each state of an activity as liveupdate answers it, once: `active` when
+Android shows it, `stale` when its stale time has passed, `active` again after an update, `ended`, `dismissed`.
+It names the id and the key, of a template and of a layout, with or without the app's files. The states are
+reported after the backend's own calls and on `sync_events`; the stored event of a dismissal is no second report.
+
+Evidence: `exchange::req_e_005_each_state_of_an_activity_reaches_the_sink_once`.
+
+## REQ-E-006 When to ask again
+
+The default Android backend says when it is worth asking again: now, soon, at the earliest stale time ahead, or
+not until an operation or an event.
+
+Evidence: `exchange::req_e_006_the_backend_says_when_to_ask_again`.
 
 ## REQ-A-001 Android content of a snapshot
 

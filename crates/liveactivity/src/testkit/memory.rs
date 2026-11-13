@@ -9,7 +9,8 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 /// A backend that keeps its activities in memory and shows nothing.
 ///
 /// It runs the progress and timer templates under the rules that [`conformance`](super::conformance) checks, stores
-/// the names of written images, reports an end to the event sink, and reports a tap when asked to.
+/// the names of written images, reports the first state of an activity and its end to the event sink, and reports
+/// a tap when asked to.
 #[derive(Default)]
 pub struct MemoryBackend {
     events: OnceLock<BackendContext>,
@@ -117,7 +118,21 @@ impl MemoryBackend {
             record: record.clone(),
             origin: input,
         });
+        drop(state);
+        // A platform reports the first state of an activity it shows. Outside the lock: a sink may call back.
+        self.report(&record, ActivityState::Active);
         Ok(record)
+    }
+
+    /// Hands the sink a state of `record`, as a platform reports it.
+    fn report(&self, record: &ActivityRecord, state: ActivityState) {
+        if let Some(events) = self.events.get() {
+            events.emit(Event::State(StateEvent {
+                activity_id: record.id.clone(),
+                activity_key: Some(record.activity_key.clone()),
+                state,
+            }));
+        }
     }
 
     fn updated(&self, input: UpdateInput) -> Result<ActivityRecord> {
@@ -163,12 +178,8 @@ impl MemoryBackend {
             (activity.record.clone(), was_running)
         };
         // An end is reported as a platform reports it, once, and outside the lock: a sink may call the backend.
-        if was_running && let Some(events) = self.events.get() {
-            events.emit(Event::State(StateEvent {
-                activity_id: record.id.clone(),
-                activity_key: Some(record.activity_key.clone()),
-                state: ActivityState::Ended,
-            }));
+        if was_running {
+            self.report(&record, ActivityState::Ended);
         }
         Ok(record)
     }
@@ -266,16 +277,20 @@ mod tests {
             .unwrap();
         let start = StartInput::progress("order:42", "Order 42", "Preparing", 0.1);
         let order = block_on(live.start(start)).unwrap();
-        assert!(events.try_recv().is_err());
-        block_on(live.end(EndInput::new(&order.id))).unwrap();
-        assert_eq!(
-            events.try_recv().unwrap(),
+        let state = |state: ActivityState| {
             Event::State(StateEvent {
                 activity_id: order.id.clone(),
                 activity_key: Some("order:42".into()),
-                state: ActivityState::Ended,
+                state,
             })
-        );
+        };
+        // The first state of an activity it shows, as a platform reports it; the same start again shows nothing new.
+        assert_eq!(events.try_recv().unwrap(), state(ActivityState::Active));
+        let again = StartInput::progress("order:42", "Order 42", "Preparing", 0.1);
+        block_on(live.start(again)).unwrap();
+        assert!(events.try_recv().is_err());
+        block_on(live.end(EndInput::new(&order.id))).unwrap();
+        assert_eq!(events.try_recv().unwrap(), state(ActivityState::Ended));
         // An end again answers the record and reports nothing, and neither does an end that fails.
         block_on(live.end(EndInput::new(&order.id))).unwrap();
         assert!(block_on(live.end(EndInput::new("unknown"))).is_err());

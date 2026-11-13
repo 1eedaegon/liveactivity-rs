@@ -304,7 +304,9 @@ Call it:
 - once at startup, after `build()`;
 - on every resume of the application;
 - when the Android side signals a stored event (liveupdate's AAR calls a listener after each one:
-  see [Android setup](android-setup.md#6-deliver-taps)).
+  see [Android setup](android-setup.md#6-deliver-taps-and-states));
+- at the time the default Android backend names with `next_check`, when the framework has a thread
+  to wait on: Android tells nobody that a stale time has come, and `sync_events` is what reports it.
 
 On iOS `sync_events` does nothing, so the same code runs on both.
 
@@ -368,9 +370,11 @@ On Android the engine calls its driver synchronously. A call completes on its fi
 the native call, a storage write and a framework call, on the thread that polls it. Poll it off the
 UI thread.
 
-The sink is called from inside `sync_events` (or `pump_events`), on the thread that runs the drain,
-and the backend holds its drain lock until every tap is handed over. Do not call `sync_events`
-from the sink.
+The sink is called by a thread that asked: the one that runs `sync_events` (or `pump_events`), or
+a call of the application that made a state due. It receives one event at a time, in the order the
+events were taken, and no lock is held while it runs, so it may call the service. When two threads
+ask at once, one of them hands over what both took. A slow sink then also holds the events of the
+other thread's call behind it, though that call has returned.
 
 ## Testing an adapter
 

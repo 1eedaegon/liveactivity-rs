@@ -31,6 +31,16 @@ pub struct MemoryState {
     pub failing_posts: usize,
     /// How often the capabilities were asked.
     pub capability_calls: usize,
+    /// The device's clock, in epoch milliseconds: a notification whose stale time has come is listed as stale.
+    pub now: u64,
+    /// While set, a post is not listed yet, as when Android shows a notification a moment after it was posted.
+    pub delay_listing: bool,
+    /// The posts that are not listed yet, by id.
+    pub unlisted: BTreeMap<String, Observation>,
+    /// How often Android was asked what it shows.
+    pub observations: usize,
+    /// How many of the next such questions fail.
+    pub failing_observations: usize,
 }
 
 #[derive(Clone)]
@@ -59,6 +69,11 @@ impl Default for MemoryDriver {
                 posts: 0,
                 failing_posts: 0,
                 capability_calls: 0,
+                now: 0,
+                delay_listing: false,
+                unlisted: BTreeMap::new(),
+                observations: 0,
+                failing_observations: 0,
             })),
         }
     }
@@ -83,8 +98,17 @@ impl MemoryDriver {
 }
 
 impl MemoryDriver {
-    /// Queues the dismissal of a notification by the person, as the Android side does.
+    /// Lists the posts that were held back, as Android does a moment after they were posted.
+    pub fn show_unlisted(&self) {
+        let mut state = self.lock();
+        state.delay_listing = false;
+        let shown = std::mem::take(&mut state.unlisted);
+        state.observed.extend(shown);
+    }
+
+    /// The person removes a notification: it is gone, and the Android side queues the dismissal.
     pub fn dismiss(&self, id: &str, sequence: u64) {
+        self.lock().observed.remove(id);
         let event: ActivityEvent = serde_json::from_value(json!({
             "sequence": sequence,
             "activityId": id,
@@ -142,7 +166,24 @@ impl Driver for MemoryDriver {
     }
 
     fn observe(&self) -> liveupdate::Result<Vec<Observation>> {
-        Ok(self.lock().observed.values().cloned().collect())
+        let mut state = self.lock();
+        state.observations += 1;
+        if state.failing_observations > 0 {
+            state.failing_observations -= 1;
+            return Err(liveupdate::Error::new(
+                liveupdate::ErrorCode::NativeError,
+                "Listing failed.",
+            ));
+        }
+        // The lifecycle has no clock: the Android side says that a stale time has come.
+        let listed = |observation: &Observation| Observation {
+            state: match observation.snapshot.stale_at {
+                Some(stale_at) if stale_at <= state.now => ActivityState::Stale,
+                _ => ActivityState::Active,
+            },
+            ..observation.clone()
+        };
+        Ok(state.observed.values().map(listed).collect())
     }
 
     fn post(&self, record: &DriverRecord) -> liveupdate::Result<()> {
@@ -178,16 +219,18 @@ impl Driver for MemoryDriver {
         } else {
             PromotionState::NotApplicable
         };
-        state.observed.insert(
-            record.id.clone(),
-            Observation {
-                id: record.id.clone(),
-                snapshot: record.snapshot.clone(),
-                state: ActivityState::Active,
-                promotion_requested: record.promotion_requested,
-                promotion_state,
-            },
-        );
+        let observation = Observation {
+            id: record.id.clone(),
+            snapshot: record.snapshot.clone(),
+            state: ActivityState::Active,
+            promotion_requested: record.promotion_requested,
+            promotion_state,
+        };
+        if state.delay_listing {
+            state.unlisted.insert(record.id.clone(), observation);
+        } else {
+            state.observed.insert(record.id.clone(), observation);
+        }
         Ok(())
     }
 

@@ -1,7 +1,7 @@
 # Android setup
 
 On Android `liveactivity` runs on the [liveupdate](https://github.com/1eedaegon/liveupdate-rs)
-crate (0.2.1 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
+crate (0.3). An activity is an ongoing notification, which Android 16 and later can promote to a
 Live Update. liveupdate keeps the lifecycle, the revisions and the receipts in Rust; a small AAR
 talks to Android's `NotificationManager`.
 
@@ -19,21 +19,21 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.2.1.aar` from liveupdate's
+Put `liveupdate-android-0.3.0.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too:
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.2.1.aar"))
+    implementation(files("libs/liveupdate-android-0.3.0.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
 }
 ```
 
 Use the AAR of the liveupdate version this crate depends on. `liveactivity::liveupdate` re-exports
-that crate. The AAR of 0.1 does not fit: liveupdate 0.2 renamed its Android package, and the JNI
-transport looks for the new name.
+that crate. The AAR of 0.2 does not fit: it had another package name, which liveupdate 0.3 took
+back, and the JNI transport looks for the name of the version it was built with.
 
 ## 2. The manifest
 
@@ -49,10 +49,9 @@ There is nothing to write. The AAR merges these into the application's manifest:
 </application>
 ```
 
-The receivers belong to the AAR's namespace, `io.github.gon.liveupdate` (`io.github.eedaegon.liveupdate`
-before liveupdate 0.2: rename it where Kotlin or a manifest of the application names a class of the
-AAR). One stores taps on a notification's actions, the other dismissals. Neither is exported. The
-AAR installs no foreground service and no background work.
+The receivers belong to the AAR's namespace, `io.github.eedaegon.liveupdate`. One stores taps on a
+notification's actions, the other dismissals. Neither is exported. The AAR installs no foreground
+service and no background work.
 
 ## 3. Choose a transport
 
@@ -253,7 +252,7 @@ intent to liveupdate in that activity. The sink then receives `Event::Opened`, w
 activity's id and key and the action that opened it, on the next `sync_events`:
 
 ```kotlin
-import io.github.gon.liveupdate.LiveUpdateEvents
+import io.github.eedaegon.liveupdate.LiveUpdateEvents
 
 override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -302,7 +301,7 @@ The service, its type and its permission are the application's; liveupdate's AAR
 Start the activity first and the service second, and attach the service in Kotlin:
 
 ```kotlin
-import io.github.gon.liveupdate.LiveUpdateForeground
+import io.github.eedaegon.liveupdate.LiveUpdateForeground
 
 class DeliveryService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -378,10 +377,12 @@ What a start does without promotion depends on `fallback`:
 The system can still decline or later remove promotion. The record reports what Android did in
 `promotionRequested` and `promotionState`.
 
-## 6. Deliver taps
+## 6. Deliver taps and states
 
-Android stores taps. liveupdate's receiver writes each one to a durable queue, also while the app
-does not run. The backend hands them to the event sink when it is asked:
+On Android nothing calls the application: it asks. liveupdate's receiver writes each tap to a
+durable queue, also while the app does not run, and liveupdate keeps with its receipts which
+state of each activity the application was told last. The backend hands both to the event sink
+when it is asked:
 
 ```rust
 live.sync_events().await?;
@@ -391,21 +392,22 @@ Call it:
 
 - once at startup, after the builder connected the sink;
 - every time the application resumes;
-- when the Android side signals that an event was stored.
+- when the Android side signals that an event was stored;
+- at the time the backend names, when the host has a thread for it (below).
 
-For the signal, the AAR calls one listener after each stored event:
+For the signal, the AAR calls one listener after each stored event, a tap or a dismissal:
 
 ```kotlin
-import io.github.gon.liveupdate.LiveUpdateEvents
+import io.github.eedaegon.liveupdate.LiveUpdateEvents
 
 LiveUpdateEvents.setListener {
     // Called on the receiver's thread. Keep it short: tell Rust to drain, from another thread.
 }
 ```
 
-`LiveUpdateBackend::pump_events()` is the same drain as a direct call. It answers how many taps it
-handed over, oldest first. A host that keeps the backend in an `Arc` can call it from the thread
-its listener wakes:
+`LiveUpdateBackend::pump_events()` is the same drain as a direct call. It answers how many events
+it took for the sink: the stored taps and openings, oldest first, then the states. A host that keeps the
+backend in an `Arc` can call it from the thread its listener wakes:
 
 ```rust
 let backend = Arc::new(LiveUpdateBackend::android()?.with_files(files));
@@ -414,16 +416,56 @@ let live = LiveActivity::builder().backend(backend.clone()).event_sink(sink).bui
 let delivered = backend.pump_events()?;
 ```
 
+### States
+
+The sink is told the state an activity has when the backend asks, if it is another than the one it
+was told last: `active` once Android shows it, `stale` after its stale time, `active` again after
+an update that makes it fresh, `ended`, `dismissed`. A start, an update, an end and a list report
+the states that are due with them; the others come with a drain. A state that came and went
+between two asks is not reported.
+
+Android tells nobody that a stale time has come, and the backend runs no timer, so a host whose
+thread waits for the listener's signal also asks the backend how long to wait:
+
+```rust
+use liveactivity::liveupdate::NextCheck;
+
+match backend.next_check()? {
+    // A state is due.
+    NextCheck::Now => { backend.pump_events()?; }
+    // Android has not shown a post yet: ask shortly, a little later each time, and give up after a few.
+    NextCheck::Soon => wait_a_moment(),
+    // The earliest stale time ahead, in epoch milliseconds: sleep until then, or until the signal.
+    // A time that has passed means now.
+    NextCheck::At(time) => wait_until(time),
+    // Nothing until the next call of the application, signal or resume.
+    NextCheck::Never => wait_for_the_signal(),
+}
+```
+
+`next_check` reads what liveupdate stored and asks Android nothing. It does not know that the
+person removed a notification: the listener's signal is what prompts that drain. A host without
+such a thread reports a stale activity at its next drain, at the latest when the application
+resumes.
+
 Rules of the drain:
 
 - Before the builder connected the sink, `pump_events` hands over nothing and leaves the taps
-  queued.
+  queued and the states due.
 - A builder without an event sink connects one that drops events. A drain then removes the taps.
   Name the sink before the first drain.
 - With files, a tap carries the activity's key, and a tap on an `actionId` that the activity's
-  layout never declared is dropped.
-- Dismissals need no event. `list()` and `list_layout()` reconcile with the notifications Android
-  shows: a notification the person removed becomes `dismissed`.
+  layout never declared is dropped. A state carries the key with or without files.
+- A dismissal is one of the states. The event Android stores for it only prompts the drain, which
+  reports `dismissed` once, when the notification is gone.
+- The sink is called for one event at a time, in the order the events were taken, with no lock
+  held: it may call the service, a drain included. When two threads drain or call at once, one of
+  them hands over what both took, and the other returns before its events arrived.
+- A state is handed over at most once. When the read of the states fails after the stored events
+  were taken, those reach the sink and the drain fails: drain again.
+- A sink does not panic. One that does loses the event it was handed, and the call that was
+  handing over panics with it; what was queued behind reaches the sink with the next call or
+  drain.
 
 A tap on a notification of a killed app starts the process and runs the receiver, which stores the
 tap. Android starts no Activity for it. The tap reaches the sink at the next `sync_events`, for
@@ -479,10 +521,10 @@ fn main() {
 - **Limits.** liveupdate keeps at most 32 active records and 128 ended ones, templates and layouts
   together. One more active activity answers `SYSTEM_LIMIT`.
 - **An update of the application.** Android removes an application's notifications when the
-  application is updated. After an update from liveupdate 0.1 to 0.2 the activities that were
-  running are also gone from the lists and their ids are `NOT_FOUND`: liveupdate 0.2 keeps its
-  receipts under its new package name and does not read those of 0.1. Their keys start new
-  activities.
+  application is updated, so an activity that ran across the update is `dismissed`. liveupdate 0.3
+  reads what 0.1 stored and not what 0.2 stored: after an update from a release on liveupdate 0.2
+  the activities that were running are gone from the lists and their ids are `NOT_FOUND`. Their
+  keys start new activities.
 - **Pushes.** Android has none. A layout start's `push` is dropped, `push_tokens()` is empty and
   `capabilities().push` is `unsupported`.
 - **Visibility.** Records keep `visibility: unknown`. Asking for private content on the lock screen

@@ -469,7 +469,7 @@ fn a_stored_tap_comes_out_with_the_activity_key() {
         },
         tap(3, "gone", "pet"),
     ];
-    // The dismissal keeps its place among the taps.
+    // The stored dismissal is no event of the store's: the backend reports it with the other states.
     assert_eq!(
         f.layouts.events(&f.updates).unwrap(),
         [
@@ -477,11 +477,6 @@ fn a_stored_tap_comes_out_with_the_activity_key() {
                 action_id: "pet".into(),
                 activity_id: record.id.clone(),
                 activity_key: Some("snack:1".into())
-            }),
-            Event::State(StateEvent {
-                activity_id: record.id.clone(),
-                activity_key: Some("snack:1".into()),
-                state: crate::ActivityState::Dismissed,
             }),
             Event::Action(ActionEvent {
                 action_id: "pet".into(),

@@ -4,9 +4,11 @@
 //! revisions and the receipts. Given the folder of the app's files ([`AndroidFiles`]), it also runs layouts, which
 //! it projects onto the engine's notification styles, stores images, and reports taps on buttons.
 //!
-//! The engine stores what the person does to a notification, and the backend hands that to the event sink when it
-//! is asked to. An end is the application's own call, which the engine stores nothing for: the backend reports it
-//! itself, so that the sink learns of an end as it does on iOS.
+//! The engine stores what the person does to a notification, and keeps an account of the state of each activity
+//! that it has not answered yet. The backend hands both to the event sink: the stored events when it is asked to,
+//! and the states then and after each of its own calls. So the sink learns once where an activity stands, as on
+//! iOS, one event at a time and in the order the engine answered. The backend has no timer:
+//! [`LiveUpdateBackend::next_check`] says when a host that has one should ask again.
 //!
 //! The caller supplies the transport: a `liveupdate::Driver`, a string `liveupdate::Bridge` over a framework's
 //! own native call, or the JNI transport of liveupdate's AAR. Android's permission dialog needs an Activity, so a
@@ -24,8 +26,9 @@ use crate::{
 use layouts::{FileStore, Layouts, Settings};
 use liveupdate::{Bridge, Driver, EventKind, JsonDriver, LiveUpdate};
 use std::{
+    collections::VecDeque,
     path::PathBuf,
-    sync::{Mutex, OnceLock, PoisonError},
+    sync::{Mutex, MutexGuard, OnceLock, PoisonError},
 };
 
 /// Where the backend keeps what layouts need, under the folder of the app's files (`Context.getFilesDir()`).
@@ -66,10 +69,34 @@ pub struct LiveUpdateBackend<D: Driver> {
     layouts: Option<(Layouts<D, FileStore>, PathBuf)>,
     /// Where taps go, once the backend is connected.
     events: OnceLock<BackendContext>,
-    /// Held for one whole drain, so that taps reach the sink in order.
-    pump: Mutex<()>,
-    /// Held while an end asks whether its activity runs and then ends it, so that one end reports it.
-    ending: Mutex<()>,
+    /// What the sink is still to receive. Held from a question to the engine until its answer is queued, so
+    /// that the queue has the order of the engine's answers; never while the sink runs.
+    outbox: Mutex<Outbox>,
+}
+
+/// The events the sink is still to receive, oldest first.
+#[derive(Default)]
+struct Outbox {
+    queued: VecDeque<Event>,
+    /// Whether a thread is handing the queue to the sink. Another thread leaves its events to that one.
+    handing_over: bool,
+}
+
+/// Ends a hand-over that a panicking sink left, so that the next ask goes on with the rest of the queue.
+struct HandOver<'a> {
+    outbox: &'a Mutex<Outbox>,
+    /// Whether the hand-over has not come to its end. One that has, has said so under the lock, and another
+    /// may have begun.
+    unfinished: bool,
+}
+
+impl Drop for HandOver<'_> {
+    fn drop(&mut self) {
+        if self.unfinished {
+            let mut outbox = self.outbox.lock().unwrap_or_else(PoisonError::into_inner);
+            outbox.handing_over = false;
+        }
+    }
 }
 
 impl<D: Driver + 'static> LiveUpdateBackend<D> {
@@ -80,8 +107,7 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
             engine: LiveUpdate::new(driver),
             layouts: None,
             events: OnceLock::new(),
-            pump: Mutex::new(()),
-            ending: Mutex::new(()),
+            outbox: Mutex::default(),
         }
     }
 
@@ -109,24 +135,65 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
         &self.engine
     }
 
-    /// Drains the taps, dismissals and openings Android queued and hands each to the event sink, oldest first. Answers how
-    /// many it handed over. A host calls this, or `sync_events`, when its Android side signals a stored event and when the
-    /// application starts or resumes: liveupdate's receiver stores taps also while the app does not run.
+    /// Hands the event sink what Android stored, the taps and the openings, oldest first, and then the state of
+    /// each activity that the sink was not told yet. Answers how many events it took for the sink. A host calls
+    /// this, or `sync_events`, when its Android side signals a stored event, when the application starts or
+    /// resumes, and at the time [`next_check`](Self::next_check) names: liveupdate's receiver stores taps also
+    /// while the app does not run, and nobody tells Android's side that a stale time has come.
+    ///
+    /// The sink receives one event at a time, in the order they were taken. When another thread is handing
+    /// events over at that moment, that thread hands these over as well, and this call returns before they
+    /// arrived.
     ///
     /// # Errors
     ///
-    /// Fails when the drain fails.
+    /// Fails when the drain or the question for the states fails. The stored events that it took before the
+    /// states failed reach the sink all the same; the states stay due for the next call.
     pub fn pump_events(&self) -> Result<usize> {
-        // Not connected yet: the taps stay queued for the sink that comes.
-        let Some(events) = self.events.get() else {
+        // Not connected yet: the taps stay queued, and the states due, for the sink that comes.
+        let Some(sink) = self.events.get() else {
             return Ok(0);
         };
-        let _pump = self.pump.lock().unwrap_or_else(PoisonError::into_inner);
-        let queued = match &self.layouts {
+        let taken = {
+            let mut outbox = self.outbox();
+            let stored = self.stored()?;
+            let count = stored.len();
+            outbox.queued.extend(stored);
+            self.states().map(|states| {
+                let count = count + states.len();
+                outbox.queued.extend(states);
+                count
+            })
+        };
+        self.hand_over(sink);
+        taken
+    }
+
+    /// When it is worth calling [`pump_events`](Self::pump_events) again for a state that no call of the
+    /// application brings. The backend runs no timer: a host that has a thread waits as this says.
+    ///
+    /// - `Now`: a state is due.
+    /// - `Soon`: Android has not shown a post yet. Ask shortly, a little later each time, and give up after a few.
+    /// - `At`: the earliest stale time ahead, in epoch milliseconds. One that has passed means now.
+    /// - `Never`: nothing until the next call of the application or the next stored event.
+    ///
+    /// It reads liveupdate's receipts and asks Android nothing, so it does not know that the person removed a
+    /// notification: the signal of the stored event is what prompts that ask.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the receipts cannot be read.
+    pub fn next_check(&self) -> Result<liveupdate::NextCheck> {
+        self.engine.next_check().map_err(convert::error)
+    }
+
+    /// The events Android stored, as the sink receives them, oldest first. Taking them removes them there.
+    fn stored(&self) -> Result<Vec<Event>> {
+        match &self.layouts {
             // With the layouts' store an event names its activity's key, and a tap on an undeclared action is
             // dropped.
-            Some((layouts, _)) => layouts.events(&self.engine)?,
-            None => self
+            Some((layouts, _)) => layouts.events(&self.engine),
+            None => Ok(self
                 .engine
                 .events()
                 .map_err(convert::error)?
@@ -138,62 +205,84 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
                         activity_id: event.activity_id,
                         activity_key: None,
                     })),
-                    EventKind::Dismissed => Some(Event::State(crate::StateEvent {
-                        activity_id: event.activity_id,
-                        activity_key: None,
-                        state: crate::ActivityState::Dismissed,
-                    })),
                     EventKind::Opened { action_id } => Some(Event::Opened(crate::OpenedEvent {
                         activity_id: event.activity_id,
                         activity_key: None,
                         action_id,
                     })),
-                    // A kind that a later liveupdate adds, and the contract has no event for.
+                    // A dismissal is reported with the other states: its stored event is the prompt to ask.
+                    // And a kind that a later liveupdate adds, which the contract has no event for.
                     _ => None,
                 })
-                .collect(),
-        };
-        let count = queued.len();
-        queued.into_iter().for_each(|event| events.emit(event));
-        Ok(count)
-    }
-
-    /// Runs `end`, an end of the activity `id`, and tells the sink that the activity ended when it was running
-    /// before: an end of an activity that is over answers its record and ends nothing. The engine stores no event
-    /// for an end, so the backend reports it. The sink is called after the end, outside the backend's locks.
-    fn ending<T>(
-        &self,
-        id: &str,
-        end: impl FnOnce() -> Result<T>,
-        key: impl FnOnce(&T) -> String,
-    ) -> Result<T> {
-        let (ended, was_running) = {
-            let _one_end = self.ending.lock().unwrap_or_else(PoisonError::into_inner);
-            let was_running = self.runs(id);
-            (end()?, was_running)
-        };
-        if was_running && let Some(events) = self.events.get() {
-            events.emit(Event::State(crate::StateEvent {
-                activity_id: id.to_owned(),
-                activity_key: Some(key(&ended)),
-                state: crate::ActivityState::Ended,
-            }));
+                .collect()),
         }
-        Ok(ended)
     }
 
-    /// Whether the engine lists the activity `id` as one that is not over. A list that fails says nothing of the
-    /// activity, and then no end is reported.
-    fn runs(&self, id: &str) -> bool {
-        self.engine.list().is_ok_and(|records| {
-            records.iter().any(|record| {
-                record.id == id
-                    && !matches!(
-                        record.state,
-                        liveupdate::ActivityState::Ended | liveupdate::ActivityState::Dismissed
-                    )
+    /// The state of each activity that liveupdate has not answered yet, as the sink receives it. liveupdate
+    /// answers a state once, whoever asks, and marks it answered before this returns: what is taken here is
+    /// queued for the sink, or lost.
+    fn states(&self) -> Result<Vec<Event>> {
+        let changed = self.engine.state_changes().map_err(convert::error)?;
+        let reported = |record: liveupdate::ActivityRecord| {
+            Event::State(crate::StateEvent {
+                activity_id: record.id,
+                activity_key: Some(record.activity_key),
+                state: convert::activity_state(record.state),
             })
-        })
+        };
+        Ok(changed.into_iter().map(reported).collect())
+    }
+
+    /// After a call of the application that looked at what Android shows: reports the states that are due, such
+    /// as the end of an activity or its first showing, whatever the call answered. Without a sink nothing is
+    /// asked. liveupdate is asked for the states only when one is due, which costs one read of the receipts; a
+    /// failure here leaves them due for the next ask and changes nothing of the call's answer.
+    fn after<T>(&self, answer: Result<T>) -> Result<T> {
+        let Some(sink) = self.events.get() else {
+            return answer;
+        };
+        if matches!(self.engine.next_check(), Ok(liveupdate::NextCheck::Now)) {
+            let mut outbox = self.outbox();
+            if let Ok(states) = self.states() {
+                outbox.queued.extend(states);
+            }
+        }
+        self.hand_over(sink);
+        answer
+    }
+
+    /// Hands the sink what is queued, one event at a time and with no lock held, so that a sink may call the
+    /// backend. When another thread is doing so, that thread hands over what this one queued as well.
+    fn hand_over(&self, sink: &BackendContext) {
+        {
+            let mut outbox = self.outbox();
+            if outbox.handing_over {
+                return;
+            }
+            outbox.handing_over = true;
+        }
+        let mut hand_over = HandOver {
+            outbox: &self.outbox,
+            unfinished: true,
+        };
+        loop {
+            let next = {
+                let mut outbox = self.outbox();
+                let next = outbox.queued.pop_front();
+                // Said under the lock that the queue was found empty under: whoever queues after this hands over.
+                outbox.handing_over = next.is_some();
+                next
+            };
+            let Some(event) = next else {
+                hand_over.unfinished = false;
+                return;
+            };
+            sink.emit(event);
+        }
+    }
+
+    fn outbox(&self) -> MutexGuard<'_, Outbox> {
+        self.outbox.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn layouts(&self) -> Result<&Layouts<D, FileStore>> {
@@ -255,63 +344,61 @@ impl<D: Driver + 'static> LiveActivityBackend for LiveUpdateBackend<D> {
 
     fn start(&self, input: StartInput) -> BackendFuture<'_, ActivityRecord> {
         Box::pin(async move {
-            self.engine
+            let started = self
+                .engine
                 .start(convert::start_request(input))
                 .map_err(convert::error)
-                .and_then(convert::activity_record)
+                .and_then(convert::activity_record);
+            self.after(started)
         })
     }
 
     fn update(&self, input: UpdateInput) -> BackendFuture<'_, ActivityRecord> {
         Box::pin(async move {
-            self.engine
+            let updated = self
+                .engine
                 .update(&input.id, convert::live_snapshot(input.snapshot))
                 .map_err(convert::error)
-                .and_then(convert::activity_record)
+                .and_then(convert::activity_record);
+            self.after(updated)
         })
     }
 
     fn end(&self, input: EndInput) -> BackendFuture<'_, ActivityRecord> {
         Box::pin(async move {
-            let end = || {
-                self.engine
-                    .end(&input.id, convert::end_policy(input.policy))
-                    .map_err(convert::error)
-                    .and_then(convert::activity_record)
-            };
-            self.ending(&input.id, end, |record| record.activity_key.clone())
+            let ended = self
+                .engine
+                .end(&input.id, convert::end_policy(input.policy))
+                .map_err(convert::error)
+                .and_then(convert::activity_record);
+            self.after(ended)
         })
     }
 
     /// The progress and timer activities; layout activities share the engine's list and are left out.
     fn list(&self) -> BackendFuture<'_, Vec<ActivityRecord>> {
         Box::pin(async move {
-            let records = self.engine.list().map_err(convert::error)?;
-            convert::v1_records(records)
+            let listed = self.engine.list().map_err(convert::error);
+            self.after(listed.and_then(convert::v1_records))
         })
     }
 
     fn start_layout(&self, input: LayoutStartInput) -> BackendFuture<'_, LayoutActivityRecord> {
-        Box::pin(async move { self.layouts()?.start(&self.engine, input) })
+        Box::pin(async move { self.after(self.layouts()?.start(&self.engine, input)) })
     }
 
     fn update_layout(&self, input: LayoutUpdateInput) -> BackendFuture<'_, LayoutActivityRecord> {
-        Box::pin(async move { self.layouts()?.update(&self.engine, input) })
+        Box::pin(async move { self.after(self.layouts()?.update(&self.engine, input)) })
     }
 
     fn end_layout(&self, input: LayoutEndInput) -> BackendFuture<'_, LayoutActivityRecord> {
-        Box::pin(async move {
-            let layouts = self.layouts()?;
-            let id = input.id.clone();
-            let end = || layouts.end(&self.engine, input);
-            self.ending(&id, end, |record| record.activity_key.clone())
-        })
+        Box::pin(async move { self.after(self.layouts()?.end(&self.engine, input)) })
     }
 
     fn list_layout(&self) -> BackendFuture<'_, Vec<LayoutActivityRecord>> {
         Box::pin(async move {
             match &self.layouts {
-                Some((layouts, _)) => layouts.list(&self.engine),
+                Some((layouts, _)) => self.after(layouts.list(&self.engine)),
                 None => Ok(Vec::new()),
             }
         })

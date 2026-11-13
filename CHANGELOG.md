@@ -4,6 +4,12 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.3.2.
+
+- A layout with a `progress` and an Android content of the progress style are posted on Android 16. liveupdate's
+  AAR before 0.3.2 called a method there that only Android 17 has, and the call answered `NATIVE_ERROR`. The
+  correction is in the AAR: take `liveupdate-android-0.3.2.aar`.
+
 ## 0.5.0 - 2026-11-13
 
 - feat: build on activitykit 0.5: toggles, staleness, scheduled and transient starts, alert sounds (#11) (`a2c8977`)

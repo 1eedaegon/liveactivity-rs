@@ -15,7 +15,7 @@ repository = "https://github.com/1eedaegon/liveactivity-rs"
 [workspace.dependencies]
 activitykit = "0.5"
 futures-executor = "0.3"
-liveupdate = "0.3.1"
+liveupdate = "0.3.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"

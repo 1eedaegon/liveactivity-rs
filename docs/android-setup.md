@@ -1,7 +1,7 @@
 # Android setup
 
 On Android `liveactivity` runs on the [liveupdate](https://github.com/1eedaegon/liveupdate-rs)
-crate (0.3.1 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
+crate (0.3.2 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
 Live Update. liveupdate keeps the lifecycle, the revisions and the receipts in Rust; a small AAR
 talks to Android's `NotificationManager`.
 
@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.3.1.aar` from liveupdate's
+Put `liveupdate-android-0.3.2.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too:
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.3.1.aar"))
+    implementation(files("libs/liveupdate-android-0.3.2.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
 }
 ```
@@ -529,6 +529,10 @@ fn main() {
   ([A foreground service](#a-foreground-service)).
 - **Limits.** liveupdate keeps at most 32 active records and 128 ended ones, templates and layouts
   together. One more active activity answers `SYSTEM_LIMIT`.
+- **A time long past, on Android 16.** Android 16 shows nothing of a notification whose time is
+  more than two weeks old, and tells the application nothing: the post is answered as shown. For a
+  timer that is a start or an end that far before the post (measured on an Android 16 emulator:
+  13 days shows, 15 days does not).
 - **An update of the application.** Android removes an application's notifications when the
   application is updated, so an activity that ran across the update is `dismissed`. liveupdate 0.3
   reads what 0.1 stored and not what 0.2 stored: after an update from a release on liveupdate 0.2
@@ -568,12 +572,10 @@ Wrap it (step 5).
 activity shows, and the device does not offer `styleChange`.
 
 **A layout with a `progress`, or a content of the progress style, answers `NATIVE_ERROR` on
-Android 16.** liveupdate's AAR up to 0.3.1 calls, for every segment and point of a progress, a
-method that only Android 17 has. The progress and timer templates are not touched, nor are
-Android 15 and earlier or Android 17. A later AAR of liveupdate corrects it: take that one when it
-is out. Until then a device that reports `progressStyle` and not `metricStyle` in
-`capabilities().androidPresentation` is on Android 16: give its snapshots an Android content of
-another style, or a layout without a `progress` node.
+Android 16.** The application packages an AAR of liveupdate older than 0.3.2, which calls, for
+every segment and point of a progress, a method that only Android 17 has. Take the AAR of 0.3.2:
+the correction is in the AAR, so a newer crate alone does not bring it. The progress and timer
+templates were not touched, nor were Android 15 and earlier or Android 17.
 
 **A start or an update with a content answers `INVALID_INPUT` on Android only.** The content names
 a URL that no activity of the application opens, a small icon that is no resource of it, or a

@@ -47,6 +47,16 @@ pub(crate) fn text(value: &str, max: usize) -> bool {
     value.chars().count() <= max && value.chars().any(|c| !blank(c))
 }
 
+/// A file name of the contract, as an image's and a sound's is: `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.
+pub(crate) fn file_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    bytes.len() <= 64
+        && bytes.first().is_some_and(u8::is_ascii_alphanumeric)
+        && bytes
+            .iter()
+            .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(c))
+}
+
 pub(crate) fn require(valid: bool) -> Result<()> {
     if valid { Ok(()) } else { Err(Error::invalid()) }
 }

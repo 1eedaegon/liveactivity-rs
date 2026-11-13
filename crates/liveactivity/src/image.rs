@@ -4,7 +4,7 @@
 
 use crate::{
     Error, Result,
-    validation::{Validate, require},
+    validation::{Validate, file_name, require},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -47,14 +47,7 @@ impl Validate for ImageInput {
 /// than [`MAX_IMAGE_BYTES`] bytes, or wider or higher than [`MAX_IMAGE_WIDTH`] by
 /// [`MAX_IMAGE_HEIGHT`] pixels, is `PAYLOAD_TOO_LARGE`.
 pub fn check_image(name: &str, png: &[u8]) -> Result<()> {
-    let bytes = name.as_bytes();
-    require(
-        bytes.len() <= 64
-            && bytes.first().is_some_and(u8::is_ascii_alphanumeric)
-            && bytes
-                .iter()
-                .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(c)),
-    )?;
+    require(file_name(name))?;
     if png.len() > MAX_IMAGE_BYTES {
         return Err(too_large());
     }

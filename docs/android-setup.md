@@ -513,7 +513,16 @@ fn main() {
   `UNSUPPORTED_FEATURE`.
 - **Alerts.** An update with an `alert` is posted on a second channel of high importance, "Live
   update alerts", which liveupdate creates with the first one. A person who blocked that channel
-  gets the update silently.
+  gets the update silently. The sound is that channel's, which the person chooses: a `sound` that
+  the alert names is not played, and the record names `alert.sound`.
+- **Toggles.** A `toggle` of a layout is an action of the notification, titled by its label, with
+  `✓` before it while its value is on. A tap reaches the sink with `on`, the other state than the
+  value of the activity's latest snapshot, and changes nothing: update the value to move it.
+- **Staleness.** Nothing redraws a notification when a time passes. A layout whose nodes say
+  `ifStale` is drawn as it is while fresh, and the record names `layout.ifStale`. The sink is told
+  `stale` ([States](#states)): update the content then if the notification should say so.
+- **A scheduled start.** `UNSUPPORTED_FEATURE`: a notification is posted when it is asked for.
+  The application starts the activity itself when the time comes.
 - **Updates need the process.** Android has no push that updates a notification. In the
   background an application updates from a foreground service or from a data message that wakes
   it. A start with the foreground placement lets such a service hold the notification
@@ -525,8 +534,8 @@ fn main() {
   reads what 0.1 stored and not what 0.2 stored: after an update from a release on liveupdate 0.2
   the activities that were running are gone from the lists and their ids are `NOT_FOUND`. Their
   keys start new activities.
-- **Pushes.** Android has none. A layout start's `push` is dropped, `push_tokens()` is empty and
-  `capabilities().push` is `unsupported`.
+- **Pushes and the iOS options.** Android has no pushes. A layout start's `push` and `ios` are
+  dropped, `push_tokens()` is empty and `capabilities().push` is `unsupported`.
 - **Visibility.** Records keep `visibility: unknown`. Asking for private content on the lock screen
   does not prove what the system UI revealed.
 - **Lock screen.** A layout start's `android.visibility` is `public`, `private` or `secret`.

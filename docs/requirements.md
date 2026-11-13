@@ -145,6 +145,40 @@ every platform.
 Evidence: `ios::tests::req_i_003_the_ios_surface_of_a_layout_reaches_the_kit` and
 `contract::req_i_003_a_wrong_member_of_the_ios_surface_reaches_no_backend`.
 
+## REQ-I-004 A toggle
+
+A layout takes the `toggle` node as activitykit takes it: it stands where a button may, shows a boolean value
+under an action id, and counts with buttons and links toward the four of a region. A tap on it reaches the sink
+as `Action` with `on`, the state the person asked for; a button's tap has none. A request that breaks a rule of
+the node is `INVALID_INPUT` on every platform.
+
+Evidence: `ios::tests::req_i_004_a_toggle_reaches_the_kit_and_its_tap_says_what_was_asked` and
+`contract::req_i_004_a_wrong_toggle_reaches_no_backend`.
+
+## REQ-I-005 Nodes that follow staleness
+
+A node's `ifStale` reaches ActivityKit as written, on any node: the system draws the node only while the content
+is stale, or only while it is not.
+
+Evidence: `ios::tests::req_i_005_a_node_that_follows_staleness_reaches_the_kit`.
+
+## REQ-I-006 A scheduled and a transient start
+
+A start takes `scheduled`, a time and the alert the system shows then, and the iOS option `transient`. Both reach
+ActivityKit, and a scheduled start answers a record that is `pending`. A time or an alert that is none of the
+contract is `INVALID_INPUT` on every platform.
+
+Evidence: `ios::tests::req_i_006_a_scheduled_and_a_transient_start_reach_the_kit` and
+`contract::req_i_006_a_wrong_schedule_reaches_no_backend`.
+
+## REQ-I-007 The sound of an alert
+
+An alert takes `sound`, the file name of a sound of the application, with an update and with a scheduled start,
+and it reaches ActivityKit. A name that is no file name of the contract is `INVALID_INPUT` on every platform.
+
+Evidence: `ios::tests::req_i_007_the_sound_of_an_alert_reaches_the_kit` and
+`contract::req_i_007_a_wrong_sound_reaches_no_backend`.
+
 ## REQ-E-002 Started, state and permission events
 
 The sink receives a layout activity that began, a new lifecycle state of any activity, and the permissions after
@@ -305,6 +339,26 @@ device offers it; where it does not, the start is `UNSUPPORTED_FEATURE`, and a s
 is `SYSTEM_LIMIT`.
 
 Evidence: `exchange::req_a_012_a_start_may_ask_for_the_foreground_placement`.
+
+## REQ-A-013 A toggle on Android
+
+On Android a toggle is an action of the notification. Its title is the toggle's label, found as a button's is,
+with a check mark before it while the value is on. Its tap reaches the sink with `on`, the other state than the
+value in the activity's latest snapshot; a tap on a button or on an action of an Android content has none. A
+toggle without a title or without a place among the actions is left out and named `layout.toggle`.
+
+Evidence: `exchange::req_a_013_a_toggle_is_an_action_on_android_and_its_tap_says_what_was_asked` and
+`android::layout::tests::req_a_013_a_toggle_is_titled_by_its_label_and_its_value`.
+
+## REQ-A-014 Staleness, start options and sounds on Android
+
+Android draws a layout as it is while fresh: a node for stale content is left out, one for fresh content is
+drawn, and the record names `layout.ifStale`. The sink is told `stale` (REQ-E-005), so the application can
+update. A scheduled start is `UNSUPPORTED_FEATURE` and leaves nothing. The iOS options are no part of what
+Android keeps and compares. The sound of an alert is named `alert.sound` where the update alerts.
+
+Evidence: `exchange::req_a_014_android_names_what_it_leaves_of_staleness_and_sounds_and_refuses_a_schedule` and
+`android::layout::tests::req_a_014_a_layout_is_drawn_as_while_fresh_and_its_staleness_is_named`.
 
 ## REQ-N-001 No framework in the crate
 

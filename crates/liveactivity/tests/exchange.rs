@@ -196,6 +196,7 @@ fn req_x_004_taps_of_any_backend_reach_the_same_sink() {
             activity_id: order.id.clone(),
             // Without the app's files the backend keeps no key of its own.
             activity_key: None,
+            on: None,
         })
     );
     assert!(matches!(taps.try_recv().unwrap(), Event::Action(tap) if tap.activity_id == "gone"));
@@ -439,6 +440,7 @@ fn req_x_007_with_the_apps_files_the_android_default_runs_layouts_images_and_key
             action_id: "pet".into(),
             activity_id: record.id.clone(),
             activity_key: Some("pet:1".into()),
+            on: None,
         })
     );
     assert!(taps.try_recv().is_err());
@@ -671,6 +673,7 @@ fn req_a_002_taps_of_a_content_and_dismissals_reach_the_sink() {
             action_id: action.into(),
             activity_id: record.id.clone(),
             activity_key: Some("ride:7".into()),
+            on: None,
         })
     };
     assert_eq!(events.try_recv().unwrap(), tap("call"));
@@ -1893,4 +1896,169 @@ fn req_e_007_events_reach_the_sink_one_at_a_time_in_the_order_they_were_taken() 
         [Event::State(change)] if change.state == ActivityState::Active
             && [&four.id, &five.id].contains(&&change.activity_id)
     ));
+}
+
+/// A ride whose lock screen has a text for fresh content and one for stale content, a toggle and a button; and
+/// what the start says beside its layout.
+fn muted_ride(key: &str, members: serde_json::Value) -> liveactivity::LayoutStartInput {
+    let mut request = serde_json::json!({
+        "activityKey": key,
+        "schemaVersion": 2,
+        "fallback": "notification",
+        "layout": { "lockScreen": { "type": "vstack", "children": [
+            { "type": "text", "bind": "eta", "ifStale": false },
+            { "type": "text", "value": "No signal", "ifStale": true },
+            { "type": "toggle", "actionId": "mute", "bind": "muted",
+                "child": { "type": "text", "value": "Mute" } },
+            { "type": "button", "actionId": "pet", "child": { "type": "text", "value": "Pet" } },
+        ] } },
+        "snapshot": { "revision": 0, "values": { "eta": "6 min", "muted": false } },
+    });
+    request
+        .as_object_mut()
+        .unwrap()
+        .extend(members.as_object().unwrap().clone());
+    liveactivity::parse_request("start_layout", request).unwrap()
+}
+
+/// An update of a [`muted_ride`], and what it says beside its values.
+fn muted_update(
+    id: &str,
+    revision: u64,
+    eta: &str,
+    muted: bool,
+    members: serde_json::Value,
+) -> liveactivity::LayoutUpdateInput {
+    let mut request = serde_json::json!({ "id": id,
+        "snapshot": { "revision": revision, "values": { "eta": eta, "muted": muted } } });
+    let members = members.as_object().unwrap().clone();
+    for (name, member) in members {
+        match name.as_str() {
+            "android" => request["snapshot"]["android"] = member,
+            _ => request[name] = member,
+        }
+    }
+    layout_update(request)
+}
+
+#[test]
+fn req_a_013_a_toggle_is_an_action_on_android_and_its_tap_says_what_was_asked() {
+    // REQ-A-013
+    let (live, events, driver) = android_with_files("toggle");
+    let record = block_on(live.start_layout(muted_ride("ride:7", serde_json::json!({})))).unwrap();
+    shown(&events, &record.id);
+    let titles = || -> Vec<(String, String)> {
+        let posted = driver.posted(&record.id).presentation.unwrap();
+        let titled =
+            |action: &liveactivity::NotificationAction| (action.id.clone(), action.title.clone());
+        posted.actions.iter().map(titled).collect()
+    };
+    let pair = |id: &str, title: &str| (id.to_owned(), title.to_owned());
+    let tap = |action: &str, on: Option<bool>| {
+        Event::Action(ActionEvent {
+            action_id: action.into(),
+            activity_id: record.id.clone(),
+            activity_key: Some("ride:7".into()),
+            on,
+        })
+    };
+
+    // The switch is off: its action is titled by its label, and a tap asks for on. A button's tap asks nothing.
+    assert_eq!(titles(), [pair("mute", "Mute"), pair("pet", "Pet")]);
+    driver.tap(&record.id, 1, "mute");
+    driver.tap(&record.id, 2, "pet");
+    block_on(live.sync_events()).unwrap();
+    assert_eq!(events.try_recv().unwrap(), tap("mute", Some(true)));
+    assert_eq!(events.try_recv().unwrap(), tap("pet", None));
+    // The tap changed nothing: the application moves the switch with an update, and the next tap asks for off.
+    assert_eq!(titles(), [pair("mute", "Mute"), pair("pet", "Pet")]);
+    let on = muted_update(&record.id, 1, "5 min", true, serde_json::json!({}));
+    block_on(live.update_layout(on)).unwrap();
+    assert_eq!(titles(), [pair("mute", "✓ Mute"), pair("pet", "Pet")]);
+    driver.tap(&record.id, 3, "mute");
+    block_on(live.sync_events()).unwrap();
+    assert_eq!(events.try_recv().unwrap(), tap("mute", Some(false)));
+
+    // A snapshot with an Android content shows that content's actions: one of them has no state to ask for,
+    // whatever its id.
+    let content = serde_json::json!({ "android": { "title": "Driver on the way", "status": "4 min away",
+        "presentation": { "style": { "kind": "standard" },
+            "actions": [{ "id": "mute", "title": "Mute all" }] } } });
+    block_on(live.update_layout(muted_update(&record.id, 2, "4 min", true, content))).unwrap();
+    assert_eq!(titles(), [pair("mute", "Mute all")]);
+    driver.tap(&record.id, 4, "mute");
+    block_on(live.sync_events()).unwrap();
+    assert_eq!(events.try_recv().unwrap(), tap("mute", None));
+    assert!(events.try_recv().is_err());
+}
+
+#[test]
+fn req_a_014_android_names_what_it_leaves_of_staleness_and_sounds_and_refuses_a_schedule() {
+    // REQ-A-014
+    let none = || serde_json::json!({});
+    let offering = MemoryDriver::offering(|offered| offered.alert = true);
+    let (live, events, driver) = android_on(offering, "staleness");
+
+    // A layout whose nodes follow staleness is drawn as it is while fresh, and the record says so.
+    let mut start = muted_ride("ride:7", none());
+    start.snapshot.stale_at = Some(1_000);
+    let record = block_on(live.start_layout(start)).unwrap();
+    shown(&events, &record.id);
+    let named = |record: &liveactivity::LayoutActivityRecord, feature: &str| {
+        record.degraded_features.iter().any(|name| name == feature)
+    };
+    assert!(named(&record, "layout.ifStale") && !named(&record, "layout.toggle"));
+    assert_eq!(driver.posted(&record.id).title, "6 min");
+    // Its stale time passes. Nothing redraws the notification: the sink is told, and the application updates.
+    driver.lock().now = 1_000;
+    block_on(live.sync_events()).unwrap();
+    assert_eq!(
+        events.try_recv().unwrap(),
+        state_of(&record.id, "ride:7", ActivityState::Stale)
+    );
+    assert_eq!(driver.posted(&record.id).title, "6 min");
+    let told = muted_update(&record.id, 1, "No signal", false, none());
+    block_on(live.update_layout(told)).unwrap();
+    assert_eq!(driver.posted(&record.id).title, "No signal");
+
+    // The sound of an alert is the channel's on Android: the update alerts, and the record names the sound.
+    let alert = |sound: Option<&str>| {
+        let mut alert = serde_json::json!({ "title": "Almost there", "body": "2 minutes away" });
+        if let Some(sound) = sound {
+            alert["sound"] = serde_json::json!(sound);
+        }
+        serde_json::json!({ "alert": alert })
+    };
+    let loud = muted_update(&record.id, 2, "2 min", false, alert(Some("chime.aiff")));
+    let updated = block_on(live.update_layout(loud)).unwrap();
+    assert!(driver.posted(&record.id).presentation.unwrap().alert);
+    assert!(named(&updated, "alert.sound") && !named(&updated, "alert"));
+    // An alert without a sound names nothing, and the next snapshot does not repeat the name.
+    let plain = muted_update(&record.id, 3, "1 min", false, alert(None));
+    let updated = block_on(live.update_layout(plain)).unwrap();
+    assert!(!named(&updated, "alert.sound") && !named(&updated, "alert"));
+
+    // A scheduled start is refused and leaves nothing: nothing is posted, and its key starts an activity.
+    let posts = driver.lock().posts;
+    let schedule = serde_json::json!({ "scheduled": { "at": 1_790_000_000_000_u64,
+        "alert": { "title": "Your ride", "body": "It starts now" } } });
+    let refused = block_on(live.start_layout(muted_ride("ride:8", schedule)));
+    assert_eq!(refused.unwrap_err().code, "UNSUPPORTED_FEATURE");
+    assert_eq!(driver.lock().posts, posts);
+    assert_eq!(block_on(live.list_layout()).unwrap().len(), 1);
+    // The iOS options are no part of what Android keeps and compares: starts that differ in them are one activity.
+    let transient = |transient: bool| serde_json::json!({ "ios": { "transient": transient } });
+    let first = block_on(live.start_layout(muted_ride("ride:8", transient(true)))).unwrap();
+    let plain = block_on(live.start_layout(muted_ride("ride:8", none()))).unwrap();
+    let other = block_on(live.start_layout(muted_ride("ride:8", transient(false)))).unwrap();
+    assert_eq!((&plain.id, &other.id), (&first.id, &first.id));
+    assert_eq!(block_on(live.list_layout()).unwrap().len(), 2);
+
+    // Where the device alerts once, the whole alert is left out and named, as before.
+    let (live, _events, driver) = android_with_files("staleness-quiet");
+    let record = block_on(live.start_layout(muted_ride("ride:7", none()))).unwrap();
+    let loud = muted_update(&record.id, 1, "2 min", false, alert(Some("chime.aiff")));
+    let updated = block_on(live.update_layout(loud)).unwrap();
+    assert!(!driver.posted(&record.id).presentation.unwrap().alert);
+    assert!(named(&updated, "alert") && !named(&updated, "alert.sound"));
 }

@@ -10,12 +10,12 @@
 use liveactivity::{
     Accessibility, ActivityState, Alert, AndroidContent, AndroidOptions, AndroidPlacement,
     AndroidPresentation, AndroidVisibility, Bound, EndInput, EndPolicy, Event, FeatureSupport,
-    Layout, LayoutEndInput, LayoutPush, LayoutSnapshot, LayoutStartInput, LayoutUpdateInput,
-    LiveActivity, LiveActivityBackend, NotificationAction, PermissionKind, PermissionState,
-    PresentationStyle, ProgressSegment, ProgressStyle, PublicVersion, Result, StartInput,
-    TimerStyle, Transition, UpdateInput,
+    IosOptions, Layout, LayoutEndInput, LayoutPush, LayoutSnapshot, LayoutStartInput,
+    LayoutUpdateInput, LiveActivity, LiveActivityBackend, NotificationAction, PermissionKind,
+    PermissionState, PresentationStyle, ProgressSegment, ProgressStyle, PublicVersion, Result,
+    ScheduledStart, StartInput, TimerStyle, Transition, UpdateInput,
     activitykit::{
-        layout::{button, link, progress, text, vstack},
+        layout::{button, link, progress, text, toggle, vstack},
         values,
     },
     android::LiveUpdateBackend,
@@ -29,6 +29,9 @@ fn connect(backend: impl LiveActivityBackend) -> Result<LiveActivity> {
         .event_sink(|event: Event| {
             if let Some(id) = over(&event) {
                 println!("{id} is over");
+            }
+            if let Some(on) = asked_to_mute(&event) {
+                println!("asked to mute: {on}");
             }
             match event {
                 Event::Action(tap) => println!("tapped {} on {}", tap.action_id, tap.activity_id),
@@ -148,6 +151,66 @@ async fn links_accessibility_and_motion(live: &LiveActivity) -> Result<()> {
     let record = live.start_layout(start).await?;
     // On Android the links open too, and the record names layout.transition.
     println!("left out: {:?}", record.degraded_features);
+    Ok(())
+}
+
+/// A toggle, and nodes that follow staleness. iOS draws a switch, and once the stale date has passed it draws the
+/// stale nodes, without the application running. Android shows the toggle as an action whose title has a check
+/// mark while it is on, draws the content as it is while fresh, and tells the sink that the activity is stale.
+async fn toggle_and_staleness(live: &LiveActivity, stale_at: u64) -> Result<()> {
+    let layout = Layout {
+        lock_screen: vstack([
+            // Drawn while the content is fresh, and the other in its place once its stale date has passed.
+            text(Bound::key("eta")).unless_stale(),
+            text("No signal").when_stale(),
+            // A switch that shows `muted`. A tap asks for the other state and changes nothing itself.
+            toggle("mute", "muted", text("Mute")),
+        ]),
+        island: None,
+        background: None,
+        keyline: None,
+        url: None,
+    };
+    let values = values! { "eta" => "6 min", "muted" => false }.into_inner();
+    let mut snapshot = LayoutSnapshot::new(0, values);
+    snapshot.stale_at = Some(stale_at);
+    let start = LayoutStartInput::new("ride:7", layout, snapshot);
+    let record = live.start_layout(start).await?;
+    // On Android the record names layout.ifStale.
+    println!("left out: {:?}", record.degraded_features);
+    Ok(())
+}
+
+/// What a sink reads of a tap on that toggle: the state the person asked for. The application sends an update
+/// with that value, or does not when it refuses the change.
+fn asked_to_mute(event: &Event) -> Option<bool> {
+    match event {
+        Event::Action(tap) if tap.action_id == "mute" => tap.on,
+        _ => None,
+    }
+}
+
+/// A start at a later time, with the alert the system shows then and its sound, and a transient activity. Both are
+/// iOS's: Android refuses a scheduled start, keeps nothing of the iOS options, and names an alert's sound.
+async fn start_options_and_sounds(
+    live: &LiveActivity,
+    start: LayoutStartInput,
+    at: u64,
+) -> Result<()> {
+    // A sound of the application's bundle. Without one the system plays its own.
+    let alert = Alert::new("Your ride", "It starts now").with_sound("chime.aiff");
+    let mut later = start.clone();
+    later.scheduled = Some(ScheduledStart::new(at, alert));
+    let record = live.start_layout(later).await?;
+    // Until its time the activity is pending: it holds its key, takes no update, and can be ended.
+    assert_eq!(record.state, ActivityState::Pending);
+    live.end_layout(LayoutEndInput::immediate(&record.id))
+        .await?;
+
+    // An activity that the system ends when the person locks the device or leaves the application (iOS 18).
+    let mut transient = start;
+    transient.ios = Some(IosOptions::new(true));
+    live.start_layout(transient).await?;
     Ok(())
 }
 
@@ -389,6 +452,10 @@ fn main() -> Result<()> {
             code(links_accessibility_and_motion(&live).await)
         );
         println!(
+            "toggle and staleness: {}",
+            code(toggle_and_staleness(&live, 1_800_000_240_000).await)
+        );
+        println!(
             "alert and relevance: {}",
             code(alert_and_relevance(&live, "id").await)
         );
@@ -416,6 +483,10 @@ fn main() -> Result<()> {
         println!(
             "android options: {}",
             code(android_options(&live, start.clone()).await)
+        );
+        println!(
+            "start options and sounds: {}",
+            code(start_options_and_sounds(&live, start.clone(), 1_800_000_240_000).await)
         );
         println!("pushes: {}", code(pushes(&live, start).await));
         println!("end and sync: {}", code(end_and_sync(&live, "id").await));

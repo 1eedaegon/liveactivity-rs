@@ -258,6 +258,8 @@ The answer is a `LayoutActivityRecord`. It has no `template` and does not repeat
 | `snapshot.relevance` | Optional finite number. Which of the application's activities the Dynamic Island shows first: the highest wins. Without it the activity keeps its score, 0 at first. Android ignores it, and an Android record does not repeat it |
 | `snapshot.android` | Optional. What Android shows for this snapshot instead of the projection of the layout: see [An Android content](#an-android-content). iOS ignores it, and an iOS record does not repeat it |
 | `android` | Optional. What only Android reads of a start: see [Options of a start on Android](#options-of-a-start-on-android). iOS ignores it |
+| `ios` | Optional. What only iOS reads of a start: see [Options of a start on iOS](#options-of-a-start-on-ios). Android ignores it |
+| `scheduled` | Optional. A time to start at instead of now, and the alert shown then: see [A scheduled start](#a-scheduled-start) |
 | `push` | Optional. `"token"` or `{ "channel": "<base64 id>" }` (iOS 18): what the activity asks ActivityKit for. Android ignores it. In Rust it is `LayoutPush::Token` or `LayoutPush::Channel(id)` |
 
 The layout and the styles are fixed at start. An update sends values only.
@@ -279,6 +281,45 @@ The layout and the styles are fixed at start. An update sends values only.
 | `placement` | Optional. `tagged`, which it is when absent, or `foreground`: the notification is the one that a foreground service of the application holds, so that the service shows no second one. One running activity has it at a time; a second is `SYSTEM_LIMIT`. On a device that does not offer `foregroundPlacement` the start is `UNSUPPORTED_FEATURE`. The placement is part of the request: another one under a running key is `CONFLICT`. The service is the application's ([Android setup](android-setup.md#a-foreground-service)) |
 
 In Rust: `AndroidOptions::new(visibility)`, then set `public_version` or `placement`.
+
+#### Options of a start on iOS
+
+```json
+"ios": { "transient": true }
+```
+
+| Member | Rule |
+| --- | --- |
+| `transient` | Required in `ios`. `true` asks for a transient activity (iOS 18; `UNSUPPORTED_FEATURE` before). By Apple's description it shows in the expanded Dynamic Island, and the system ends it when the person locks the device, collapses that presentation or leaves the application |
+
+The options are no part of what makes two starts the same activity, on either platform. Android
+does not keep them. In Rust: `IosOptions::new(transient)`.
+
+#### A scheduled start
+
+```json
+"scheduled": {
+  "at": 1790000000000,
+  "alert": { "title": "Your ride", "body": "It starts now", "sound": "chime.aiff" }
+}
+```
+
+| Member | Rule |
+| --- | --- |
+| `at` | Required. A time in epoch milliseconds. One that has passed starts the activity at once |
+| `alert` | Required: the system shows an alert when it starts the activity. An [alert](#update_layout) as an update's |
+
+The activity starts at that time instead of now (iOS 26). Until then its record is `pending`:
+
+- it holds its key, so the same start again answers it, whatever its time;
+- it can be ended;
+- an update is `CONFLICT`: the activity begins with the content of its start, whatever was sent
+  meanwhile;
+- the sink receives `Event::State` with `active` when it begins.
+
+An older iOS and Android answer `UNSUPPORTED_FEATURE`, and nothing is kept: a notification is
+posted when it is asked for, and showing the activity at once would show it at the wrong time. In
+Rust: `ScheduledStart::new(at, alert)`.
 
 ### update_layout
 
@@ -305,13 +346,20 @@ An update may bring an alert:
 | --- | --- |
 | `alert.title` | 1 to 120 code points, at least one of them not whitespace |
 | `alert.body` | 1 to 240 code points, at least one of them not whitespace |
+| `alert.sound` | Optional. The file name of a sound in the application's bundle or in its `Library/Sounds`: `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, such as `chime.aiff` |
 
 On iOS the device lights up, the Dynamic Island expands (without one, the Lock Screen presentation
 shows as a banner), and an Apple Watch shows the title and the body. On Android the notification
 alerts again with that revision, with its own title and text, where the device offers `alert`;
 elsewhere the update is silent and the record names `alert` in `degradedFeatures` until the next
-snapshot. Without `alert` an update is silent everywhere. In Rust:
-`LayoutUpdateInput::new(id, snapshot)`, then set `alert`.
+snapshot. Without `alert` an update is silent everywhere.
+
+With `sound` the alert plays that file on iOS; without it the system plays its default sound.
+Android alerts with the sound of its channel, which is the person's choice: the update alerts and
+the record names `alert.sound`.
+
+In Rust: `LayoutUpdateInput::new(id, snapshot)`, then set `alert` to `Alert::new(title, body)`,
+with `.with_sound(name)` for a sound.
 
 ### An Android content
 
@@ -544,7 +592,7 @@ match with a `_` arm.
 
 | Variant | Payload | From |
 | --- | --- | --- |
-| `Event::Action` | `ActionEvent` | iOS, Android: a tap on a `button` node |
+| `Event::Action` | `ActionEvent` | iOS, Android: a tap on a `button` or a `toggle` node, or on an action of an Android content. For a toggle it has `on`, the state the person asked for |
 | `Event::PushToken` | `PushTokenEvent` | iOS: a push token of an activity, new or changed |
 | `Event::PushToStartToken` | `PushToStartTokenEvent` | iOS: the app's push-to-start token, new or changed |
 | `Event::Updated` | `UpdatedEvent` | iOS: content that a push delivered to a layout activity |
@@ -687,6 +735,10 @@ Every node is an object with a `type`. Any node may also carry:
 - `style`, a style token;
 - one of `if` and `unless`, a value key: with `if` the node and its subtree are drawn only when the
   value is truthy, with `unless` only when it is not;
+- `ifStale`, a boolean: with `true` the node and its subtree are drawn only while the content is
+  stale, with `false` only while it is not. Content is stale once its `staleAt` has passed and no
+  newer content has come. Beside `if` or `unless` the node is drawn while both hold. See
+  [Staleness](#staleness);
 - `accessibility`: what assistive technologies read of the node, see [Accessibility](#accessibility);
 - `transition`: how the node comes and goes when its `if` or `unless` shows or hides it: `opacity`,
   `slide`, `moveTop`, `moveBottom`, `moveLeading`, `moveTrailing`, `pushTop`, `pushBottom`,
@@ -711,6 +763,7 @@ Every node is an object with a `type`. Any node may also carry:
 | `gauge` | `bind`: a value key of a number; `min`?, `max`?: numbers, 0 and 1 when left out, `min` below `max`; `kind`?: `linear` `circular` |
 | `timerText` | `start`, `end`: value keys of times in epoch milliseconds, the `end` value after the `start` value; `countsDown`?: boolean, true when left out |
 | `button` | `actionId`: `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`; `child`: Node |
+| `toggle` | `actionId`: as a button's; `bind`: a value key of a boolean, the state the switch shows; `child`: Node, its label |
 | `link` | `url`: a URL or a binding, see [Links and URLs](#links-and-urls); `child`: Node |
 | `custom` | `name`: `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, a view the app registers on iOS; `props`?: 1 to 16 entries, each a string of 0 to 200 code points, a number, a boolean or a binding |
 
@@ -720,16 +773,17 @@ or `m` first.
 Limits of a tree:
 
 - Depth at most 8. The root of a region has depth 1; a node in `children` or the `child` of a
-  button or a link is one deeper.
+  button, a toggle or a link is one deeper.
 - Nodes per region, containers included: `lockScreen` 40, each expanded region 12,
   `compactLeading`, `compactTrailing` and `minimal` 3 each.
-- Buttons and links only in `lockScreen` and the expanded regions, never inside a button or a link,
-  at most 4 per region, buttons and links together.
+- Buttons, toggles and links only in `lockScreen` and the expanded regions, never inside one of
+  them, at most 4 per region, all three together.
 
 References are checked at start, and again with the new values on every update:
 
 - every `bind`, `if`, `unless`, `variableBind`, `start` and `end` names a key of `snapshot.values`;
 - `progress.bind`, `gauge.bind`, `variableBind`, `timerText.start` and `timerText.end` name a number;
+- `toggle.bind` names a boolean;
 - every `style` names a token of `styles`;
 - every bound `label`, `value` and `hint` of an `accessibility` names a key, of any type;
 - a bound `url`, of the layout or of a link, names a string that is a URL.
@@ -820,6 +874,44 @@ A `button` wraps one child and carries an `actionId`. A tap reaches the event si
 `Event::Action` with that `actionId`, the activity's `id` and its key. A tap does not change the
 activity: update it from the application if the button should change.
 
+A `toggle` is a switch beside its label. It shows the boolean value it is bound to, and a tap
+reaches the sink as `Event::Action` with `on`, the state the person asked for: the other one than
+the value shown. The tap does not move the switch. The application sends an update with the new
+value, or does not when it refuses the change.
+
+```json
+{ "type": "toggle", "actionId": "mute", "bind": "muted", "child": { "type": "text", "value": "Mute" } }
+```
+
+```rust
+Event::Action(tap) if tap.action_id == "mute" => {
+    // `tap.on` is `Some(true)` when the person switched it on.
+}
+```
+
+iOS draws the switch from iOS 17; before it shows the label alone. Android shows it as an action
+of the notification: see [What Android shows](#what-android-shows).
+
+### Staleness
+
+A snapshot may say when it is out of date (`staleAt`). A layout says what it shows then with
+`ifStale`:
+
+```json
+{ "type": "vstack", "children": [
+  { "type": "text", "bind": "eta", "ifStale": false },
+  { "type": "text", "value": "No signal", "ifStale": true }
+] }
+```
+
+On iOS the system draws the stale nodes once the time has passed, without an update and without
+the application running, and the next snapshot whose time has not passed is fresh again.
+
+Android draws a notification when it is posted, and nothing redraws it when a time passes. The
+Android backend draws the layout as it is while fresh, names `layout.ifStale`, and tells the sink
+`Event::State` with `stale` when it next asks ([Events](#events)). An application that wants the
+notification to say so sends an update then.
+
 ### Styles
 
 `styles` maps a token (`^[A-Za-z][A-Za-z0-9_]{0,31}$`) to a style. A style has at least one member.
@@ -908,6 +1000,8 @@ A notification cannot draw a layout. For a snapshot without [an Android content]
 the Android backend projects the `lockScreen` tree onto one of Android's notification styles and
 reports what it left out. It reads only the lock screen tree, in
 document order, depth first, with the current values and the `if` and `unless` conditions applied.
+The content is drawn as it is while fresh: a node with `ifStale: true` is never shown and counts
+for nothing below.
 
 The style of the projection is the layout's, the same with every snapshot. It is chosen from the
 tree, conditions aside: a `progress` anywhere gives the progress style; else a `timerText` the
@@ -921,6 +1015,7 @@ standard style. A node that Android cannot draw and that has a label or a value 
 | first shown `progress` | the progress bar, clamped to 0..1; 0 while the node is hidden |
 | first shown `timerText` | the chronometer, counting down to `end`, or up from `start` with `countsDown: false`; the tree's first timer while none is shown. Beside a progress it is the clock in the header, where the device offers `chronometer` |
 | `button`s and `link`s, three in all | actions, in the order of the tree. A button's tap reaches the sink; a link's action opens its URL, where the device offers `links`, and its id is `link:<n>`, `n` counting the links of the tree from 1, hidden ones too. The title is the first shown text inside, cut to 64; without a text, the label of the first node inside that has one; then the button's or the link's own label |
+| a `toggle` | one of those three actions, in its place in the tree. Its title is its label, found as a button's title is, with `✓` before it while the bound value is on. Its tap reaches the sink with `on`, the other state than the value in the activity's latest snapshot |
 | a shown `symbol`, `path`, `gauge`, `custom`, `spacer`, `divider` or asset `image` with an `accessibility` label, a value or both | a text, in its place among the texts: the label, the value, or `label, value`. A bound member reads as a text shows its value, and says nothing while the value is empty. A second progress or timer is named, whatever it says |
 | a node of those kinds with `accessibility.hidden` | nothing: it is decoration, and it is not named |
 | first shown `image` with a `file` source | the large icon, when the stored PNG is at most 1024 pixels a side and 1 MiB |
@@ -938,27 +1033,32 @@ progress is shown and no timer. A bound text shows its value as text.
 2. `layout.<type>` for every shown node that was left out, once per type: a third text
    (`layout.text`), a second progress or timer, a timer under the progress style on a device
    without `chronometer` (`layout.timerText`), a button or a link without a title, beyond the
-   three actions or with an id that is taken (`layout.button`, `layout.link`), a link on a device
+   three actions or with an id that is taken (`layout.button`, `layout.toggle`, `layout.link`), a link on a device
    without `links` or with a URL that liveupdate does not take or nothing opens (`layout.link`),
-   every node inside a button or a link other than the one that titles it, an asset image, a second
+   every node inside a button, a toggle or a link other than the one that titles it, an asset image, a second
    file image or a file that is missing or too large (`layout.image`), and every `symbol`,
    `spacer`, `divider`, `path`, `gauge` and `custom` node that says nothing in words. Among them,
    in the order of the nodes: `layout.transition` for a shown node with a `transition`, and
    `layout.privacy` for a shown node with `privacy` when `android.visibility` is `public`. A
    notification that a locked screen hides shows nothing private there, so the mark leaves nothing
    out;
-3. `layout.island`, `layout.styles`, `layout.background` and `layout.keyline`, when the request has
-   them, and `layout.url` when the notification does not open it. A notification draws no styles,
-   so a bound color changes nothing on Android;
-4. `alert` when an update asked for one on a device that does not offer it, and `publicVersion`
-   when the start gave one on a device that shows none.
+3. `layout.ifStale` when a node of the lock screen follows staleness, then `layout.island`,
+   `layout.styles`, `layout.background` and `layout.keyline`, when the request has them, and
+   `layout.url` when the notification does not open it. A notification draws no styles, so a bound
+   color changes nothing on Android;
+4. `alert` when an update asked for one on a device that does not offer it, `alert.sound` when an
+   alert that alerts named a sound, and `publicVersion` when the start gave one on a device that
+   shows none.
 
 A node hidden by its condition is not listed. The list is computed from the current values, so it
 can change with an update. The record carries the layout snapshot the application sent, not the
 projection.
 
-A tap on an action reaches the sink with the activity's key. A tap on an `actionId` that neither
-the activity's layout nor an Android content it has shown declared is dropped. An activity keeps
+A tap on an action reaches the sink with the activity's key. A tap on a toggle's action has `on`,
+read from the latest snapshot when the tap is handed over: Android stores a tap also while the
+application does not run, so it may come after an update changed the value. A tap on an action of
+an Android content has none. A tap on an `actionId` that neither the activity's layout nor an
+Android content it has shown declared is dropped. An activity keeps
 the action ids of its last contents, up to 32, because a stored tap may come after a later content
 replaced its action.
 

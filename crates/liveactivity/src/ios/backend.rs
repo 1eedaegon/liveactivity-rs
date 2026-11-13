@@ -206,6 +206,7 @@ mod tests {
             action_id: "pet".into(),
             activity_id: "la-1".into(),
             activity_key: Some("demo:1".into()),
+            on: None,
         };
         kit.send_tap(tap.clone(), FakeAck(log.clone()));
         assert_eq!(

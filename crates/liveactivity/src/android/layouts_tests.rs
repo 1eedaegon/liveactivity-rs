@@ -476,12 +476,14 @@ fn a_stored_tap_comes_out_with_the_activity_key() {
             Event::Action(ActionEvent {
                 action_id: "pet".into(),
                 activity_id: record.id.clone(),
-                activity_key: Some("snack:1".into())
+                activity_key: Some("snack:1".into()),
+                on: None,
             }),
             Event::Action(ActionEvent {
                 action_id: "pet".into(),
                 activity_id: "gone".into(),
-                activity_key: None
+                activity_key: None,
+                on: None,
             }),
         ]
     );
@@ -734,7 +736,8 @@ fn a_store_that_cannot_be_read_loses_no_tap() {
         [Event::Action(ActionEvent {
             action_id: "pet".into(),
             activity_id: record.id,
-            activity_key: None
+            activity_key: None,
+            on: None,
         })]
     );
 }

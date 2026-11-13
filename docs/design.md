@@ -67,8 +67,9 @@ application or framework plugin
    feature where the device has none.
 
 What the engines opened and what this crate does with each is in
-[design/engine-expressiveness](design/engine-expressiveness/PRD.md) and
-[design/engine-extensions](design/engine-extensions/PRD.md). What a layout shows
+[design/engine-expressiveness](design/engine-expressiveness/PRD.md),
+[design/engine-extensions](design/engine-extensions/PRD.md) and
+[design/engine-interaction](design/engine-interaction/PRD.md). What a layout shows
 on Android is in [design/layout-on-android](design/layout-on-android/PRD.md),
 and how the sink learns of an activity's states there in
 [design/end-events](design/end-events/PRD.md) and

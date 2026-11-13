@@ -50,6 +50,7 @@ fn req_c_001_the_contract_has_stable_json() {
         action_id: "track".into(),
         activity_id: "id".into(),
         activity_key: None,
+        on: None,
     };
     assert_eq!(
         serde_json::to_value(tap).unwrap(),
@@ -295,5 +296,159 @@ fn req_i_003_a_wrong_member_of_the_ios_surface_reaches_no_backend() {
             "child":{"type":"link","url":"myapp://x","child":{"type":"text","bind":"eta"}}}}),
     ] {
         assert_eq!(start(wrong.clone()), "INVALID_INPUT", "{wrong}");
+    }
+}
+
+/// The code that a host, which is neither platform, answers a layout start with: a right request is refused by
+/// the backend, a wrong one before it.
+fn answer_to_a_start(members: serde_json::Value) -> String {
+    let live = LiveActivity::builder().build().unwrap();
+    let mut request = json!({"activityKey":"ride:7","schemaVersion":2,"fallback":"notification",
+        "layout":{"lockScreen":{"type":"text","bind":"eta"}},
+        "snapshot":{"revision":0,"values":{"eta":"4 min","muted":false,"count":3}}});
+    request
+        .as_object_mut()
+        .unwrap()
+        .extend(members.as_object().unwrap().clone());
+    match liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", request) {
+        Ok(input) => block_on(live.start_layout(input)).unwrap_err().code,
+        Err(error) => error.code,
+    }
+}
+
+#[test]
+fn req_i_004_a_wrong_toggle_reaches_no_backend() {
+    // REQ-I-004
+    let toggle = |members: serde_json::Value| {
+        let mut node = json!({"type":"toggle","actionId":"mute","bind":"muted",
+            "child":{"type":"text","value":"Mute"}});
+        node.as_object_mut()
+            .unwrap()
+            .extend(members.as_object().unwrap().clone());
+        node
+    };
+    let on_the_lock_screen = |node: serde_json::Value| json!({"layout":{"lockScreen":node}});
+    let controls = |count: usize| {
+        let buttons: Vec<_> = (0..count)
+            .map(|place| toggle(json!({"actionId": format!("mute:{place}")})))
+            .collect();
+        on_the_lock_screen(json!({"type":"hstack","children":buttons}))
+    };
+    for right in [on_the_lock_screen(toggle(json!({}))), controls(4)] {
+        assert_eq!(
+            answer_to_a_start(right.clone()),
+            "UNSUPPORTED_PLATFORM",
+            "{right}"
+        );
+    }
+    for wrong in [
+        // A value that is no flag, a value the snapshot does not have, and an id that is none.
+        on_the_lock_screen(toggle(json!({"bind":"count"}))),
+        on_the_lock_screen(toggle(json!({"bind":"missing"}))),
+        on_the_lock_screen(toggle(json!({"actionId":"no id"}))),
+        // Inside a button, a button inside it, and more than a region takes.
+        on_the_lock_screen(json!({"type":"button","actionId":"go","child":toggle(json!({}))})),
+        on_the_lock_screen(toggle(
+            json!({"child":{"type":"button","actionId":"go","child":{"type":"text","value":"Go"}}}),
+        )),
+        controls(5),
+        // Where no button may stand: the compact island.
+        json!({"layout":{"lockScreen":{"type":"text","bind":"eta"},
+            "island":{"compactLeading":toggle(json!({}))}}}),
+    ] {
+        assert_eq!(answer_to_a_start(wrong.clone()), "INVALID_INPUT", "{wrong}");
+    }
+
+    // The state a toggle was asked for is a member of the event; a button's tap is written as before.
+    let tap = |on| ActionEvent {
+        action_id: "mute".into(),
+        activity_id: "id".into(),
+        activity_key: None,
+        on,
+    };
+    assert_eq!(
+        serde_json::to_value(tap(Some(true))).unwrap(),
+        json!({"actionId": "mute", "activityId": "id", "on": true})
+    );
+    assert_eq!(
+        serde_json::to_value(tap(None)).unwrap(),
+        json!({"actionId": "mute", "activityId": "id"})
+    );
+}
+
+#[test]
+fn req_i_006_a_wrong_schedule_reaches_no_backend() {
+    // REQ-I-006
+    let alert = json!({"title":"Your ride","body":"It starts now"});
+    for right in [
+        json!({"scheduled":{"at":1_790_000_000_000_u64,"alert":alert}}),
+        json!({"ios":{"transient":true}}),
+        json!({"ios":{"transient":false},"scheduled":{"at":0,"alert":alert}}),
+    ] {
+        assert_eq!(
+            answer_to_a_start(right.clone()),
+            "UNSUPPORTED_PLATFORM",
+            "{right}"
+        );
+    }
+    for wrong in [
+        // A schedule needs its alert, and a time of the contract.
+        json!({"scheduled":{"at":1_790_000_000_000_u64}}),
+        json!({"scheduled":{"at":8_640_000_000_000_001_u64,"alert":alert}}),
+        json!({"scheduled":{"at":-1,"alert":alert}}),
+        json!({"scheduled":{"at":1_790_000_000_000_u64,"alert":{"title":"","body":"It starts now"}}}),
+        json!({"scheduled":{"at":1_790_000_000_000_u64,"alert":alert,"repeat":true}}),
+        json!({"scheduled":null}),
+        // The iOS options are read strictly, as Android's are.
+        json!({"ios":{}}),
+        json!({"ios":{"transient":"yes"}}),
+        json!({"ios":{"transient":true,"style":"transient"}}),
+        json!({"ios":null}),
+    ] {
+        assert_eq!(answer_to_a_start(wrong.clone()), "INVALID_INPUT", "{wrong}");
+    }
+}
+
+#[test]
+fn req_i_007_a_wrong_sound_reaches_no_backend() {
+    // REQ-I-007
+    let scheduled = |sound: serde_json::Value| {
+        json!({"scheduled":{"at":1_790_000_000_000_u64,
+            "alert":{"title":"Your ride","body":"It starts now","sound":sound}}})
+    };
+    let update = |sound: serde_json::Value| {
+        let request = json!({"id":"a","snapshot":{"revision":1,"values":{"eta":"2 min"}},
+            "alert":{"title":"Gate changed","body":"Now gate 12","sound":sound}});
+        validate_request("update_layout", request).map_err(|error| error.code)
+    };
+    for right in ["chime.aiff", "a", "Alarm_2-b.caf"] {
+        assert_eq!(
+            answer_to_a_start(scheduled(json!(right))),
+            "UNSUPPORTED_PLATFORM",
+            "{right}"
+        );
+        assert_eq!(update(json!(right)), Ok(()), "{right}");
+    }
+    let long = "a".repeat(65);
+    for wrong in [
+        json!(""),
+        json!("../chime.aiff"),
+        json!("sounds/chime.aiff"),
+        json!(".chime"),
+        json!("chime aiff"),
+        json!(long),
+        json!(7),
+        serde_json::Value::Null,
+    ] {
+        assert_eq!(
+            answer_to_a_start(scheduled(wrong.clone())),
+            "INVALID_INPUT",
+            "{wrong}"
+        );
+        assert_eq!(
+            update(wrong.clone()),
+            Err("INVALID_INPUT".to_owned()),
+            "{wrong}"
+        );
     }
 }

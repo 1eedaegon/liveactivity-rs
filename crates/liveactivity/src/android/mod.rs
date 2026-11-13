@@ -204,6 +204,7 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
                         action_id,
                         activity_id: event.activity_id,
                         activity_key: None,
+                        on: None,
                     })),
                     EventKind::Opened { action_id } => Some(Event::Opened(crate::OpenedEvent {
                         activity_id: event.activity_id,

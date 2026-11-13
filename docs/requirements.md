@@ -153,6 +153,16 @@ the person changed them. On Android a dismissal is a state event.
 Evidence: `ios::backend::tests::req_e_002_starts_states_and_permissions_reach_the_sink` and
 `exchange::req_a_002_taps_of_a_content_and_dismissals_reach_the_sink`.
 
+## REQ-E-003 An end is reported on Android
+
+On Android the sink receives `State` with `ended`, the activity's id and its key, when an end of the application
+ends a running activity: a template or a layout, at once or with a last content that stays. An end of an activity
+that is already over and an end that fails report nothing. The test kit's backend without a platform does the
+same.
+
+Evidence: `exchange::req_e_003_an_end_of_the_application_is_reported_on_android` and
+`testkit::memory::tests::req_e_003_the_backend_without_a_platform_reports_its_ends`.
+
 ## REQ-A-001 Android content of a snapshot
 
 A snapshot's Android content is shown as given, in place of the projection of the layout. A snapshot without one

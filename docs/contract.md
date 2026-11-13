@@ -532,7 +532,7 @@ match with a `_` arm.
 | `Event::PushToStartToken` | `PushToStartTokenEvent` | iOS: the app's push-to-start token, new or changed |
 | `Event::Updated` | `UpdatedEvent` | iOS: content that a push delivered to a layout activity |
 | `Event::Started` | `StartedEvent` | iOS: a layout activity began, one the application started or one a push started |
-| `Event::State` | `StateEvent` | iOS: a new lifecycle state of any activity, while the application runs. Android: the person dismissed the notification |
+| `Event::State` | `StateEvent` | iOS: a new lifecycle state of any activity, while the application runs. Android: `ended` when an end of the application ends a running activity, and `dismissed` when the person removes the notification |
 | `Event::Permissions` | `Permissions` | iOS: what the person allows, after a change in Settings |
 
 ```json
@@ -571,6 +571,15 @@ activities that got one (`TOKENS_KEPT`), in the order their first tokens came. A
 
 iOS delivers events as they come. Android stores taps and dismissals; `live.sync_events()` hands
 the stored ones to the sink, oldest first. On iOS it does nothing.
+
+An activity is over when its state is `ended` or `dismissed`, on either platform. On iOS ActivityKit
+reports `ended` for every end, the application's, a push's or the system's, and `dismissed` when
+the activity leaves the screen. On Android only the application ends an activity, and the backend
+reports that end itself, on the thread of the call and once: an end sent again, an end of an
+activity the person already removed and an end that fails report nothing. A last content that
+[stays after an end](#end) leaves without an event when its time comes. Android reports no
+`active` and no `stale`: a start is the application's own call, and a stale date is read when the
+record is asked for.
 
 A URL that a tap opens is no event. The system gives it to the application as any URL it is opened
 with: `onOpenURL` or the scene's URL contexts on iOS, the intent of the activity that declares the

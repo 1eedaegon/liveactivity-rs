@@ -40,8 +40,9 @@ pub enum Event {
     Updated(UpdatedEvent),
     /// A layout activity began: one the application started, or one a push started (iOS).
     Started(StartedEvent),
-    /// A new lifecycle state of an activity. iOS reports every change while the application runs; Android reports
-    /// that the person dismissed the notification.
+    /// A new lifecycle state of an activity. iOS reports every change while the application runs. Android reports
+    /// `Ended` when an end of the application ends a running activity, and `Dismissed` when the person removes
+    /// the notification. An activity is over at either.
     State(StateEvent),
     /// What the person allows, after a change in Settings (iOS).
     Permissions(Permissions),
@@ -52,7 +53,7 @@ pub enum Event {
 /// On iOS the backend calls the sink from a thread of its own. A tap keeps its intent, and an app the system
 /// launched for it, until `emit` has returned, for at most 4 seconds; the other events wait for nothing. On Android
 /// the sink is called on the thread that runs `sync_events`, while the backend holds its drain: a sink must not
-/// call `sync_events` itself.
+/// call `sync_events` itself. An end is reported on the thread that runs the end, after it, with no lock held.
 pub trait EventSink: Send + Sync + 'static {
     /// Takes one event.
     fn emit(&self, event: Event);

@@ -8,11 +8,11 @@
 //! ```
 
 use liveactivity::{
-    Accessibility, Alert, AndroidContent, AndroidPresentation, Bound, EndInput, EndPolicy, Event,
-    FeatureSupport, Layout, LayoutEndInput, LayoutPush, LayoutSnapshot, LayoutStartInput,
-    LayoutUpdateInput, LiveActivity, LiveActivityBackend, NotificationAction, PermissionKind,
-    PermissionState, PresentationStyle, ProgressSegment, ProgressStyle, PublicVersion, Result,
-    StartInput, TimerStyle, Transition, UpdateInput,
+    Accessibility, ActivityState, Alert, AndroidContent, AndroidPresentation, Bound, EndInput,
+    EndPolicy, Event, FeatureSupport, Layout, LayoutEndInput, LayoutPush, LayoutSnapshot,
+    LayoutStartInput, LayoutUpdateInput, LiveActivity, LiveActivityBackend, NotificationAction,
+    PermissionKind, PermissionState, PresentationStyle, ProgressSegment, ProgressStyle,
+    PublicVersion, Result, StartInput, TimerStyle, Transition, UpdateInput,
     activitykit::{
         layout::{button, link, progress, text, vstack},
         values,
@@ -24,13 +24,34 @@ use liveactivity::{
 fn connect(backend: impl LiveActivityBackend) -> Result<LiveActivity> {
     LiveActivity::builder()
         .backend(backend) // leave this out for the platform's own backend
-        .event_sink(|event: Event| match event {
-            Event::Action(tap) => println!("tapped {} on {}", tap.action_id, tap.activity_id),
-            Event::State(change) => println!("{} is {:?}", change.activity_id, change.state),
-            Event::PushToken(token) => println!("send {} to the server", token.token),
-            _ => {}
+        .event_sink(|event: Event| {
+            if let Some(id) = over(&event) {
+                println!("{id} is over");
+            }
+            match event {
+                Event::Action(tap) => println!("tapped {} on {}", tap.action_id, tap.activity_id),
+                Event::State(change) => println!("{} is {:?}", change.activity_id, change.state),
+                Event::PushToken(token) => println!("send {} to the server", token.token),
+                _ => {}
+            }
         })
         .build()
+}
+
+/// Events: an activity is over when a state event says that it ended or that the person dismissed it. This is
+/// the id of the activity that `event` says is over.
+fn over(event: &Event) -> Option<&str> {
+    match event {
+        Event::State(change)
+            if matches!(
+                change.state,
+                ActivityState::Ended | ActivityState::Dismissed
+            ) =>
+        {
+            Some(&change.activity_id)
+        }
+        _ => None,
+    }
 }
 
 /// Progress and timer activities: a title, a status, and a progress from 0 to 1 or a countdown.

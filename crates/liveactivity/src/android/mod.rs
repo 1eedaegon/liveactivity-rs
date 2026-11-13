@@ -4,6 +4,10 @@
 //! revisions and the receipts. Given the folder of the app's files ([`AndroidFiles`]), it also runs layouts, which
 //! it projects onto the engine's notification styles, stores images, and reports taps on buttons.
 //!
+//! The engine stores what the person does to a notification, and the backend hands that to the event sink when it
+//! is asked to. An end is the application's own call, which the engine stores nothing for: the backend reports it
+//! itself, so that the sink learns of an end as it does on iOS.
+//!
 //! The caller supplies the transport: a `liveupdate::Driver`, a string `liveupdate::Bridge` over a framework's
 //! own native call, or the JNI transport of liveupdate's AAR. Android's permission dialog needs an Activity, so a
 //! host that shows it implements `request_permissions` in a backend of its own around this one.
@@ -64,6 +68,8 @@ pub struct LiveUpdateBackend<D: Driver> {
     events: OnceLock<BackendContext>,
     /// Held for one whole drain, so that taps reach the sink in order.
     pump: Mutex<()>,
+    /// Held while an end asks whether its activity runs and then ends it, so that one end reports it.
+    ending: Mutex<()>,
 }
 
 impl<D: Driver + 'static> LiveUpdateBackend<D> {
@@ -75,6 +81,7 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
             layouts: None,
             events: OnceLock::new(),
             pump: Mutex::new(()),
+            ending: Mutex::new(()),
         }
     }
 
@@ -144,6 +151,44 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
         let count = queued.len();
         queued.into_iter().for_each(|event| events.emit(event));
         Ok(count)
+    }
+
+    /// Runs `end`, an end of the activity `id`, and tells the sink that the activity ended when it was running
+    /// before: an end of an activity that is over answers its record and ends nothing. The engine stores no event
+    /// for an end, so the backend reports it. The sink is called after the end, outside the backend's locks.
+    fn ending<T>(
+        &self,
+        id: &str,
+        end: impl FnOnce() -> Result<T>,
+        key: impl FnOnce(&T) -> String,
+    ) -> Result<T> {
+        let (ended, was_running) = {
+            let _one_end = self.ending.lock().unwrap_or_else(PoisonError::into_inner);
+            let was_running = self.runs(id);
+            (end()?, was_running)
+        };
+        if was_running && let Some(events) = self.events.get() {
+            events.emit(Event::State(crate::StateEvent {
+                activity_id: id.to_owned(),
+                activity_key: Some(key(&ended)),
+                state: crate::ActivityState::Ended,
+            }));
+        }
+        Ok(ended)
+    }
+
+    /// Whether the engine lists the activity `id` as one that is not over. A list that fails says nothing of the
+    /// activity, and then no end is reported.
+    fn runs(&self, id: &str) -> bool {
+        self.engine.list().is_ok_and(|records| {
+            records.iter().any(|record| {
+                record.id == id
+                    && !matches!(
+                        record.state,
+                        liveupdate::ActivityState::Ended | liveupdate::ActivityState::Dismissed
+                    )
+            })
+        })
     }
 
     fn layouts(&self) -> Result<&Layouts<D, FileStore>> {
@@ -223,10 +268,13 @@ impl<D: Driver + 'static> LiveActivityBackend for LiveUpdateBackend<D> {
 
     fn end(&self, input: EndInput) -> BackendFuture<'_, ActivityRecord> {
         Box::pin(async move {
-            self.engine
-                .end(&input.id, convert::end_policy(input.policy))
-                .map_err(convert::error)
-                .and_then(convert::activity_record)
+            let end = || {
+                self.engine
+                    .end(&input.id, convert::end_policy(input.policy))
+                    .map_err(convert::error)
+                    .and_then(convert::activity_record)
+            };
+            self.ending(&input.id, end, |record| record.activity_key.clone())
         })
     }
 
@@ -247,7 +295,12 @@ impl<D: Driver + 'static> LiveActivityBackend for LiveUpdateBackend<D> {
     }
 
     fn end_layout(&self, input: LayoutEndInput) -> BackendFuture<'_, LayoutActivityRecord> {
-        Box::pin(async move { self.layouts()?.end(&self.engine, input) })
+        Box::pin(async move {
+            let layouts = self.layouts()?;
+            let id = input.id.clone();
+            let end = || layouts.end(&self.engine, input);
+            self.ending(&id, end, |record| record.activity_key.clone())
+        })
     }
 
     fn list_layout(&self) -> BackendFuture<'_, Vec<LayoutActivityRecord>> {

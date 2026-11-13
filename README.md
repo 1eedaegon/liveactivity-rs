@@ -370,16 +370,34 @@ started as `Event::Started`. The steps are in
 | Event | When | iOS | Android |
 | --- | --- | --- | --- |
 | `Event::Action` | a button or an action was tapped | ✓ | ✓ |
-| `Event::State` | an activity has a new lifecycle state | every change while the app runs | the person dismissed it |
+| `Event::State` | an activity has a new lifecycle state | every change while the app runs | `ended` when the application ends it, `dismissed` when the person removes it |
 | `Event::Started` | a layout activity began, also one a push started | ✓ | |
 | `Event::Updated` | a push changed the content of a layout activity | ✓ | |
 | `Event::PushToken` | an activity got a push token, or a new one | ✓ | |
 | `Event::PushToStartToken` | the app got its push-to-start token | ✓ | |
 | `Event::Permissions` | the person changed what the app may do | ✓ | |
 
-The enum may grow: match with a `_` arm. iOS delivers events as they come, and
-a tap keeps the app awake until the sink returns, for at most 4 seconds.
-Android stores taps and dismissals, also while the application does not run:
+The enum may grow: match with a `_` arm. An activity is over when a `State`
+event says `ended` or `dismissed`, on either platform:
+
+```rust
+/// The id of the activity that `event` says is over.
+fn over(event: &Event) -> Option<&str> {
+    match event {
+        Event::State(change)
+            if matches!(change.state, ActivityState::Ended | ActivityState::Dismissed) =>
+        {
+            Some(&change.activity_id)
+        }
+        _ => None,
+    }
+}
+```
+
+iOS delivers events as they come, and a tap keeps the app awake until the sink
+returns, for at most 4 seconds. Android reports an end of the application at
+the call, and stores taps and dismissals, also while the application does not
+run:
 
 ```rust
 // When the application starts and resumes. On iOS it does nothing.

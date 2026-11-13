@@ -406,6 +406,14 @@ fn req_x_007_with_the_apps_files_the_android_default_runs_layouts_images_and_key
         1
     );
 
+    // The conformance run ended its activities, and each of those ends was reported.
+    let ends: Vec<Event> = taps.try_iter().collect();
+    assert!(!ends.is_empty());
+    assert!(ends.iter().all(|event| matches!(
+        event,
+        Event::State(change) if change.state == ActivityState::Ended
+    )));
+
     // A tap on a declared button names its activity's key; one on an undeclared action is dropped.
     driver.tap(&record.id, 1, "pet");
     driver.tap(&record.id, 2, "undeclared");
@@ -1203,4 +1211,83 @@ fn req_a_007_a_content_that_android_refuses_at_the_post_leaves_nothing_behind() 
     assert_eq!(listed[0].id, started.id);
     let corrected = block_on(live.start_layout(ride("ride:3", Some(opening("myapp://rides/3")))));
     assert_eq!(corrected.unwrap().state, ActivityState::Active);
+}
+
+#[test]
+fn req_e_003_an_end_of_the_application_is_reported_on_android() {
+    // REQ-E-003
+    use liveactivity::{EndPolicy, LayoutEndInput, StateEvent};
+    let ended = |id: &str, key: &str| {
+        Event::State(StateEvent {
+            activity_id: id.into(),
+            activity_key: Some(key.into()),
+            state: ActivityState::Ended,
+        })
+    };
+    let at = 1_800_000_600_000;
+
+    // A template, over a driver and over a framework's string bridge.
+    for connect in [android_default as Connect, android_over_a_framework_bridge] {
+        let (live, events) = connect();
+        let start = StartInput::progress("order:42", "Order 42", "Preparing", 0.1);
+        let order = block_on(live.start(start)).unwrap();
+        // A start is the application's own call too, and reports nothing.
+        assert!(events.try_recv().is_err());
+        block_on(live.end(EndInput::immediate(&order.id))).unwrap();
+        assert_eq!(events.try_recv().unwrap(), ended(&order.id, "order:42"));
+        // An end again answers the record and reports nothing, and neither does an end that fails.
+        block_on(live.end(EndInput::new(&order.id))).unwrap();
+        assert_eq!(
+            block_on(live.end(EndInput::new("unknown")))
+                .unwrap_err()
+                .code,
+            "NOT_FOUND"
+        );
+        assert!(events.try_recv().is_err());
+    }
+
+    // A layout, at once and with a last content that stays.
+    let offering = MemoryDriver::offering(|offered| offered.delayed_end = true);
+    let (live, events, driver) = android_on(offering, "end-events");
+    let record = block_on(live.start_layout(ride("ride:7", None))).unwrap();
+    block_on(live.end_layout(LayoutEndInput::immediate(&record.id))).unwrap();
+    assert_eq!(events.try_recv().unwrap(), ended(&record.id, "ride:7"));
+    let kept = block_on(live.start_layout(ride("ride:8", None))).unwrap();
+    let mut end = LayoutEndInput::new(&kept.id);
+    end.policy = EndPolicy::After { at };
+    block_on(live.end_layout(end)).unwrap();
+    assert_eq!(events.try_recv().unwrap(), ended(&kept.id, "ride:8"));
+    // The activity ended then: removing its last content early ends nothing again.
+    block_on(live.end_layout(LayoutEndInput::immediate(&kept.id))).unwrap();
+    assert!(events.try_recv().is_err());
+
+    // What the person removed is reported as dismissed, on the drain. Its end reports nothing more.
+    let gone = block_on(live.start_layout(ride("ride:9", None))).unwrap();
+    driver.lock().observed.remove(&gone.id);
+    driver.dismiss(&gone.id, 1);
+    block_on(live.sync_events()).unwrap();
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        Event::State(change) if change.state == ActivityState::Dismissed
+    ));
+    let over = block_on(live.end_layout(LayoutEndInput::new(&gone.id))).unwrap();
+    assert_eq!(over.state, ActivityState::Ended);
+    assert!(events.try_recv().is_err());
+
+    // An end that is refused ends nothing: a delayed one on a device that offers none.
+    driver.lock().capabilities.presentation.delayed_end = false;
+    let stays = block_on(live.start_layout(ride("ride:10", None))).unwrap();
+    let mut end = LayoutEndInput::new(&stays.id);
+    end.policy = EndPolicy::After { at };
+    assert_eq!(
+        block_on(live.end_layout(end)).unwrap_err().code,
+        "UNSUPPORTED_FEATURE"
+    );
+    assert!(events.try_recv().is_err());
+    // A template of the same backend is reported like a layout.
+    let start = StartInput::progress("order:43", "Order 43", "Preparing", 0.1);
+    let order = block_on(live.start(start)).unwrap();
+    block_on(live.end(EndInput::new(&order.id))).unwrap();
+    assert_eq!(events.try_recv().unwrap(), ended(&order.id, "order:43"));
+    assert!(events.try_recv().is_err());
 }

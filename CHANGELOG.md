@@ -23,6 +23,9 @@ as before 1.0; JSON written for 0.2 reads unchanged.
   snapshot, also after a content of another style.
 - An end sent again for an activity that is over answers its record on Android as on iOS, also with a final
   content, which is not applied. A start that Android refuses to post leaves no activity and its key free.
+- On Android the sink receives `Event::State` with `ended` when an end of the application ends a running
+  activity, as it does on iOS; until now Android reported only a dismissal. A sink that took every state event
+  on Android for a dismissal reads `state` now. `testkit::MemoryBackend` reports its ends the same way.
 - liveupdate 0.2 renamed its Android package to `io.github.gon.liveupdate`: take its AAR of 0.2, and rename the
   package where Kotlin or a manifest names one of its classes. It keeps its receipts under the new name and does
   not read those of 0.1, so an activity that runs while the application is updated to this release is no longer

@@ -181,6 +181,9 @@ impl FakeKit {
     }
 }
 
+/// The fake's clock, in epoch milliseconds: it stands still.
+pub(crate) const NOW: u64 = 1_800_000_000_000;
+
 fn take(book: &mut Book, call: String) -> Result<(), Error> {
     book.calls.push(call);
     book.fail.take().map_or(Ok(()), Err)
@@ -190,13 +193,15 @@ fn live(state: State) -> bool {
     matches!(state, State::Active | State::Stale | State::Pending)
 }
 
-/// A start's content, as a repeated keyed start compares it: everything but the timestamp, the relevance and the
-/// push, which are no part of the request that ActivityKit's side compares.
+/// A start's content, as a repeated keyed start compares it: everything but the timestamp, the relevance, the
+/// push and when and how the activity begins, which are no part of the request that ActivityKit's side compares.
 fn content(start: &StartSpec) -> StartSpec {
     StartSpec {
         timestamp: None,
         relevance: None,
         push: None,
+        transient: false,
+        scheduled: None,
         ..start.clone()
     }
 }
@@ -272,7 +277,11 @@ impl Kit for FakeKit {
             guard.entries.push(Entry {
                 id: id.clone(),
                 start: start.clone(),
-                state: State::Active,
+                // A scheduled activity waits for its time; one whose time has passed begins at once.
+                state: match &start.scheduled {
+                    Some(scheduled) if scheduled.at > NOW => State::Pending,
+                    _ => State::Active,
+                },
                 values: start.values.clone(),
                 revision: start.revision,
                 stale_at: start.stale_at,
@@ -383,6 +392,13 @@ impl Handle for FakeHandle {
         async move {
             let mut guard = book.lock().unwrap();
             take(&mut guard, format!("update {id}"))?;
+            // A pending activity begins with the content of its start, whatever is sent meanwhile.
+            let pending = |entry: &Entry| entry.id == id && entry.state == State::Pending;
+            if guard.entries.iter().any(pending) {
+                return Err(Error::Conflict(
+                    "A scheduled activity takes no update before it began.".into(),
+                ));
+            }
             let entry = guard.entries.iter_mut().find(|entry| {
                 entry.id == id && matches!(entry.state, State::Active | State::Stale)
             });

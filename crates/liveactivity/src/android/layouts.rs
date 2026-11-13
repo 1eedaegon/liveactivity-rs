@@ -1,9 +1,9 @@
 //! Layout activities on Android, on liveupdate: liveupdate keeps the lifecycle, the receipts and the notification
 //! of each schema-v2 request, which is a snapshot's Android content as given or else the projection of the layout
 //! by `android_layout`, and a store of the backend keeps what liveupdate does not, the layout request and its
-//! latest snapshot, under liveupdate's id. Taps and dismissals come from liveupdate's events. What only some
-//! devices do (another style in an update, an update that alerts, a last content that stays) is asked of
-//! liveupdate's capabilities when a request needs it.
+//! latest snapshot, under liveupdate's id. Taps come from liveupdate's events; the latest snapshot says which
+//! state a tap on a toggle asks for. What only some devices do (another style in an update, an update that
+//! alerts, a last content that stays) is asked of liveupdate's capabilities when a request needs it.
 
 use super::{
     convert as android_liveupdate,
@@ -12,7 +12,7 @@ use super::{
 use crate::{
     ActionEvent, Backend, EndPolicy, Error, Event, LayoutActivityRecord, LayoutEndInput,
     LayoutSnapshot, LayoutStartInput, LayoutUpdateInput, OpenedEvent, Result, Visibility,
-    layout::{AndroidOptions, AndroidPlacement, AndroidVisibility, Element, Node},
+    layout::{Alert, AndroidOptions, AndroidPlacement, AndroidVisibility, Element, Node},
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, io::Read, path::PathBuf, sync::Mutex};
@@ -24,6 +24,8 @@ const MAX_ICON_BYTES: u64 = 1_048_576;
 const PENDING: &str = "pending:";
 /// What a record names when an update asked for an alert on a device that alerts once.
 const ALERT: &str = "alert";
+/// What a record names when an alert that alerts named a sound: Android plays the sound of its channel.
+const ALERT_SOUND: &str = "alert.sound";
 /// What a record names when the start gave a public version on a device that shows none.
 const PUBLIC_VERSION: &str = "publicVersion";
 /// How many action ids of its Android contents an activity keeps.
@@ -111,10 +113,19 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         updates: &liveupdate::LiveUpdate<D>,
         input: LayoutStartInput,
     ) -> Result<LayoutActivityRecord> {
-        // Android has no pushes and no relevance: what the start says of them is dropped here, so that it is no
-        // part of the request the activity keeps and a repeated start is compared without it.
+        // A notification is posted when it is asked for. Starting at once in place of later would show the
+        // activity at the wrong time, so the start is refused, before anything is kept.
+        if input.scheduled.is_some() {
+            return Err(Error::unsupported_feature(
+                "Android starts an activity when it is asked to, not at a later time",
+            ));
+        }
+        // Android has no pushes, no relevance and none of the iOS options: what the start says of them is dropped
+        // here, so that it is no part of the request the activity keeps and a repeated start is compared without
+        // it.
         let input = LayoutStartInput {
             push: None,
+            ios: None,
             snapshot: for_android(input.snapshot),
             android: input.android.map(by_default),
             ..input
@@ -154,7 +165,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         // The second turn, when there is one, sends the projection without its links: see `unlinked`.
         let mut links = true;
         let (record, entry) = loop {
-            let projection = self.sent(&mut offered, &input, &input.snapshot, false, links)?;
+            let projection = self.sent(&mut offered, &input, &input.snapshot, None, links)?;
             let retry = links && unlinked(&input.snapshot, &projection.snapshot);
             // The style of the first snapshot: its content's, or else the one the layout projects to.
             let template = projection
@@ -201,7 +212,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
     ) -> Result<LayoutActivityRecord> {
         let _guard = self.lock.lock().map_err(|_| Error::native())?;
         let (mut entries, records) = self.reconciled(updates)?;
-        let alert = input.alert.is_some();
+        let alert = input.alert.as_ref();
         let snapshot = for_android(input.snapshot);
         let record = self.replace(updates, &mut entries, &records, &input.id, snapshot, alert)?;
         let entry = entries.get(&input.id).ok_or_else(not_found)?;
@@ -236,7 +247,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
             ));
         }
         if let Some(snapshot) = last {
-            self.replace(updates, &mut entries, &records, &input.id, snapshot, false)?;
+            self.replace(updates, &mut entries, &records, &input.id, snapshot, None)?;
         }
         let record = updates
             .end(&input.id, android_liveupdate::end_policy(input.policy))
@@ -262,7 +273,8 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
     }
 
     /// The events in liveupdate's queue, as the backend passes them on, oldest first: the taps, with the
-    /// activity's key and without those on action ids that the activity never declared, and the openings.
+    /// activity's key, with the state a toggle was asked for, and without those on action ids that the activity
+    /// never declared, and the openings.
     pub(crate) fn events(&self, updates: &liveupdate::LiveUpdate<D>) -> Result<Vec<Event>> {
         // The entries are read before the queue is drained, under the lock, so that a start settles first and a
         // tap on its activity finds the entry; a store that cannot be read loses no event, only the keys.
@@ -280,10 +292,12 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                         if entry.is_some_and(|entry| !declares(entry, &action_id)) {
                             return None;
                         }
+                        let on = entry.and_then(|entry| asked_for(entry, &action_id));
                         Some(Event::Action(ActionEvent {
                             action_id,
                             activity_id: event.activity_id,
                             activity_key,
+                            on,
                         }))
                     }
                     // An opening is the host's report of an intent that liveupdate made and checked: its
@@ -311,7 +325,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         records: &[liveupdate::ActivityRecord],
         id: &str,
         snapshot: LayoutSnapshot,
-        alert: bool,
+        alert: Option<&Alert>,
     ) -> Result<liveupdate::ActivityRecord> {
         let entry = entries.get(id).ok_or_else(not_found)?;
         fits(entry, id, &snapshot)?;
@@ -405,15 +419,16 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
     /// What liveupdate is sent for `snapshot` on this device, and what the record names as left out of it. A
     /// content that uses what the device does not offer cannot be shown as given, and is refused. An alert, asked
     /// for by the update or by the content itself, marks the revision as one that alerts where the device alerts
-    /// again; elsewhere the revision is silent and `alert` is named, until the next snapshot. The public version
-    /// of the start goes with a snapshot that has none of its own, where the device shows one; elsewhere
-    /// `publicVersion` is named. `links` says whether a projection may give the notification URLs to open.
+    /// again; elsewhere the revision is silent and `alert` is named, until the next snapshot. An alert that alerts
+    /// plays the sound of its channel, and a sound it named is named as `alert.sound`. The public version of the
+    /// start goes with a snapshot that has none of its own, where the device shows one; elsewhere `publicVersion`
+    /// is named. `links` says whether a projection may give the notification URLs to open.
     fn sent(
         &self,
         offered: &mut Offered<'_, D>,
         input: &LayoutStartInput,
         snapshot: &LayoutSnapshot,
-        alert: bool,
+        alert: Option<&Alert>,
         links: bool,
     ) -> Result<android_layout::Projection> {
         let shown = self.shown(offered, input, snapshot, links)?;
@@ -427,8 +442,9 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                 )));
             }
         }
-        let asked = alert || presentation.is_some_and(|presentation| presentation.alert);
+        let asked = alert.is_some() || presentation.is_some_and(|presentation| presentation.alert);
         let alerts = asked && offered.get()?.alert;
+        let sound = alerts && alert.is_some_and(|alert| alert.sound.is_some());
         // The public version of the start, for a snapshot that has none of its own.
         let of_the_start = input
             .android
@@ -446,6 +462,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                 .degraded
                 .into_iter()
                 .chain((asked && !alerts).then(|| ALERT.to_owned()))
+                .chain(sound.then(|| ALERT_SOUND.to_owned()))
                 .chain(unshown.then(|| PUBLIC_VERSION.to_owned()))
                 .collect(),
         })
@@ -689,23 +706,37 @@ fn with_actions(kept: Vec<String>, snapshot: &LayoutSnapshot) -> Vec<String> {
     all.into_iter().skip(surplus).collect()
 }
 
-/// Whether the activity declared `action_id`: a button of its layout, or an action of an Android content it has
-/// shown.
+/// Whether the activity declared `action_id`: a button or a toggle of its layout, or an action of an Android
+/// content it has shown.
 fn declares(entry: &Entry, action_id: &str) -> bool {
-    button(&entry.origin.layout.lock_screen, action_id)
+    control(&entry.origin.layout.lock_screen, action_id)
         || entry.actions.iter().any(|id| id == action_id)
 }
 
-/// Whether a button of the tree has `action_id`.
-fn button(node: &Node, action_id: &str) -> bool {
+/// The state that a tap on the action `action_id` asks for: for a toggle's action, the other one than the value in
+/// the latest snapshot, as the notification of that snapshot shows it. A button asks for none, and neither does
+/// an action of an Android content, which is what the notification shows in place of the layout.
+fn asked_for(entry: &Entry, action_id: &str) -> Option<bool> {
+    if entry.snapshot.android.is_some() {
+        return None;
+    }
+    android_layout::asked_for(&entry.origin.layout, &entry.snapshot.values, action_id)
+}
+
+/// Whether a button or a toggle of the tree has `action_id`, shown or not.
+fn control(node: &Node, action_id: &str) -> bool {
     match &node.element {
-        Element::Button {
-            action_id: id,
-            child,
-        } => id == action_id || button(child, action_id),
+        Element::Button { action_id: id, .. } | Element::Toggle { action_id: id, .. }
+            if id == action_id =>
+        {
+            true
+        }
+        Element::Button { child, .. } | Element::Toggle { child, .. } => control(child, action_id),
         Element::Vstack { children, .. }
         | Element::Hstack { children, .. }
-        | Element::Zstack { children, .. } => children.iter().any(|child| button(child, action_id)),
+        | Element::Zstack { children, .. } => {
+            children.iter().any(|child| control(child, action_id))
+        }
         _ => false,
     }
 }

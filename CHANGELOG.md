@@ -4,6 +4,29 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on activitykit 0.5, whose vocabulary this crate re-exports, and on liveupdate 0.3.1. Breaking for a Rust
+caller: `ActionEvent`, `Alert` and `LayoutStartInput` have new public members, the re-exported `Element` has the
+variant `Toggle` and `Node` the member `if_stale`. JSON written for 0.4 reads unchanged.
+
+- A layout takes the `toggle` node: a switch that shows a boolean value. Its tap reaches the sink as `Action`
+  with `on`, the state the person asked for; `ActionEvent.on` is absent for a button. On Android a toggle is an
+  action of the notification, titled by its label with `✓` before it while the value is on, and its tap has `on`
+  as well, read from the activity's latest snapshot.
+- A node takes `ifStale` (`when_stale()`, `unless_stale()`): iOS draws it only while the content is stale, or only
+  while it is not, without the application running. Android draws a layout as it is while fresh and names
+  `layout.ifStale`; the sink is told `stale` there since 0.4.
+- A start takes `scheduled`, a time and the alert the system shows then (`ScheduledStart`, iOS 26). Its record is
+  `pending` until the activity begins, and an update before that is `CONFLICT`. An older iOS and Android answer
+  `UNSUPPORTED_FEATURE`.
+- A start takes `ios`, the options that only iOS reads (`IosOptions`): `transient` asks for a transient activity
+  (iOS 18). Android keeps nothing of them.
+- An alert takes `sound`, the file name of a sound of the application (`Alert::with_sound`), with an update and
+  with a scheduled start. Android alerts with the sound of its channel and names `alert.sound`.
+- liveupdate 0.3.1 writes the stopwatch and the countdown of a metric as its Android side reads them
+  (`startedAt`, `endsAt`): an Android content with one could not be posted before. Take its AAR of 0.3.1.
+- Known: on Android 16, liveupdate's AAR up to 0.3.1 cannot post a progress of a layout or of an Android content
+  (`NATIVE_ERROR`); the templates and other Android versions are not touched. The correction is liveupdate's.
+
 ## 0.4.0 - 2026-11-13
 
 - feat: build on liveupdate 0.3, and tell the sink each state of an activity once on Android (#10) (`e3bf99f`)

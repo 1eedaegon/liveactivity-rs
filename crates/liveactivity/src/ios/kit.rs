@@ -4,7 +4,10 @@
 use super::{
     Acknowledge, Authorization, EndSpec, Handle, Kit, KitEvent, StartSpec, UpdateSpec, action_event,
 };
-use crate::{layout::LayoutPush, models::EndPolicy};
+use crate::{
+    layout::{Alert, LayoutPush},
+    models::EndPolicy,
+};
 use activitykit::{
     Acknowledgement, Activity, ActivityKit, ChannelId, End, Event, Push, Start, State, Update,
     Values,
@@ -44,6 +47,15 @@ pub(crate) fn start_of(spec: StartSpec) -> activitykit::Result<Start> {
         Some(score) => start.relevance(score),
         None => start,
     };
+    let start = if spec.transient {
+        start.transient()
+    } else {
+        start
+    };
+    let start = match spec.scheduled {
+        Some(scheduled) => start.scheduled(time(scheduled.at), alert_of(scheduled.alert)),
+        None => start,
+    };
     Ok(match spec.push {
         Some(LayoutPush::Token) => start.push(Push::Token),
         Some(LayoutPush::Channel(id)) => start.push(Push::Channel(ChannelId::new(id)?)),
@@ -66,8 +78,17 @@ pub(crate) fn update_of(spec: UpdateSpec) -> Update {
         None => update,
     };
     match spec.alert {
-        Some(alert) => update.alert(activitykit::Alert::new(alert.title, alert.body)),
+        Some(alert) => update.alert(alert_of(alert)),
         None => update,
+    }
+}
+
+/// activitykit's alert, with its sound when it names one.
+fn alert_of(alert: Alert) -> activitykit::Alert {
+    let shown = activitykit::Alert::new(alert.title, alert.body);
+    match alert.sound {
+        Some(name) => shown.sound(name),
+        None => shown,
     }
 }
 
@@ -120,10 +141,11 @@ fn kit_event(event: Event) -> Option<KitEvent<Activity, Acknowledgement>> {
         Event::Action {
             activity,
             action,
+            on,
             acknowledgement,
             ..
         } => Some(KitEvent::Tap(
-            action_event(&activity, action),
+            action_event(&activity, action, on),
             acknowledgement,
         )),
         Event::PushToken {
@@ -253,6 +275,8 @@ mod tests {
             timestamp: Some(2_000),
             relevance: Some(80.0),
             push,
+            transient: false,
+            scheduled: None,
         };
         let expected = Start::new(layout.clone(), values())
             .key("rec")
@@ -271,6 +295,23 @@ mod tests {
         // A channel that is no id never reaches ActivityKit.
         let refused = start_of(spec(Some(LayoutPush::Channel("no id".into())))).unwrap_err();
         assert_eq!(refused.code(), "INVALID_INPUT");
+        // REQ-I-006, REQ-I-007: a transient style, and a later time with the alert shown then and its sound.
+        let alert = crate::Alert::new("Recording", "It starts now").with_sound("chime.aiff");
+        let later = StartSpec {
+            transient: true,
+            scheduled: Some(crate::ScheduledStart::new(9_000, alert)),
+            ..spec(None)
+        };
+        let shown = activitykit::Alert::new("Recording", "It starts now").sound("chime.aiff");
+        let expected = Start::new(layout.clone(), values())
+            .key("rec")
+            .revision(5)
+            .stale_at(time(1_000))
+            .timestamp(time(2_000))
+            .relevance(80.0)
+            .transient()
+            .scheduled(time(9_000), shown);
+        assert_eq!(debug(start_of(later).unwrap()), debug(expected));
 
         let update = UpdateSpec {
             values: values(),
@@ -278,10 +319,7 @@ mod tests {
             stale_at: None,
             timestamp: Some(u64::MAX),
             relevance: Some(20.0),
-            alert: Some(crate::Alert {
-                title: "Stopped".into(),
-                body: "Tap to resume".into(),
-            }),
+            alert: Some(crate::Alert::new("Stopped", "Tap to resume")),
         };
         // REQ-I-001, REQ-I-002
         let expected = Update::new(values())
@@ -301,6 +339,20 @@ mod tests {
         assert_eq!(
             debug(update_of(silent)),
             debug(Update::new(values()).revision(7))
+        );
+        // REQ-I-007
+        let loud = UpdateSpec {
+            values: values(),
+            revision: 8,
+            stale_at: None,
+            timestamp: None,
+            relevance: None,
+            alert: Some(crate::Alert::new("Stopped", "Tap to resume").with_sound("stop.caf")),
+        };
+        let shown = activitykit::Alert::new("Stopped", "Tap to resume").sound("stop.caf");
+        assert_eq!(
+            debug(update_of(loud)),
+            debug(Update::new(values()).revision(8).alert(shown))
         );
 
         let end = |policy, values: Option<Values>| EndSpec {

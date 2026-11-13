@@ -35,6 +35,7 @@ other call answers `UNSUPPORTED_PLATFORM`.
 | [docs/ios-setup.md](docs/ios-setup.md) | the widget extension, the App Group and pushes of an iOS app |
 | [docs/android-setup.md](docs/android-setup.md) | the AAR, the permissions and the files of an Android app |
 | [docs/framework-integration.md](docs/framework-integration.md) | writing a framework plugin: commands, events, lifecycle, threads |
+| [docs/design/engine-interaction](docs/design/engine-interaction/PRD.md) | toggles, staleness, scheduled and transient starts and alert sounds, on activitykit 0.5 |
 | [docs/design/engine-extensions](docs/design/engine-extensions/PRD.md) | what the engines opened in activitykit 0.4 and liveupdate 0.2, what this crate does with it, and what is still planned |
 
 ## The two sides
@@ -72,9 +73,13 @@ cargo run -p liveactivity --example features --features testkit
 | [Progress and timer](#progress-and-timer-activities) | `start`, `update`, `end`, `list` | ✓ | ✓ |
 | [Layouts](#layout-activities) | `start_layout`, `update_layout`, `end_layout`, `list_layout` | ✓ | ✓ projected onto a notification |
 | [Buttons and taps](#buttons-and-taps) | a `button` node, `Event::Action` | ✓ | ✓ up to three |
+| [Toggles](#toggles-and-staleness) | a `toggle` node, `ActionEvent.on` | ✓ a switch, from iOS 17 | ✓ an action, with a check mark while on |
+| [Staleness](#toggles-and-staleness) | `when_stale()` and `unless_stale()` on a node | ✓ drawn by the system when the time has passed | drawn as while fresh, reported as `layout.ifStale`; the sink is told `stale` |
 | [Links](#links-accessibility-and-motion) | a `link` node, `Layout.url` | ✓ | ✓ the notification and its actions open them, where the device opens URLs |
 | [Accessibility, motion, privacy](#links-accessibility-and-motion) | members of a node and of a style | ✓ | a label is the text of what a notification cannot draw; motion and privacy are named as left out |
 | [Alerts](#alerts-and-relevance) | `LayoutUpdateInput.alert` | ✓ | ✓ where the device alerts again; else silent, reported as `alert` |
+| [A scheduled start](#start-options-and-sounds) | `LayoutStartInput.scheduled` | ✓ from iOS 26 | `UNSUPPORTED_FEATURE` |
+| [A transient activity, an alert's sound](#start-options-and-sounds) | `LayoutStartInput.ios`, `Alert::with_sound` | ✓ | not kept; a sound is reported as `alert.sound` |
 | [Relevance](#alerts-and-relevance) | `LayoutSnapshot.relevance` | ✓ | ignored |
 | [Android content](#android-content) | `LayoutSnapshot.android` | ignored | ✓ |
 | [A last content that stays](#ending) | `EndPolicy::After` | ✓ up to four hours | ✓ where the device offers it |
@@ -169,6 +174,51 @@ on Android. Its tap reaches the sink as `Event::Action`, with the `action_id`,
 the activity's `id` and its key. The tap does not change the activity: send an
 update if the button should change something.
 
+### Toggles and staleness
+
+```rust
+use liveactivity::activitykit::layout::{text, toggle, vstack};
+
+let layout = Layout {
+    lock_screen: vstack([
+        // Drawn while the content is fresh, and the other in its place once its stale date has passed.
+        text(Bound::key("eta")).unless_stale(),
+        text("No signal").when_stale(),
+        // A switch that shows `muted`. A tap asks for the other state and changes nothing itself.
+        toggle("mute", "muted", text("Mute")),
+    ]),
+    island: None,
+    background: None,
+    keyline: None,
+    url: None,
+};
+let values = values! { "eta" => "6 min", "muted" => false }.into_inner();
+let mut snapshot = LayoutSnapshot::new(0, values);
+snapshot.stale_at = Some(stale_at);
+let record = live.start_layout(LayoutStartInput::new("ride:7", layout, snapshot)).await?;
+```
+
+A tap on the toggle reaches the sink as `Event::Action` with `on`, the state
+the person asked for. The application sends an update with that value, or does
+not when it refuses the change:
+
+```rust
+match event {
+    Event::Action(tap) if tap.action_id == "mute" => tap.on,
+    _ => None,
+}
+```
+
+- **iOS** draws a switch (iOS 17; the label alone before). Once the stale date
+  has passed, the system draws the stale nodes by itself, without an update
+  and without the application running.
+- **Android** shows the toggle as one of the notification's three actions,
+  titled by its label, with `✓` before it while the value is on. It draws the
+  content as it is while fresh and names `layout.ifStale`: nothing redraws a
+  notification when a time passes. The sink is told `stale`
+  ([Events](#events)), and an application that wants the notification to say
+  so sends an update then.
+
 ### Links, accessibility and motion
 
 Members of the layout, which iOS draws: a URL that a tap opens the application
@@ -241,6 +291,34 @@ shows the title and the body. On Android the notification alerts again with
 that update where the device offers it (`android_presentation.alert`);
 elsewhere the update is silent and `record.degraded_features` names `alert`.
 An update without an alert is silent everywhere.
+
+### Start options and sounds
+
+```rust
+// A sound of the application's bundle. Without one the system plays its own.
+let alert = Alert::new("Your ride", "It starts now").with_sound("chime.aiff");
+let mut later = start.clone();
+later.scheduled = Some(ScheduledStart::new(at, alert));
+let record = live.start_layout(later).await?;
+// Until its time the activity is pending: it holds its key, takes no update, and can be ended.
+assert_eq!(record.state, ActivityState::Pending);
+live.end_layout(LayoutEndInput::immediate(&record.id)).await?;
+
+// An activity that the system ends when the person locks the device or leaves the application (iOS 18).
+let mut transient = start;
+transient.ios = Some(IosOptions::new(true));
+live.start_layout(transient).await?;
+```
+
+- **A scheduled start** begins at `at`, in epoch milliseconds, with the alert
+  the system shows then (iOS 26). The sink receives `State` with `active` when
+  it begins. An older iOS and Android answer `UNSUPPORTED_FEATURE`: a
+  notification is posted when it is asked for.
+- **`ios`** holds what only iOS reads, as `android` does for Android. It is no
+  part of what makes two starts the same activity.
+- **A sound** is the name of a file in the application's bundle or in its
+  `Library/Sounds`, for the alert of an update as well. Android alerts with
+  the sound of its channel and names `alert.sound`.
 
 ### Android content
 
@@ -408,7 +486,7 @@ started as `Event::Started`. The steps are in
 
 | Event | When | iOS | Android |
 | --- | --- | --- | --- |
-| `Event::Action` | a button or an action was tapped | ✓ | ✓ |
+| `Event::Action` | a button, a toggle or an action was tapped | ✓ | ✓ |
 | `Event::State` | an activity has a new lifecycle state | every change while the app runs | the state it has when the backend is asked, once (`active`, `stale`, `ended`, `dismissed`) |
 | `Event::Started` | a layout activity began, also one a push started | ✓ | |
 | `Event::Updated` | a push changed the content of a layout activity | ✓ | |

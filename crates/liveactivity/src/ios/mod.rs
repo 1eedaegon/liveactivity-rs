@@ -20,7 +20,7 @@ use crate::{
     event::{StartedEvent, StateEvent},
     layout::{
         ActionEvent, Alert, LayoutActivityRecord, LayoutEndInput, LayoutPush, LayoutSnapshot,
-        LayoutStartInput, LayoutUpdateInput,
+        LayoutStartInput, LayoutUpdateInput, ScheduledStart,
     },
     models::*,
     pushes::{PushTokenEvent, UpdatedEvent},
@@ -107,8 +107,8 @@ pub(crate) struct Authorization {
     pub(crate) frequent_pushes: bool,
 }
 
-/// A start: activitykit's `Start` with a key, a revision, a stale date, a timestamp, a relevance and what it asks
-/// for of the pushes.
+/// A start: activitykit's `Start` with a key, a revision, a stale date, a timestamp, a relevance, what it asks
+/// for of the pushes, and when and how the activity begins.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StartSpec {
     pub(crate) key: String,
@@ -119,6 +119,10 @@ pub(crate) struct StartSpec {
     pub(crate) timestamp: Option<u64>,
     pub(crate) relevance: Option<f64>,
     pub(crate) push: Option<LayoutPush>,
+    /// A transient activity.
+    pub(crate) transient: bool,
+    /// A start at a later time, with the alert the system shows then.
+    pub(crate) scheduled: Option<ScheduledStart>,
 }
 
 /// An update: activitykit's `Update` at the caller's revision, with a stale date, a timestamp, a relevance and
@@ -191,13 +195,15 @@ fn kind<H: Handle>(handle: &H) -> Kind {
     template::of(&handle.values()).map_or(Kind::Layout, Kind::Template)
 }
 
-/// The tap of a button of `handle` as the event sink gets it.
-pub(crate) fn action_event<H: Handle>(handle: &H, action: String) -> ActionEvent {
+/// The tap of a button or a toggle of `handle` as the event sink gets it; `on` is the state a toggle was asked
+/// for.
+pub(crate) fn action_event<H: Handle>(handle: &H, action: String, on: Option<bool>) -> ActionEvent {
     let key = handle.key();
     ActionEvent {
         action_id: action,
         activity_id: handle.id().to_owned(),
         activity_key: (!key.is_empty()).then(|| key.to_owned()),
+        on,
     }
 }
 
@@ -321,6 +327,8 @@ pub(crate) fn start_spec(request: LayoutStartInput) -> StartSpec {
         timestamp: request.snapshot.timestamp,
         relevance: request.snapshot.relevance,
         push: request.push,
+        transient: request.ios.is_some_and(|ios| ios.transient),
+        scheduled: request.scheduled,
     }
 }
 

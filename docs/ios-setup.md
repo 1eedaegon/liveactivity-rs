@@ -27,9 +27,15 @@ A tap -> ActivityKitActionIntent in the app (product ActivityKitIntent) -> activ
   the Rust library.
 - iOS 16.2 on an iPhone, iPadOS 17 on an iPad. Below that every command answers
   `UNSUPPORTED_PLATFORM` and `capabilities()` reports every feature as `unsupported`.
-- iOS 17 for buttons. Below it the widget shows a button's label without the button, and
-  `capabilities().actions` is `unsupported`.
-- iOS 17.2 for push-to-start, iOS 18 for broadcast channels.
+- iOS 17 for buttons and toggles. Below it the widget shows the label of a button or a toggle
+  without the control, and `capabilities().actions` is `unsupported`.
+- iOS 17.2 for push-to-start, iOS 18 for broadcast channels and for a transient activity
+  (`ios.transient`), iOS 26 for a scheduled start (`scheduled`). Below them such a start answers
+  `UNSUPPORTED_FEATURE`. An application built before the iOS 26 SDK gets `CONFIGURATION_REQUIRED`
+  for a scheduled start.
+- A sound that an alert names (`alert.sound`) is a file in the application's bundle or in its
+  `Library/Sounds`. Nothing reports a name that no file has: the system then plays its default
+  sound.
 
 ## 1. Build the Rust library
 
@@ -364,9 +370,16 @@ iPadOS 17, or the target is not iOS.
 records keep `visibility: unknown`. Check that the extension links `ActivityKitWidget`, that its
 bundle is `ActivityKitLayoutWidget()`, and that its deployment target is iOS 16.2 or later.
 
-**A button does nothing.** The app target does not link `ActivityKitIntent`, or it compiles no
-Swift file, so Xcode extracted no App Intents metadata. Below iOS 17 buttons are not drawn as
-buttons.
+**A button or a toggle does nothing.** The app target does not link `ActivityKitIntent`, or it
+compiles no Swift file, so Xcode extracted no App Intents metadata. Below iOS 17 buttons and
+toggles are not drawn as controls.
+
+**A toggle does not move.** A tap asks for the other state and changes nothing: the application
+sends an update with the value that the event's `on` names.
+
+**The stale nodes do not show.** The system draws them once the snapshot's `staleAt` has passed.
+That can take a while after the time: on a simulator the Lock Screen turned to the stale content
+after 45 to 90 seconds.
 
 **An image draws nothing.** The file was not written, or the `asset` name is not in the extension's
 asset catalog. Neither is reported.

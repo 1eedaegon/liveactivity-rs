@@ -65,6 +65,7 @@ impl MemoryBackend {
                 action_id: action_id.into(),
                 activity_id: id.into(),
                 activity_key: Some(activity_key),
+                on: None,
             }));
         }
         Ok(())

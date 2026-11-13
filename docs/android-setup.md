@@ -1,7 +1,7 @@
 # Android setup
 
 On Android `liveactivity` runs on the [liveupdate](https://github.com/1eedaegon/liveupdate-rs)
-crate (0.3). An activity is an ongoing notification, which Android 16 and later can promote to a
+crate (0.3.1 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
 Live Update. liveupdate keeps the lifecycle, the revisions and the receipts in Rust; a small AAR
 talks to Android's `NotificationManager`.
 
@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.3.0.aar` from liveupdate's
+Put `liveupdate-android-0.3.1.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too:
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.3.0.aar"))
+    implementation(files("libs/liveupdate-android-0.3.1.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
 }
 ```
@@ -513,7 +513,16 @@ fn main() {
   `UNSUPPORTED_FEATURE`.
 - **Alerts.** An update with an `alert` is posted on a second channel of high importance, "Live
   update alerts", which liveupdate creates with the first one. A person who blocked that channel
-  gets the update silently.
+  gets the update silently. The sound is that channel's, which the person chooses: a `sound` that
+  the alert names is not played, and the record names `alert.sound`.
+- **Toggles.** A `toggle` of a layout is an action of the notification, titled by its label, with
+  `✓` before it while its value is on. A tap reaches the sink with `on`, the other state than the
+  value of the activity's latest snapshot, and changes nothing: update the value to move it.
+- **Staleness.** Nothing redraws a notification when a time passes. A layout whose nodes say
+  `ifStale` is drawn as it is while fresh, and the record names `layout.ifStale`. The sink is told
+  `stale` ([States](#states)): update the content then if the notification should say so.
+- **A scheduled start.** `UNSUPPORTED_FEATURE`: a notification is posted when it is asked for.
+  The application starts the activity itself when the time comes.
 - **Updates need the process.** Android has no push that updates a notification. In the
   background an application updates from a foreground service or from a data message that wakes
   it. A start with the foreground placement lets such a service hold the notification
@@ -525,8 +534,8 @@ fn main() {
   reads what 0.1 stored and not what 0.2 stored: after an update from a release on liveupdate 0.2
   the activities that were running are gone from the lists and their ids are `NOT_FOUND`. Their
   keys start new activities.
-- **Pushes.** Android has none. A layout start's `push` is dropped, `push_tokens()` is empty and
-  `capabilities().push` is `unsupported`.
+- **Pushes and the iOS options.** Android has no pushes. A layout start's `push` and `ios` are
+  dropped, `push_tokens()` is empty and `capabilities().push` is `unsupported`.
 - **Visibility.** Records keep `visibility: unknown`. Asking for private content on the lock screen
   does not prove what the system UI revealed.
 - **Lock screen.** A layout start's `android.visibility` is `public`, `private` or `secret`.
@@ -557,6 +566,14 @@ Wrap it (step 5).
 
 **An update answers `UNSUPPORTED_FEATURE`.** Its snapshot has another notification style than the
 activity shows, and the device does not offer `styleChange`.
+
+**A layout with a `progress`, or a content of the progress style, answers `NATIVE_ERROR` on
+Android 16.** liveupdate's AAR up to 0.3.1 calls, for every segment and point of a progress, a
+method that only Android 17 has. The progress and timer templates are not touched, nor are
+Android 15 and earlier or Android 17. A later AAR of liveupdate corrects it: take that one when it
+is out. Until then a device that reports `progressStyle` and not `metricStyle` in
+`capabilities().androidPresentation` is on Android 16: give its snapshots an Android content of
+another style, or a layout without a `progress` node.
 
 **A start or an update with a content answers `INVALID_INPUT` on Android only.** The content names
 a URL that no activity of the application opens, a small icon that is no resource of it, or a

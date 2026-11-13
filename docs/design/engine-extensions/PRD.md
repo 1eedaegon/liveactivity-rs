@@ -45,7 +45,7 @@ requirements. The first five rows are built since: [a layout on Android](../layo
 | Accessibility labels on Android | activitykit 0.4 | The projection uses a label as the text of a node Android cannot draw. |
 | A public version of a projected layout | liveupdate 0.2 | An Android option of the start, beside `visibility`. |
 | A foreground placement | liveupdate 0.2 | An Android option of the start; the host runs the service that holds the notification. |
-| Toggle, transient and scheduled starts, alert sounds, the small region | a later activitykit | As [planned before](../engine-expressiveness/PRD.md). |
+| Toggle, transient and scheduled starts, alert sounds, the small region | a later activitykit | As [planned before](../engine-expressiveness/PRD.md). activitykit 0.5 has all but the small region: [engine interaction](../engine-interaction/PRD.md). |
 
 ## Non-goals
 

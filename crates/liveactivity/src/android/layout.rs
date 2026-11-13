@@ -2,6 +2,10 @@
 //! request, which liveupdate's renderer draws with Android's notification styles. Only the lock screen is walked,
 //! depth first in document order; a node shows when its `if` value is truthy and its `unless` value is not.
 //!
+//! A notification is drawn when it is posted, and nothing redraws it when its stale time passes. So the layout is
+//! projected as it is while fresh: a node that is drawn only while the content is stale never shows, and counts
+//! for nothing. The record names `layout.ifStale`, and the sink is told when the activity became stale.
+//!
 //! A notification has no label per node: Android reads its title and text. So what a node says to a screen reader
 //! is used where the notification would otherwise show nothing of the node: as the text of a node Android cannot
 //! draw, and as the title of a button or a link without a text.
@@ -16,6 +20,9 @@ const MAX_TITLE: usize = 120;
 const MAX_STATUS: usize = 240;
 const MAX_ACTION_TITLE: usize = 64;
 const MAX_ACTIONS: usize = liveupdate::MAX_ACTIONS;
+/// What stands before the title of a toggle's action while its value is on. An action is a title and nothing
+/// else, and the mark is no word of any language.
+const ON_MARK: &str = "✓ ";
 
 /// What the projection needs beside the layout and its values: the app around it, and how the activity started.
 pub(crate) struct Environment<'a> {
@@ -156,6 +163,8 @@ pub(crate) fn project(
                 .map(|text| cut(&text, MAX_STATUS)),
         });
     for part in [
+        // The stale variant of the layout is never drawn.
+        (follows_staleness(&layout.lock_screen), "layout.ifStale"),
         (layout.island.is_some(), "layout.island"),
         (styled, "layout.styles"),
         (layout.background.is_some(), "layout.background"),
@@ -189,11 +198,29 @@ pub(crate) fn project(
     }
 }
 
+/// The state that a tap on the action `action_id` asks for, in the notification of these values: the other one
+/// than the value of the toggle whose action it is. An id is a toggle's when a toggle is the control that the
+/// projection gives the action to: the first shown one with that id that has a title. `None` for a button's
+/// action and for an id that no shown control has.
+pub(crate) fn asked_for(
+    layout: &Layout,
+    values: &BTreeMap<String, Value>,
+    action_id: &str,
+) -> Option<bool> {
+    // Links are left aside: they have ids of their own, and without them no control loses its place.
+    let mut shown = Shown::default();
+    walk(&layout.lock_screen, values, &mut shown);
+    let toggle = shown.toggles.iter().find(|(id, _)| id == action_id);
+    toggle.map(|(_, on)| !on)
+}
+
 /// The shown nodes of a lock screen, as the projection takes them.
 #[derive(Default)]
 struct Shown {
     texts: Vec<String>,
     actions: Vec<liveupdate::NotificationAction>,
+    /// The actions that stand for a toggle, by id, with the value each shows.
+    toggles: Vec<(String, bool)>,
     files: Vec<String>,
     /// The first shown progress, clamped to 0..1.
     progress: Option<f64>,
@@ -251,6 +278,23 @@ fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
                 title.map(|title| liveupdate::NotificationAction::new(action_id.clone(), title));
             act(shown, action, &inside, "button");
         }
+        // A switch is an action whose title says its state: the tap asks for the other one.
+        Element::Toggle {
+            action_id,
+            bind,
+            child,
+        } => {
+            let (label, inside) = action_title(node, child, values, shown.public);
+            let on = truthy(values.get(bind));
+            let mark = if on { ON_MARK } else { "" };
+            let action = label.map(|label| {
+                let title = cut(&format!("{mark}{label}"), MAX_ACTION_TITLE);
+                liveupdate::NotificationAction::new(action_id.clone(), title)
+            });
+            if act(shown, action, &inside, "toggle") {
+                shown.toggles.push((action_id.clone(), on));
+            }
+        }
         Element::Link { url, child } => {
             shown.links_seen += 1;
             let id = format!("link:{}", shown.links_seen);
@@ -289,15 +333,15 @@ fn say(shown: &mut Shown, words: String) {
     }
 }
 
-/// Adds `action`, the action of a button or a link, and names what stands beside its title. liveupdate takes three
-/// actions and each id once: an action without a title, without room or with an id that is taken is left out and
-/// named as `kind`.
+/// Adds `action`, the action of a button, a toggle or a link, and names what stands beside its title. liveupdate
+/// takes three actions and each id once: an action without a title, without room or with an id that is taken is
+/// left out and named as `kind`. Answers whether the action was added.
 fn act(
     shown: &mut Shown,
     action: Option<liveupdate::NotificationAction>,
     inside: &[&'static str],
     kind: &str,
-) {
+) -> bool {
     let room = shown.actions.len() < MAX_ACTIONS;
     match action {
         Some(action) if room && shown.actions.iter().all(|other| other.id != action.id) => {
@@ -305,12 +349,16 @@ fn act(
             inside
                 .iter()
                 .for_each(|kind| note(&mut shown.degraded, kind));
+            true
         }
-        _ => note(&mut shown.degraded, kind),
+        _ => {
+            note(&mut shown.degraded, kind);
+            false
+        }
     }
 }
 
-/// The title of the action of `owner`, a button or a link, cut to liveupdate's length, and what the action leaves
+/// The title of the action of `owner`, a button, a toggle or a link, cut to liveupdate's length, and what the action leaves
 /// out of `child`. The title is the first shown text inside. Without one it is what the first picture inside says
 /// in words, and then what the owner says itself. Left out is every other shown node, a transition, and on a
 /// notification that a locked screen shows (`public`) a privacy mark; decoration is left out without a word.
@@ -393,6 +441,7 @@ fn drawn(element: &Element) -> bool {
             | Element::Progress { .. }
             | Element::TimerText { .. }
             | Element::Button { .. }
+            | Element::Toggle { .. }
             | Element::Link { .. }
             | Element::Image {
                 source: ImageSource::File { .. },
@@ -514,12 +563,33 @@ fn millis(value: f64) -> u64 {
     }
 }
 
+/// Whether the node shows with these values, in a notification, which is drawn as the content is while fresh.
 fn visible(node: &Node, values: &BTreeMap<String, Value>) -> bool {
-    node.r#if.as_ref().is_none_or(|key| truthy(values.get(key)))
+    !only_when_stale(node)
+        && node.r#if.as_ref().is_none_or(|key| truthy(values.get(key)))
         && node
             .unless
             .as_ref()
             .is_none_or(|key| !truthy(values.get(key)))
+}
+
+/// A node that is drawn only while the content is stale: a notification never shows it.
+fn only_when_stale(node: &Node) -> bool {
+    node.if_stale == Some(true)
+}
+
+/// Whether a node of the tree says when it is drawn by the staleness of the content.
+fn follows_staleness(node: &Node) -> bool {
+    node.if_stale.is_some()
+        || match &node.element {
+            Element::Vstack { children, .. }
+            | Element::Hstack { children, .. }
+            | Element::Zstack { children, .. } => children.iter().any(follows_staleness),
+            Element::Button { child, .. }
+            | Element::Toggle { child, .. }
+            | Element::Link { child, .. } => follows_staleness(child),
+            _ => false,
+        }
 }
 
 /// `true`, a number other than 0, or text that is not empty.
@@ -627,12 +697,17 @@ fn kind(element: &Element) -> &'static str {
         Element::TimerText { .. } => "timerText",
         Element::Button { .. } => "button",
         Element::Link { .. } => "link",
+        Element::Toggle { .. } => "toggle",
         Element::Custom { .. } => "custom",
     }
 }
 
-/// Every node in document order, shown or not; `in_button` says whether a button holds it.
+/// Every node that a notification can show, in document order, whatever the values; `in_button` says whether a
+/// button or a toggle holds it.
 fn visit_all(node: &Node, in_button: bool, visit: &mut impl FnMut(&Node, bool)) {
+    if only_when_stale(node) {
+        return;
+    }
     visit(node, in_button);
     match &node.element {
         Element::Vstack { children, .. }
@@ -642,7 +717,9 @@ fn visit_all(node: &Node, in_button: bool, visit: &mut impl FnMut(&Node, bool)) 
                 .iter()
                 .for_each(|child| visit_all(child, in_button, visit));
         }
-        Element::Button { child, .. } => visit_all(child, true, visit),
+        Element::Button { child, .. } | Element::Toggle { child, .. } => {
+            visit_all(child, true, visit);
+        }
         _ => {}
     }
 }
@@ -661,7 +738,9 @@ fn visit_shown(node: &Node, values: &BTreeMap<String, Value>, visit: &mut impl F
                 .iter()
                 .for_each(|child| visit_shown(child, values, visit));
         }
-        Element::Button { child, .. } => visit_shown(child, values, visit),
+        Element::Button { child, .. } | Element::Toggle { child, .. } => {
+            visit_shown(child, values, visit);
+        }
         _ => {}
     }
 }

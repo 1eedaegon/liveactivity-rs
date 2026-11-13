@@ -1,7 +1,8 @@
 //! Request contract v2: a layout tree, a style table and a map of values.
 //!
 //! The requests and records are this crate's own, and so is what they say beside the layout: the options of each
-//! platform, the relevance, the alert of an update and the Android content of a snapshot. The vocabulary of each
+//! platform, the time of a scheduled start, the relevance, an alert and the Android content of a snapshot. The
+//! vocabulary of each
 //! presentation belongs to the engine that draws it: the node and style types and their validator are the
 //! `activitykit` crate's, and the notification styles of an Android content are the `liveupdate` crate's, both
 //! re-exported here. A request is read in this crate's types, and the part activitykit knows is converted into its
@@ -10,7 +11,7 @@
 use crate::{
     Error, Result,
     models::{ActivityState, Backend, EndPolicy, Fallback, PromotionState, Visibility},
-    validation::{Validate, require, text},
+    validation::{MAX_TIMESTAMP, Validate, file_name, require, text},
 };
 use activitykit::contract as wire;
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
@@ -93,6 +94,44 @@ impl AndroidOptions {
     }
 }
 
+/// Options of a start that only iOS reads. Android ignores them: two starts that differ only in them are the
+/// same activity there. More may come: build it with [`IosOptions::new`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IosOptions {
+    /// A transient activity (iOS 18 and later; `UNSUPPORTED_FEATURE` before). By Apple's description it shows in
+    /// the expanded Dynamic Island, and the system ends it when the person locks the device, collapses that
+    /// presentation or leaves the application.
+    pub transient: bool,
+}
+
+impl IosOptions {
+    /// The options of an activity that is transient, or is not, and nothing else.
+    pub fn new(transient: bool) -> Self {
+        Self { transient }
+    }
+}
+
+/// A start at a later time. Until then the activity is `pending`: it holds its key, it can be ended, and it takes
+/// no update (`CONFLICT`), since it begins with the content of its start. The sink receives `State` with `active`
+/// when it begins. iOS 26 and later; an older system and Android answer `UNSUPPORTED_FEATURE`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScheduledStart {
+    /// When the activity begins, in epoch milliseconds. A time that has passed starts it at once.
+    pub at: u64,
+    /// The alert the system shows when it starts the activity. The system requires one.
+    pub alert: Alert,
+}
+
+impl ScheduledStart {
+    /// A start at `at`, in epoch milliseconds, with the alert the system shows then.
+    pub fn new(at: u64, alert: Alert) -> Self {
+        Self { at, alert }
+    }
+}
+
 /// What Android shows for a snapshot, in Android's own terms, in place of the projection of the layout: a
 /// progress with segments and points, metrics, the text of the status chip, icons of actions, the URL a tap
 /// opens, a clock in the header. iOS ignores it.
@@ -112,11 +151,11 @@ pub struct AndroidContent {
     pub presentation: AndroidPresentation,
 }
 
-/// An alert that comes with an update: on iOS the device lights up, the Dynamic Island expands (or, without one,
-/// the Lock Screen presentation shows as a banner), and an Apple Watch shows the title and the body. On Android
-/// the notification alerts again with that revision, with its own title and text, where the device offers it
-/// (`alert` in the capabilities); elsewhere the update is silent and the record reports `alert` in
-/// `degradedFeatures`. More may come, such as a sound: build it with [`Alert::new`].
+/// An alert that comes with an update, or with a scheduled start: on iOS the device lights up, the Dynamic Island
+/// expands (or, without one, the Lock Screen presentation shows as a banner), and an Apple Watch shows the title
+/// and the body. On Android the notification alerts again with that revision, with its own title and text, where
+/// the device offers it (`alert` in the capabilities); elsewhere the update is silent and the record reports
+/// `alert` in `degradedFeatures`. More may come: build it with [`Alert::new`].
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -125,14 +164,29 @@ pub struct Alert {
     pub title: String,
     /// The alert's body, 1 to 240 characters.
     pub body: String,
+    /// The sound of the alert on iOS: the file name of a sound in the application's bundle or in its
+    /// `Library/Sounds`, such as `chime.aiff`, 1 to 64 of `A-Za-z0-9._-` beginning with a letter or a digit.
+    /// Without it the system plays its default sound. Android alerts with the sound of its channel, which is the
+    /// person's choice, and the record names `alert.sound`.
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
+    pub sound: Option<String>,
 }
 
 impl Alert {
-    /// An alert with this title and body.
+    /// An alert with this title and body, and the system's sound.
     pub fn new(title: impl Into<String>, body: impl Into<String>) -> Self {
         Self {
             title: title.into(),
             body: body.into(),
+            sound: None,
+        }
+    }
+
+    /// The alert with the sound of the file `name`.
+    pub fn with_sound(self, name: impl Into<String>) -> Self {
+        Self {
+            sound: Some(name.into()),
+            ..self
         }
     }
 }
@@ -210,6 +264,12 @@ pub struct LayoutStartInput {
     /// Options that only Android reads.
     #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
     pub android: Option<AndroidOptions>,
+    /// Options that only iOS reads.
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
+    pub ios: Option<IosOptions>,
+    /// Starts the activity at a later time instead of now. A platform that cannot answers `UNSUPPORTED_FEATURE`.
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
+    pub scheduled: Option<ScheduledStart>,
     /// Ignored on Android.
     #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
     pub push: Option<LayoutPush>,
@@ -240,6 +300,8 @@ impl LayoutStartInput {
             styles: None,
             snapshot,
             android: None,
+            ios: None,
+            scheduled: None,
             push: None,
         }
     }
@@ -315,17 +377,21 @@ pub struct LayoutActivityRecord {
     pub promotion_state: PromotionState,
 }
 
-/// A tap on a button node.
+/// A tap on a button or a toggle node, or on an action of an Android content.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionEvent {
-    /// The id of the tapped button, as its node declares it.
+    /// The id of the tapped button or toggle, as its node declares it.
     pub action_id: String,
-    /// Handle of the activity that showed the button.
+    /// Handle of the activity that showed it.
     pub activity_id: String,
     /// Absent when the backend no longer knows that activity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity_key: Option<String>,
+    /// The state the person asked a toggle for: the other one than the value it showed. The tap changes nothing:
+    /// update the value to move the switch. Absent for a button and for an action of an Android content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
 }
 
 impl LayoutSnapshot {
@@ -425,7 +491,15 @@ impl LayoutSnapshot {
 
 impl Validate for Alert {
     fn validate(&self) -> Result<()> {
-        require(text(&self.title, 120) && text(&self.body, 240))
+        require(text(&self.title, 120) && text(&self.body, 240))?;
+        require(self.sound.as_deref().is_none_or(file_name))
+    }
+}
+
+impl Validate for ScheduledStart {
+    fn validate(&self) -> Result<()> {
+        require(self.at <= MAX_TIMESTAMP)?;
+        self.alert.validate()
     }
 }
 
@@ -497,6 +571,7 @@ impl Validate for LayoutStartInput {
         self.snapshot.beside_the_layout()?;
         require(self.takes_public_version_of(&self.snapshot))?;
         require(self.public_version_of_the_start_fits())?;
+        self.scheduled.as_ref().map_or(Ok(()), Validate::validate)?;
         unmarked(&self.snapshot)
     }
 }

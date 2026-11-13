@@ -1,4 +1,7 @@
-use super::{fake::FakeKit, *};
+use super::{
+    fake::{self, FakeKit},
+    *,
+};
 use crate::{
     block_on,
     layout::{LayoutPush, Value},
@@ -687,17 +690,19 @@ fn a_tap_names_the_action_the_activity_and_its_key() {
     assert_eq!(
         action_event(
             &kit.handle("la-ios-layout-1", "mochi:buttons"),
-            "pet".into()
+            "pet".into(),
+            None
         ),
         ActionEvent {
             action_id: "pet".into(),
             activity_id: "la-ios-layout-1".into(),
-            activity_key: Some("mochi:buttons".into())
+            activity_key: Some("mochi:buttons".into()),
+            on: None,
         }
     );
     // activitykit names no key once ActivityKit no longer lists the activity.
     assert_eq!(
-        action_event(&kit.handle("gone", ""), "pet".into()).activity_key,
+        action_event(&kit.handle("gone", ""), "pet".into(), None).activity_key,
         None
     );
 }
@@ -771,10 +776,7 @@ fn req_i_002_an_alert_reaches_the_kit_with_its_update() {
     let id = block_on(apple.start_layout(start("demo:1", "green")))
         .unwrap()
         .id;
-    let alert = crate::Alert {
-        title: "Gate changed".into(),
-        body: "Now gate 12".into(),
-    };
+    let alert = crate::Alert::new("Gate changed", "Now gate 12");
     let mut loud = update(&id, 6, "red");
     loud.alert = Some(alert.clone());
     block_on(apple.update_layout(loud)).unwrap();
@@ -788,10 +790,7 @@ fn req_i_002_an_alert_reaches_the_kit_with_its_update() {
     assert_eq!(alerts, [Some(alert), None]);
     // An alert without a title is no alert, and the update does not go out.
     let mut blank = update(&id, 8, "red");
-    blank.alert = Some(crate::Alert {
-        title: " ".into(),
-        body: "Now gate 12".into(),
-    });
+    blank.alert = Some(crate::Alert::new(" ", "Now gate 12"));
     assert_eq!(block_on(apple.update_layout(blank)), Err(Error::invalid()));
     assert_eq!(kit.book().updates.len(), 2);
 }
@@ -864,4 +863,174 @@ fn req_i_003_the_ios_surface_of_a_layout_reaches_the_kit() {
         start.validate_update(&LayoutUpdateInput::new("id", wrong)),
         Err(Error::invalid())
     );
+}
+
+/// A start whose lock screen is `lock_screen`, with the values `status`, `muted` and `tone`.
+fn start_showing(lock_screen: Json, members: Json) -> LayoutStartInput {
+    let mut request = json!({"activityKey":"ride:7","schemaVersion":2,"fallback":"notification",
+        "layout":{"lockScreen":lock_screen},
+        "snapshot":{"revision":0,"values":{"status":"On the way","muted":false}}});
+    request
+        .as_object_mut()
+        .unwrap()
+        .extend(members.as_object().unwrap().clone());
+    crate::parse_request("start_layout", request).unwrap()
+}
+
+#[test]
+fn req_i_004_a_toggle_reaches_the_kit_and_its_tap_says_what_was_asked() {
+    // REQ-I-004
+    use crate::layout::Element;
+    let toggle = json!({"type":"toggle","actionId":"mute","bind":"muted",
+        "child":{"type":"text","value":"Mute"}});
+    let (apple, kit) = apple();
+    let record = block_on(apple.start_layout(start_showing(toggle, json!({})))).unwrap();
+    let layout = kit.book().starts[0].layout.clone();
+    let Element::Toggle {
+        action_id,
+        bind,
+        child,
+    } = &layout.lock_screen.element
+    else {
+        panic!("a toggle")
+    };
+    assert_eq!((action_id.as_str(), bind.as_str()), ("mute", "muted"));
+    assert!(matches!(&child.element, Element::Text { value: Some(label), .. } if label == "Mute"));
+
+    // A tap says which state the person asked for; a button's says none.
+    let handle = kit.handle(&record.id, "ride:7");
+    let tap = |on| ActionEvent {
+        action_id: "mute".into(),
+        activity_id: record.id.clone(),
+        activity_key: Some("ride:7".into()),
+        on,
+    };
+    assert_eq!(
+        action_event(&handle, "mute".into(), Some(true)),
+        tap(Some(true))
+    );
+    assert_eq!(
+        action_event(&handle, "mute".into(), Some(false)),
+        tap(Some(false))
+    );
+    assert_eq!(action_event(&handle, "mute".into(), None), tap(None));
+}
+
+#[test]
+fn req_i_005_a_node_that_follows_staleness_reaches_the_kit() {
+    // REQ-I-005
+    use crate::layout::Element;
+    let lock_screen = json!({"type":"vstack","ifStale":false,"children":[
+        {"type":"text","bind":"status","ifStale":false},
+        {"type":"text","value":"No signal","ifStale":true,"unless":"muted"},
+        {"type":"text","value":"Always"}]});
+    let (apple, kit) = apple();
+    block_on(apple.start_layout(start_showing(lock_screen, json!({})))).unwrap();
+    let layout = kit.book().starts[0].layout.clone();
+    let Element::Vstack { children, .. } = &layout.lock_screen.element else {
+        panic!("a stack")
+    };
+    assert_eq!(layout.lock_screen.if_stale, Some(false));
+    let conditions: Vec<_> = children.iter().map(|child| child.if_stale).collect();
+    assert_eq!(conditions, [Some(false), Some(true), None]);
+    // Beside another condition both are kept.
+    assert_eq!(children[1].unless.as_deref(), Some("muted"));
+}
+
+#[test]
+fn req_i_006_a_scheduled_and_a_transient_start_reach_the_kit() {
+    // REQ-I-006
+    let text = || json!({"type":"text","bind":"status"});
+    let later = |key: &str, at: u64, transient: bool| {
+        start_showing(
+            text(),
+            json!({"activityKey":key,
+                "scheduled":{"at":at,"alert":{"title":"Your ride","body":"It starts now"}},
+                "ios":{"transient":transient}}),
+        )
+    };
+    let fresh = |id: &str| {
+        LayoutUpdateInput::new(
+            id,
+            serde_json::from_value(json!({"revision":1,"values":{"status":"Soon","muted":false}}))
+                .unwrap(),
+        )
+    };
+    let (apple, kit) = apple();
+    let ahead = fake::NOW + 600_000;
+    let record = block_on(apple.start_layout(later("ride:7", ahead, true))).unwrap();
+    {
+        let book = kit.book();
+        let sent = &book.starts[0];
+        assert!(sent.transient);
+        assert_eq!(
+            sent.scheduled,
+            Some(crate::ScheduledStart::new(
+                ahead,
+                crate::Alert::new("Your ride", "It starts now")
+            ))
+        );
+    }
+    // Until its time the activity waits: it is pending and takes no update.
+    assert_eq!(record.state, ActivityState::Pending);
+    assert_eq!(
+        code(block_on(apple.update_layout(fresh(&record.id)))),
+        "CONFLICT"
+    );
+    // When and how an activity begins is no part of what makes two starts the same activity.
+    let again = block_on(apple.start_layout(later("ride:7", ahead + 900_000, false))).unwrap();
+    assert_eq!(again.id, record.id);
+    assert_eq!(kit.book().starts.len(), 1);
+    // The system begins it: it is active, and takes updates.
+    kit.set_state(&record.id, State::Active);
+    let begun = block_on(apple.update_layout(fresh(&record.id))).unwrap();
+    assert_eq!(begun.state, ActivityState::Active);
+
+    // A pending activity can be ended, and a time that has passed starts an activity at once.
+    let waiting = block_on(apple.start_layout(later("ride:8", ahead, false))).unwrap();
+    let ended = block_on(apple.end_layout(end(&waiting.id, EndPolicy::Immediate {}, None)));
+    assert_eq!(ended.unwrap().state, ActivityState::Ended);
+    let passed = block_on(apple.start_layout(later("ride:9", fake::NOW - 1, false))).unwrap();
+    assert_eq!(passed.state, ActivityState::Active);
+
+    // A start without them asks for neither.
+    block_on(apple.start_layout(start("demo:1", "green"))).unwrap();
+    let book = kit.book();
+    let plain = book.starts.last().unwrap();
+    assert!(!plain.transient);
+    assert_eq!(plain.scheduled, None);
+}
+
+#[test]
+fn req_i_007_the_sound_of_an_alert_reaches_the_kit() {
+    // REQ-I-007
+    let (apple, kit) = apple();
+    let id = block_on(apple.start_layout(start("demo:1", "green")))
+        .unwrap()
+        .id;
+    let alert = crate::Alert::new("Gate changed", "Now gate 12").with_sound("chime.aiff");
+    let mut loud = update(&id, 6, "red");
+    loud.alert = Some(alert.clone());
+    block_on(apple.update_layout(loud)).unwrap();
+    assert_eq!(kit.book().updates[0].alert, Some(alert));
+    // A sound that is no file name is no alert, and the update does not go out.
+    let mut wrong = update(&id, 7, "red");
+    wrong.alert =
+        Some(crate::Alert::new("Gate changed", "Now gate 12").with_sound("../chime.aiff"));
+    assert_eq!(block_on(apple.update_layout(wrong)), Err(Error::invalid()));
+    assert_eq!(kit.book().updates.len(), 1);
+
+    // The alert of a scheduled start keeps its sound too.
+    let scheduled = start_showing(
+        json!({"type":"text","bind":"status"}),
+        json!({"scheduled":{"at":fake::NOW + 600_000,
+            "alert":{"title":"Your ride","body":"It starts now","sound":"start.caf"}}}),
+    );
+    block_on(apple.start_layout(scheduled)).unwrap();
+    let book = kit.book();
+    let sound = book.starts[1]
+        .scheduled
+        .as_ref()
+        .and_then(|scheduled| scheduled.alert.sound.as_deref());
+    assert_eq!(sound, Some("start.caf"));
 }

@@ -271,10 +271,7 @@ fn req_c_006_what_a_request_says_beside_the_layout_is_checked() {
     }
     // An alert has a title and a body within their lengths.
     let alert = |title: &str, body: &str| LayoutUpdateInput {
-        alert: Some(Alert {
-            title: title.into(),
-            body: body.into(),
-        }),
+        alert: Some(Alert::new(title, body)),
         ..LayoutUpdateInput::new("a", input.snapshot.clone())
     };
     assert_eq!(code(alert("Gate changed", "Now gate 12").validate()), None);

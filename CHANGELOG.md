@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.4.0 - 2026-11-13
+
+- feat: build on liveupdate 0.3, and tell the sink each state of an activity once on Android (#10) (`e3bf99f`)
+
 Built on liveupdate 0.3.
 
 - On Android the sink is told where an activity stands, as on iOS: `active` once Android shows it, `stale` after

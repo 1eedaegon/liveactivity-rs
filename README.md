@@ -20,7 +20,7 @@ live.end(EndInput::new(&order.id)).await?;
 
 ```toml
 [dependencies]
-liveactivity = "0.2"
+liveactivity = "0.3"
 ```
 
 The crate uses [activitykit](https://github.com/1eedaegon/activitykit-rs) for

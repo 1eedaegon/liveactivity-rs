@@ -4,6 +4,11 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.3.0 - 2026-11-13
+
+- ci: tag the release commit in the run that prepared it (#8) (`febb247`)
+- feat: build on activitykit 0.4 and liveupdate 0.2, and show more of a layout on Android (#9) (`f7d186a`)
+
 Built on activitykit 0.4 and liveupdate 0.2 (0.2.1 or later), whose vocabularies this crate re-exports. Breaking
 for Rust callers, as before 1.0; JSON written for 0.2 reads unchanged.
 

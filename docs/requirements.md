@@ -180,16 +180,16 @@ Evidence: `exchange::req_a_002_taps_of_a_content_and_dismissals_reach_the_sink`.
 ## REQ-A-003 Style support in the capabilities
 
 Capabilities report which notification styles the device draws and which extensions it offers, when the Android
-backend runs layouts. `foregroundPlacement` is false: the contract has no member that asks for it.
+backend runs layouts.
 
 Evidence: `exchange::req_a_003_capabilities_report_the_styles_the_device_draws`.
 
 ## REQ-A-004 What Android leaves out of the iOS surface
 
-The projection names `layout.link` for a shown link, whose label it does not show, `layout.url` for a layout with
-a URL, `layout.transition` for a shown node with a transition, and `layout.privacy` for a shown node marked
-sensitive when a locked screen shows the notification's content. Accessibility members are named nowhere: they
-are read by iOS only.
+The projection names what it does not show: `layout.link` for a shown link and `layout.url` for the layout's URL
+where the device offers no links (REQ-A-008 has the rest), `layout.transition` for a shown node with a
+transition, and `layout.privacy` for a shown node marked sensitive when a locked screen shows the notification's
+content. Accessibility members are named nowhere.
 
 Evidence: `android::layout::tests::req_a_004_the_projection_names_what_android_leaves_out_of_the_ios_surface`
 and `exchange::req_a_004_a_public_activity_names_the_privacy_a_notification_cannot_keep`.
@@ -224,6 +224,56 @@ corrected content can use the same revision.
 Evidence: `layout::tests::req_a_007_a_content_takes_the_extensions_of_a_presentation`,
 `exchange::req_a_007_the_extensions_of_a_content_reach_android` and
 `exchange::req_a_007_a_content_that_android_refuses_at_the_post_leaves_nothing_behind`.
+
+## REQ-A-008 Links of a layout on Android
+
+Where the device offers `links`, the projection gives the notification the layout's `url` and makes each shown
+`link` an action that opens its URL, titled by the link's label and named `link:<n>` after its place among the
+links of the tree. A URL that liveupdate does not take, and a link beyond the three actions, is named as before.
+When the device refuses the links at the post, because nothing in the application opens a URL, the snapshot is
+shown without them and the record names `layout.url` and `layout.link`.
+
+Evidence: `android::layout::tests::req_a_008_links_of_a_layout_become_what_the_notification_opens` and
+`exchange::req_a_008_a_url_nothing_opens_is_left_out_and_named`.
+
+## REQ-E-004 An opening is reported
+
+The sink receives `Opened`, with the activity's id and key and the id of an opening action, when the host reported
+that the person opened the application from a notification (Android).
+
+Evidence: `exchange::req_e_004_an_opening_from_a_notification_is_reported`.
+
+## REQ-A-009 A timer beside a progress
+
+Where the device offers `chronometer`, a layout with a progress and a timer shows the timer as the clock in the
+header, and `layout.timerText` is not named.
+
+Evidence: `android::layout::tests::req_a_009_a_timer_beside_a_progress_is_the_header_clock`.
+
+## REQ-A-010 Labels on Android
+
+A shown node that Android cannot draw and that has an accessibility label, a value or both is projected as that
+text. A button or a link without a text is titled by a label inside it or its own. A node hidden from assistive
+technologies is decoration: it is left out without being named.
+
+Evidence: `android::layout::tests::req_a_010_labels_are_the_text_of_what_android_cannot_draw`.
+
+## REQ-A-011 A public version of the start
+
+A start may give a public version among its Android options, for a private activity only. Where the device
+offers `publicVersion`, every snapshot that has none of its own shows it on a secure lock screen; elsewhere the
+record names `publicVersion`.
+
+Evidence: `layout::tests::req_a_011_a_public_version_is_an_option_of_a_private_start` and
+`exchange::req_a_011_the_public_version_of_a_start_goes_with_every_snapshot`.
+
+## REQ-A-012 A foreground placement
+
+A start may ask for the foreground placement among its Android options. The capabilities report whether the
+device offers it; where it does not, the start is `UNSUPPORTED_FEATURE`, and a second activity with the placement
+is `SYSTEM_LIMIT`.
+
+Evidence: `exchange::req_a_012_a_start_may_ask_for_the_foreground_placement`.
 
 ## REQ-N-001 No framework in the crate
 

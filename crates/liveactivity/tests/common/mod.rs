@@ -96,13 +96,17 @@ impl MemoryDriver {
     }
 
     /// Queues what the Android side queues when the host reports that the person opened the application from
-    /// the notification.
-    pub fn open(&self, id: &str, sequence: u64) {
+    /// the notification, by its content or by `action`.
+    pub fn open(&self, id: &str, sequence: u64, action: Option<&str>) {
+        let mut kind = json!({"kind": "opened"});
+        if let Some(action) = action {
+            kind["actionId"] = json!(action);
+        }
         let event: ActivityEvent = serde_json::from_value(json!({
             "sequence": sequence,
             "activityId": id,
             "occurredAt": 1_800_000_000_000_u64,
-            "kind": {"kind": "opened"},
+            "kind": kind,
         }))
         .unwrap();
         self.lock().events.events.push(event);
@@ -151,12 +155,14 @@ impl Driver for MemoryDriver {
                 "Posting failed.",
             ));
         }
-        let url = record
-            .snapshot
-            .presentation
-            .as_ref()
-            .and_then(|presentation| presentation.open_url.as_deref());
-        if url.is_some_and(|url| url.starts_with(UNOPENED)) {
+        let unopened = record.snapshot.presentation.as_ref().is_some_and(|shown| {
+            let of_actions = shown.actions.iter().map(|action| &action.open_url);
+            std::iter::once(&shown.open_url)
+                .chain(of_actions)
+                .flatten()
+                .any(|url| url.starts_with(UNOPENED))
+        });
+        if unopened {
             return Err(liveupdate::Error::new(
                 liveupdate::ErrorCode::InvalidInput,
                 "No activity of the application opens the URL.",

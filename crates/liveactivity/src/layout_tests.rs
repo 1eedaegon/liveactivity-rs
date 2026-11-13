@@ -427,3 +427,75 @@ fn req_a_007_a_content_takes_the_extensions_of_a_presentation() {
     plain["android"]["visibility"] = json!("public");
     assert_eq!(read(plain), None);
 }
+
+#[test]
+fn req_a_011_a_public_version_is_an_option_of_a_private_start() {
+    // REQ-A-011
+    let invalid = Some("INVALID_INPUT".to_owned());
+    let with = |android: serde_json::Value| {
+        let mut request = start();
+        request["android"] = android;
+        code(parse::<LayoutStartInput>("start_layout", request))
+    };
+    let version = json!({"title":"Ride","status":"On the way"});
+
+    let private = json!({"visibility":"private","publicVersion":version});
+    assert_eq!(with(private.clone()), None);
+    // It reads into the contract's types and writes back as it was sent, and the iOS engine is not shown it.
+    let mut request = start();
+    request["android"] = private;
+    let input: LayoutStartInput = parse("start_layout", request.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&input).unwrap(), request);
+    let options = input.android.as_ref().unwrap();
+    assert_eq!(
+        options.public_version,
+        Some(PublicVersion {
+            title: "Ride".into(),
+            status: "On the way".into(),
+        })
+    );
+    assert!(
+        serde_json::to_value(input.wire())
+            .unwrap()
+            .get("android")
+            .is_none()
+    );
+
+    // A locked screen shows the content of a public activity and nothing of a secret one: neither has one.
+    assert_eq!(
+        with(json!({"visibility":"public","publicVersion":version})),
+        invalid
+    );
+    assert_eq!(
+        with(json!({"visibility":"secret","publicVersion":version})),
+        invalid
+    );
+    // Its texts have liveupdate's bounds, and it takes no other member.
+    for wrong in [
+        json!({"title":" ","status":"On the way"}),
+        json!({"title":"Ride","status":"s".repeat(241)}),
+        json!({"title":"Ride"}),
+        json!({"title":"Ride","status":"On the way","icon":"x"}),
+        json!(null),
+    ] {
+        let options = json!({"visibility":"private","publicVersion":wrong});
+        assert_eq!(with(options.clone()), invalid, "{options}");
+    }
+    // The placement is one of two words.
+    assert_eq!(
+        with(json!({"visibility":"private","placement":"foreground"})),
+        None
+    );
+    assert_eq!(
+        with(json!({"visibility":"private","placement":"tagged"})),
+        None
+    );
+    assert_eq!(
+        with(json!({"visibility":"private","placement":"floating"})),
+        invalid
+    );
+    assert_eq!(
+        with(json!({"visibility":"private","placement":null})),
+        invalid
+    );
+}

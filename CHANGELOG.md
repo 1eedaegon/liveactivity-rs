@@ -26,6 +26,16 @@ for Rust callers, as before 1.0; JSON written for 0.2 reads unchanged.
 - On Android the sink receives `Event::State` with `ended` when an end of the application ends a running
   activity, as it does on iOS; until now Android reported only a dismissal. A sink that took every state event
   on Android for a dismissal reads `state` now. `testkit::MemoryBackend` reports its ends the same way.
+- A layout shows more on Android, where the device offers it: `Layout.url` and `link` nodes open their URLs from
+  the notification and its actions, a timer beside a progress is the clock in the header, and a node that a
+  notification cannot draw is shown as the text of its accessibility label and value. A button or a link without
+  a text is titled by a label. A URL that nothing in the application opens does not fail a layout: its links
+  are left out and named. A node hidden from assistive technologies is no longer named in `degradedFeatures`.
+- `AndroidOptions` has `public_version`, what a secure lock screen shows of a private activity, and `placement`,
+  with `AndroidPlacement::Foreground` for a notification that a foreground service of the application holds.
+  The capabilities report `foregroundPlacement` as the device offers it.
+- `Event::Opened`: the person opened the application from a notification (Android), when the host reports the
+  opening intent to liveupdate.
 - liveupdate 0.2 renamed its Android package to `io.github.gon.liveupdate`: take its AAR of 0.2, and rename the
   package where Kotlin or a manifest names one of its classes. It keeps its receipts under the new name and does
   not read those of 0.1, so an activity that runs while the application is updated to this release is no longer

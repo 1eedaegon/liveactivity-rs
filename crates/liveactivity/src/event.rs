@@ -26,6 +26,22 @@ pub struct StateEvent {
     pub state: ActivityState,
 }
 
+/// The person opened the application from the notification of an activity (Android), as the host reported it to
+/// liveupdate with the opening intent. The application receives the URL itself, from that intent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenedEvent {
+    /// The handle of the activity.
+    pub activity_id: String,
+    /// Absent when the backend no longer knows that activity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_key: Option<String>,
+    /// The action that opened the application, when the person tapped one and not the notification itself: an
+    /// action of an Android content, or `link:<n>` for the nth link of a layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_id: Option<String>,
+}
+
 /// What a platform reports of the application's activities. More kinds may come: match with a `_` arm.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +62,8 @@ pub enum Event {
     State(StateEvent),
     /// What the person allows, after a change in Settings (iOS).
     Permissions(Permissions),
+    /// The person opened the application from a notification (Android).
+    Opened(OpenedEvent),
 }
 
 /// Where a backend's events go: implemented by a framework plugin, or any closure.

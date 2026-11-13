@@ -699,7 +699,7 @@ fn req_a_003_capabilities_report_the_styles_the_device_draws() {
     // This device offers none of the extensions.
     assert!(!(styles.style_change || styles.delayed_end || styles.alert || styles.links));
 
-    // One that offers them all reports each, except the placement, which no member of the contract asks for.
+    // One that offers them all reports each.
     {
         let mut state = driver.lock();
         let offered = &mut state.capabilities.presentation;
@@ -719,13 +719,13 @@ fn req_a_003_capabilities_report_the_styles_the_device_draws() {
         "links",
         "styleChange",
         "delayedEnd",
+        "foregroundPlacement",
         "alert",
         "publicVersion",
         "branding",
     ] {
         assert_eq!(offered[extension], true, "{extension}");
     }
-    assert_eq!(offered["foregroundPlacement"], false);
 
     // A backend that shows no Android content reports no styles, and its JSON has no such member.
     for (_, connect) in BACKENDS {
@@ -1034,7 +1034,7 @@ fn req_a_007_the_extensions_of_a_content_reach_android() {
         offered.public_version = true;
         offered.branding = true;
     });
-    let (live, events, driver) = android_on(offering, "extensions");
+    let (live, _events, driver) = android_on(offering, "extensions");
     let record = block_on(live.start_layout(ride("ride:7", Some(extended())))).unwrap();
 
     // What liveupdate posted is the presentation as it was sent.
@@ -1044,13 +1044,6 @@ fn req_a_007_the_extensions_of_a_content_reach_android() {
         serde_json::to_value(&record.snapshot.android).unwrap(),
         extended()
     );
-
-    // liveupdate reports an activity that was opened. The contract has no event for it yet: the drain goes on.
-    driver.open(&record.id, 0);
-    driver.tap(&record.id, 1, "pet");
-    block_on(live.sync_events()).unwrap();
-    assert!(matches!(events.try_recv().unwrap(), Event::Action(tap) if tap.action_id == "pet"));
-    assert!(events.try_recv().is_err());
 
     // A public version is of a private activity. A start that says otherwise is refused before any backend, so
     // on every platform.
@@ -1120,15 +1113,6 @@ fn req_a_007_the_extensions_of_a_content_reach_android() {
         block_on(bare.update_layout(update)).unwrap_err().code,
         "INVALID_INPUT"
     );
-
-    // Without the app's files the backend runs templates only, and its drain leaves the same kind out.
-    let driver = MemoryDriver::default();
-    let (templates, events) = connect(LiveUpdateBackend::new(driver.clone()));
-    driver.open("opened", 0);
-    driver.tap("opened", 1, "pet");
-    block_on(templates.sync_events()).unwrap();
-    assert!(matches!(events.try_recv().unwrap(), Event::Action(tap) if tap.action_id == "pet"));
-    assert!(events.try_recv().is_err());
 }
 
 #[test]
@@ -1281,4 +1265,281 @@ fn req_e_003_an_end_of_the_application_is_reported_on_android() {
     block_on(live.end(EndInput::new(&order.id))).unwrap();
     assert_eq!(events.try_recv().unwrap(), ended(&order.id, "order:43"));
     assert!(events.try_recv().is_err());
+}
+
+/// A layout with a URL of its own, a link, a button and a text.
+fn linked(key: &str, url: &str, link: &str) -> liveactivity::LayoutStartInput {
+    liveactivity::parse_request(
+        "start_layout",
+        serde_json::json!({
+            "activityKey": key, "schemaVersion": 2, "fallback": "notification",
+            "layout": { "url": url, "lockScreen": { "type": "vstack", "children": [
+                { "type": "text", "bind": "title" },
+                { "type": "link", "url": link, "child": { "type": "text", "value": "Map" } },
+                { "type": "button", "actionId": "call", "child": { "type": "text", "value": "Call" } },
+            ] } },
+            "snapshot": { "revision": 0, "values": { "title": "Ride 7" } },
+        }),
+    )
+    .unwrap()
+}
+
+#[test]
+fn req_a_008_a_url_nothing_opens_is_left_out_and_named() {
+    // REQ-A-008
+    let offering = MemoryDriver::offering(|offered| offered.links = true);
+    let (live, _events, driver) = android_on(offering, "layout-links");
+    let named = |record: &liveactivity::LayoutActivityRecord, feature: &str| {
+        record.degraded_features.iter().any(|left| left == feature)
+    };
+    let update = |id: &str, revision: u64| {
+        layout_update(serde_json::json!({
+            "id": id, "snapshot": { "revision": revision, "values": { "title": "Ride 7" } },
+        }))
+    };
+
+    // The application opens the layout's URLs: the notification opens them, and nothing is named.
+    let record =
+        block_on(live.start_layout(linked("ride:7", "myapp://rides/7", "myapp://rides/7/map")))
+            .unwrap();
+    let shown = driver.posted(&record.id).presentation.unwrap();
+    assert_eq!(shown.open_url.as_deref(), Some("myapp://rides/7"));
+    let link = shown.actions.iter().find(|action| action.id == "link:1");
+    assert_eq!(
+        link.and_then(|action| action.open_url.as_deref()),
+        Some("myapp://rides/7/map")
+    );
+    assert!(!named(&record, "layout.url") && !named(&record, "layout.link"));
+    // The device is asked what it offers once for such a snapshot, beside liveupdate's own question for an
+    // update, and not at all for a layout that could use nothing of it.
+    let asked = driver.lock().capability_calls;
+    block_on(live.update_layout(update(&record.id, 1))).unwrap();
+    assert_eq!(driver.lock().capability_calls - asked, 2);
+    let plain = block_on(live.start_layout(ride("ride:6", None))).unwrap();
+    let asked = driver.lock().capability_calls;
+    block_on(live.update_layout(layout_update(ride_update(&plain.id, 1, None)))).unwrap();
+    assert_eq!(driver.lock().capability_calls - asked, 1);
+    // The same start again is the same activity, also when the device has stopped offering what the
+    // notification was given.
+    driver.lock().capabilities.presentation.links = false;
+    let again =
+        block_on(live.start_layout(linked("ride:7", "myapp://rides/7", "myapp://rides/7/map")))
+            .unwrap();
+    assert_eq!(again.id, record.id);
+    assert_eq!(again.snapshot.revision, 1);
+    driver.lock().capabilities.presentation.links = true;
+
+    // Nothing in the application opens these URLs, which only the device knows. The layout that works on iOS
+    // is shown all the same, without its links, and the record says so, at the start and with every update.
+    let unopened = format!("{}//rides/8", common::UNOPENED);
+    let posts = driver.lock().posts;
+    let record = block_on(live.start_layout(linked("ride:8", &unopened, &unopened))).unwrap();
+    assert_eq!(record.state, ActivityState::Active);
+    // The device refused once, and took the snapshot without the links.
+    assert_eq!(driver.lock().posts - posts, 2);
+    let shown = driver.posted(&record.id).presentation.unwrap();
+    assert_eq!(shown.open_url, None);
+    let ids: Vec<_> = shown
+        .actions
+        .iter()
+        .map(|action| action.id.as_str())
+        .collect();
+    assert_eq!(ids, ["call"]);
+    assert!(named(&record, "layout.url") && named(&record, "layout.link"));
+    let updated = block_on(live.update_layout(update(&record.id, 1))).unwrap();
+    assert_eq!(updated.snapshot.revision, 1);
+    assert_eq!(driver.posted(&record.id).revision, 1);
+    assert!(named(&updated, "layout.url") && named(&updated, "layout.link"));
+    // The same start again is the same activity.
+    let again = block_on(live.start_layout(linked("ride:8", &unopened, &unopened))).unwrap();
+    assert_eq!(again.id, record.id);
+
+    // An Android content is the application's own word for Android: it is shown as given or refused, at once.
+    let mut content = arrived();
+    content["presentation"]["openUrl"] = serde_json::json!(unopened);
+    let posts = driver.lock().posts;
+    let refused = block_on(live.start_layout(ride("ride:9", Some(content))));
+    assert_eq!(refused.unwrap_err().code, "INVALID_INPUT");
+    assert_eq!(driver.lock().posts - posts, 1);
+
+    // A device that opens no URL is asked nothing of the kind: one post, and the links are named.
+    let (bare, _events, bare_driver) = android_with_files("layout-links-none");
+    let record =
+        block_on(bare.start_layout(linked("ride:7", "myapp://rides/7", "myapp://rides/7/map")))
+            .unwrap();
+    assert_eq!(bare_driver.lock().posts, 1);
+    assert!(named(&record, "layout.url") && named(&record, "layout.link"));
+}
+
+#[test]
+fn req_e_004_an_opening_from_a_notification_is_reported() {
+    // REQ-E-004
+    use liveactivity::OpenedEvent;
+    let (live, events, driver) = android_with_files("opened");
+    let record = block_on(live.start_layout(ride("ride:7", None))).unwrap();
+    // The host handed liveupdate the intent that opened it: by the notification itself, then by an action.
+    driver.open(&record.id, 0, None);
+    driver.tap(&record.id, 1, "pet");
+    driver.open(&record.id, 2, Some("link:1"));
+    block_on(live.sync_events()).unwrap();
+    let opened = |action: Option<&str>| {
+        Event::Opened(OpenedEvent {
+            activity_id: record.id.clone(),
+            activity_key: Some("ride:7".into()),
+            action_id: action.map(str::to_owned),
+        })
+    };
+    assert_eq!(events.try_recv().unwrap(), opened(None));
+    assert!(matches!(events.try_recv().unwrap(), Event::Action(tap) if tap.action_id == "pet"));
+    assert_eq!(events.try_recv().unwrap(), opened(Some("link:1")));
+    assert!(events.try_recv().is_err());
+    let wire = serde_json::to_value(OpenedEvent {
+        activity_id: "id".into(),
+        activity_key: None,
+        action_id: None,
+    });
+    assert_eq!(wire.unwrap(), serde_json::json!({ "activityId": "id" }));
+
+    // Without the app's files the backend knows no key, and reports the opening all the same.
+    let driver = MemoryDriver::default();
+    let (templates, events) = connect(LiveUpdateBackend::new(driver.clone()));
+    driver.open("opened", 0, None);
+    block_on(templates.sync_events()).unwrap();
+    assert_eq!(
+        events.try_recv().unwrap(),
+        Event::Opened(OpenedEvent {
+            activity_id: "opened".into(),
+            activity_key: None,
+            action_id: None,
+        })
+    );
+}
+
+#[test]
+fn req_a_011_the_public_version_of_a_start_goes_with_every_snapshot() {
+    // REQ-A-011
+    let offering = MemoryDriver::offering(|offered| offered.public_version = true);
+    let (live, _events, driver) = android_on(offering, "public-version");
+    let private = |key: &str, android: Option<serde_json::Value>| {
+        let mut request = serde_json::to_value(ride(key, android)).unwrap();
+        request["android"] = serde_json::json!({ "visibility": "private",
+            "publicVersion": { "title": "Ride", "status": "On the way" } });
+        liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", request)
+    };
+    let public_version = |id: &str| {
+        let shown = driver.posted(id).presentation.unwrap().public_version;
+        shown.map(|version| (version.title, version.status))
+    };
+    let of_the_start = Some(("Ride".to_owned(), "On the way".to_owned()));
+
+    // A projected snapshot shows it, at the start and after an update.
+    let record = block_on(live.start_layout(private("ride:7", None).unwrap())).unwrap();
+    assert_eq!(public_version(&record.id), of_the_start);
+    assert!(
+        !record
+            .degraded_features
+            .contains(&"publicVersion".to_owned())
+    );
+    block_on(live.update_layout(layout_update(ride_update(&record.id, 1, None)))).unwrap();
+    assert_eq!(public_version(&record.id), of_the_start);
+    // A content without one gets it; a content with its own keeps its own.
+    let update = layout_update(ride_update(&record.id, 2, Some(driving(70, "2 min"))));
+    block_on(live.update_layout(update)).unwrap();
+    assert_eq!(public_version(&record.id), of_the_start);
+    let mut own = driving(80, "1 min");
+    own["presentation"]["publicVersion"] =
+        serde_json::json!({ "title": "Ride", "status": "Almost there" });
+    block_on(live.update_layout(layout_update(ride_update(&record.id, 3, Some(own))))).unwrap();
+    assert_eq!(
+        public_version(&record.id),
+        Some(("Ride".to_owned(), "Almost there".to_owned()))
+    );
+
+    // A device that has none shows the snapshot without it, and the record says so.
+    let (bare, _events, bare_driver) = android_with_files("public-version-none");
+    let record = block_on(bare.start_layout(private("ride:7", None).unwrap())).unwrap();
+    assert_eq!(
+        bare_driver
+            .posted(&record.id)
+            .presentation
+            .unwrap()
+            .public_version,
+        None
+    );
+    assert!(
+        record
+            .degraded_features
+            .contains(&"publicVersion".to_owned())
+    );
+}
+
+#[test]
+fn req_a_012_a_start_may_ask_for_the_foreground_placement() {
+    // REQ-A-012
+    use liveactivity::liveupdate::Placement;
+    let offering = MemoryDriver::offering(|offered| offered.foreground_placement = true);
+    let (live, _events, driver) = android_on(offering, "placement");
+    let placed = |key: &str, placement: Option<&str>| {
+        let mut request = serde_json::to_value(ride(key, None)).unwrap();
+        request["android"] = serde_json::json!({ "visibility": "private" });
+        if let Some(placement) = placement {
+            request["android"]["placement"] = serde_json::json!(placement);
+        }
+        liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", request)
+            .unwrap()
+    };
+    let capabilities = block_on(live.capabilities()).unwrap();
+    assert!(
+        capabilities
+            .android_presentation
+            .unwrap()
+            .foreground_placement
+    );
+
+    // The placement reaches liveupdate with the start. A start without one, or with the default by name, is
+    // tagged, and the two are the same request.
+    let held = block_on(live.start_layout(placed("ride:7", Some("foreground")))).unwrap();
+    let tagged = block_on(live.start_layout(placed("ride:8", None))).unwrap();
+    let by_name = block_on(live.start_layout(placed("ride:8", Some("tagged")))).unwrap();
+    assert_eq!(by_name.id, tagged.id);
+    let placement = |id: &str| {
+        let state = driver.lock();
+        state
+            .records
+            .iter()
+            .find(|record| record.id == id)
+            .map(|record| record.origin.placement)
+    };
+    assert_eq!(placement(&held.id), Some(Placement::Foreground));
+    assert_eq!(placement(&tagged.id), Some(Placement::Tagged));
+
+    // One activity has the placement at a time, and a running key keeps the placement it started with.
+    let second = block_on(live.start_layout(placed("ride:9", Some("foreground"))));
+    assert_eq!(second.unwrap_err().code, "SYSTEM_LIMIT");
+    let other = block_on(live.start_layout(placed("ride:7", None)));
+    assert_eq!(other.unwrap_err().code, "CONFLICT");
+    // It is free once its activity ended.
+    block_on(live.end_layout(liveactivity::LayoutEndInput::immediate(&held.id))).unwrap();
+    block_on(live.start_layout(placed("ride:9", Some("foreground")))).unwrap();
+
+    // A device that does not offer it says so and refuses the start.
+    let (bare, _events, _driver) = android_with_files("placement-none");
+    let capabilities = block_on(bare.capabilities()).unwrap();
+    assert!(
+        !capabilities
+            .android_presentation
+            .unwrap()
+            .foreground_placement
+    );
+    let refused = block_on(bare.start_layout(placed("ride:7", Some("foreground"))));
+    assert_eq!(refused.unwrap_err().code, "UNSUPPORTED_FEATURE");
+    // Wherever it runs, a placement the contract does not know is no request.
+    let mut unknown = serde_json::to_value(ride("ride:7", None)).unwrap();
+    unknown["android"] = serde_json::json!({ "visibility": "private", "placement": "floating" });
+    assert_eq!(
+        liveactivity::validate_request("start_layout", unknown)
+            .unwrap_err()
+            .code,
+        "INVALID_INPUT"
+    );
 }

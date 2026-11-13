@@ -208,8 +208,10 @@ The rules are in [the contract](contract.md#an-android-content).
 
 ### Links
 
-A content may name the URL that a tap on the notification opens, and an action may open one
-instead of sending a tap:
+A layout's `url` is what a tap on the notification opens, and each of its `link` nodes is an
+action that opens its URL: nothing to write for Android, where the device offers `links`. A
+content may name them itself, the URL of the notification and an action that opens one instead
+of sending a tap:
 
 ```rust
 snapshot.android = Some(AndroidContent {
@@ -239,15 +241,86 @@ its activities, exported or not, needs an intent filter for it:
 </activity>
 ```
 
-The activity reads the URL from its intent, as for any deep link. A URL that nothing in the
-application opens fails the request with `INVALID_INPUT`, and nothing is posted. The `url` of a
-layout and its `link` nodes are for iOS: the projection names them in `degradedFeatures`.
+The activity reads the URL from its intent, as for any deep link. Without such an activity
+liveupdate refuses to post a URL. For a content the request then fails with `INVALID_INPUT`, and
+nothing is posted. For a layout it does not fail: the snapshot is shown without its links, the
+notification opens the launch activity as before, and the record names `layout.url` and
+`layout.link` in `degradedFeatures`. That costs a second post with every snapshot, so declare the
+scheme.
+
+To learn in Rust that the person opened the application from a notification, hand the opening
+intent to liveupdate in that activity. The sink then receives `Event::Opened`, with the
+activity's id and key and the action that opened it, on the next `sync_events`:
+
+```kotlin
+import io.github.gon.liveupdate.LiveUpdateEvents
+
+override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    // A new intent, not one the system restored.
+    if (savedInstanceState == null) LiveUpdateEvents.opened(this, intent)
+}
+
+override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    LiveUpdateEvents.opened(this, intent)
+}
+```
 
 ### A last content that stays, a header clock, a lock screen version, branding
 
 They are members of the content too, each behind a capability of its own:
 [the table in the contract](contract.md#an-android-content). An end with the `after` policy keeps
 the last content on screen, no longer ongoing and no longer promoted, until its time.
+
+A layout gets two of them without a content. A timer beside a progress is the clock in the
+header. And a start may say what a secure lock screen shows of a private activity:
+
+```rust
+let mut options = AndroidOptions::new(AndroidVisibility::Private);
+options.public_version = Some(PublicVersion {
+    title: "Delivery".into(),
+    status: "On the way".into(),
+});
+start.android = Some(options);
+```
+
+### A foreground service
+
+Android shows one notification for a foreground service. An application that updates an activity
+from such a service, in the background, lets the service hold the activity's notification instead
+of a second one. The start asks for it:
+
+```rust
+let mut options = AndroidOptions::new(AndroidVisibility::Private);
+options.placement = Some(AndroidPlacement::Foreground);
+start.android = Some(options);
+let record = live.start_layout(start).await?;
+```
+
+The service, its type and its permission are the application's; liveupdate's AAR declares none.
+Start the activity first and the service second, and attach the service in Kotlin:
+
+```kotlin
+import io.github.gon.liveupdate.LiveUpdateForeground
+
+class DeliveryService : Service() {
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // The activity's notification becomes this service's. False when no activity has the placement.
+        if (!LiveUpdateForeground.attach(this, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)) stopSelf()
+        return START_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}
+
+// Once, for example in Application.onCreate: an end takes the service out of the foreground.
+LiveUpdateForeground.setListener { stopService(Intent(this, DeliveryService::class.java)) }
+```
+
+One running activity has the placement at a time: a second start with it is `SYSTEM_LIMIT`. A
+device that does not offer `foregroundPlacement` answers `UNSUPPORTED_FEATURE`. Without a service
+the notification is an ordinary one.
 
 ## 5. Permissions
 
@@ -401,8 +474,8 @@ fn main() {
   gets the update silently.
 - **Updates need the process.** Android has no push that updates a notification. In the
   background an application updates from a foreground service or from a data message that wakes
-  it. liveupdate can let such a service hold the notification; the contract has no member for
-  that placement yet, so a host that needs it starts the activity on `backend.engine()`.
+  it. A start with the foreground placement lets such a service hold the notification
+  ([A foreground service](#a-foreground-service)).
 - **Limits.** liveupdate keeps at most 32 active records and 128 ended ones, templates and layouts
   together. One more active activity answers `SYSTEM_LIMIT`.
 - **An update of the application.** Android removes an application's notifications when the
@@ -458,8 +531,14 @@ backend has files and the layout does not declare the tapped `actionId`.
 not written before the start or update, or it is larger than 1024 pixels a side or 1 MiB. Only the
 first shown `image` with a `file` source is used.
 
-**Parts of a layout are missing.** A notification shows a title, a status line, one progress or
-timer, up to three actions and one icon. The record's `degradedFeatures` names the rest.
+**Parts of a layout are missing.** A notification shows a title, a status line, a progress, a
+timer, up to three actions and one icon. The record's `degradedFeatures` names the rest. A picture
+with an accessibility label is shown as that text, and a button whose label is a picture needs
+one to become an action.
+
+**A layout's links do not open.** The record names `layout.url` or `layout.link`: no activity of
+the application declares the URL's scheme, or liveupdate does not take the URL (a scheme with a
+capital letter, or one of `intent`, `content`, `file`, `javascript`, `data`, `android-app`).
 
 **A start answers `SYSTEM_LIMIT`.** 32 activities are active. End the ones that are done.
 

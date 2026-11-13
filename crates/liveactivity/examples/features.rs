@@ -8,11 +8,12 @@
 //! ```
 
 use liveactivity::{
-    Accessibility, ActivityState, Alert, AndroidContent, AndroidPresentation, Bound, EndInput,
-    EndPolicy, Event, FeatureSupport, Layout, LayoutEndInput, LayoutPush, LayoutSnapshot,
-    LayoutStartInput, LayoutUpdateInput, LiveActivity, LiveActivityBackend, NotificationAction,
-    PermissionKind, PermissionState, PresentationStyle, ProgressSegment, ProgressStyle,
-    PublicVersion, Result, StartInput, TimerStyle, Transition, UpdateInput,
+    Accessibility, ActivityState, Alert, AndroidContent, AndroidOptions, AndroidPlacement,
+    AndroidPresentation, AndroidVisibility, Bound, EndInput, EndPolicy, Event, FeatureSupport,
+    Layout, LayoutEndInput, LayoutPush, LayoutSnapshot, LayoutStartInput, LayoutUpdateInput,
+    LiveActivity, LiveActivityBackend, NotificationAction, PermissionKind, PermissionState,
+    PresentationStyle, ProgressSegment, ProgressStyle, PublicVersion, Result, StartInput,
+    TimerStyle, Transition, UpdateInput,
     activitykit::{
         layout::{button, link, progress, text, vstack},
         values,
@@ -111,8 +112,9 @@ async fn layout(live: &LiveActivity) -> Result<String> {
     Ok(record.id)
 }
 
-/// Links, accessibility, motion and privacy: members of the layout, which iOS draws. Android opens the
-/// application from its notification and names what it left out.
+/// Links, accessibility, motion and privacy: members of the layout, which iOS draws. On Android the notification
+/// and its actions open the URLs, a label is the text of what a notification cannot draw, and the record names
+/// what was left out.
 async fn links_accessibility_and_motion(live: &LiveActivity) -> Result<()> {
     let layout = Layout {
         lock_screen: vstack([
@@ -143,7 +145,7 @@ async fn links_accessibility_and_motion(live: &LiveActivity) -> Result<()> {
     .into_inner();
     let start = LayoutStartInput::new("delivery:9", layout, LayoutSnapshot::new(0, values));
     let record = live.start_layout(start).await?;
-    // On Android: layout.transition, layout.link and layout.url.
+    // On Android the links open too, and the record names layout.transition.
     println!("left out: {:?}", record.degraded_features);
     Ok(())
 }
@@ -241,6 +243,32 @@ async fn android_links_and_extras(live: &LiveActivity, id: &str, ends_at: u64) -
     });
     live.update_layout(LayoutUpdateInput::new(id, snapshot))
         .await?;
+    Ok(())
+}
+
+/// Android options: what only Android reads of a start. A public version is what a secure lock screen shows in
+/// place of the content of a private activity. The foreground placement makes the notification the one that a
+/// foreground service of the application holds.
+async fn android_options(live: &LiveActivity, mut start: LayoutStartInput) -> Result<()> {
+    let capabilities = live.capabilities().await?;
+    let offered = capabilities.android_presentation.unwrap_or_default();
+    let mut options = AndroidOptions::new(AndroidVisibility::Private);
+    options.public_version = Some(PublicVersion {
+        title: "Delivery".into(),
+        status: "On the way".into(),
+    });
+    if offered.foreground_placement {
+        options.placement = Some(AndroidPlacement::Foreground);
+    }
+    start.android = Some(options);
+    let record = live.start_layout(start).await?;
+    if record
+        .degraded_features
+        .iter()
+        .any(|left| left == "publicVersion")
+    {
+        println!("this device shows no public version");
+    }
     Ok(())
 }
 
@@ -364,6 +392,10 @@ fn main() -> Result<()> {
                 url: None,
             },
             LayoutSnapshot::new(0, Default::default()),
+        );
+        println!(
+            "android options: {}",
+            code(android_options(&live, start.clone()).await)
         );
         println!("pushes: {}", code(pushes(&live, start).await));
         println!("end and sync: {}", code(end_and_sync(&live, "id").await));

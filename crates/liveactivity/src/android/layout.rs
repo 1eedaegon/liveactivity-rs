@@ -1,9 +1,12 @@
 //! A layout activity on Android: the projection of its lock screen tree and values onto a liveupdate schema-v2
 //! request, which liveupdate's renderer draws with Android's notification styles. Only the lock screen is walked,
-//! depth first in document order; a node shows when its `if` value is truthy and its `unless` value is not. What a
-//! node says to a screen reader is iOS's: Android reads the notification's title and text.
+//! depth first in document order; a node shows when its `if` value is truthy and its `unless` value is not.
+//!
+//! A notification has no label per node: Android reads its title and text. So what a node says to a screen reader
+//! is used where the notification would otherwise show nothing of the node: as the text of a node Android cannot
+//! draw, and as the title of a button or a link without a text.
 
-use crate::layout::{Element, ImageSource, Layout, LayoutSnapshot, Node, Value};
+use crate::layout::{Bindable, Element, ImageSource, Layout, LayoutSnapshot, Node, Value};
 use std::collections::BTreeMap;
 
 /// The progress style's one segment: a layout progress is a fraction, liveupdate's an integer up to the segments'
@@ -24,6 +27,10 @@ pub(crate) struct Environment<'a> {
     pub(crate) image: &'a dyn Fn(&str) -> Option<String>,
     /// Whether a locked screen shows the notification's content.
     pub(crate) public: bool,
+    /// Whether the device opens URLs from a notification and its actions.
+    pub(crate) links: bool,
+    /// Whether the device shows a clock in the header, beside a style.
+    pub(crate) chronometer: bool,
 }
 
 /// One layout snapshot as liveupdate takes it, and what the projection left out.
@@ -48,6 +55,8 @@ pub(crate) fn template(layout: &Layout) -> liveupdate::Template {
             Element::Progress { .. } => progress = true,
             Element::TimerText { .. } => timer = true,
             Element::Text { .. } if !in_button => texts += 1,
+            // A node Android cannot draw that says in words what it is: `walk` takes those words as a text.
+            element if !in_button && !drawn(element) && worded(node) => texts += 1,
             _ => {}
         },
     );
@@ -73,6 +82,7 @@ pub(crate) fn project(
     let values = &snapshot.values;
     let mut shown = Shown {
         public: environment.public,
+        links: environment.links,
         ..Shown::default()
     };
     walk(&layout.lock_screen, values, &mut shown);
@@ -108,11 +118,26 @@ pub(crate) fn project(
         }
         _ => liveupdate::PresentationStyle::Standard,
     };
-    // A timer that a Progress template does not draw is left out; a second progress or timer is left out by `walk`.
+    // Beside a progress the timer is the clock in the header, where the device has one. Elsewhere a timer that the
+    // progress style does not draw is left out; a second progress or timer is left out by `walk`.
+    let beside = environment.chronometer && matches!(template, liveupdate::Template::Progress);
+    let chronometer = shown
+        .timer
+        .filter(|_| beside)
+        .map(|timer| timer_style(Some(timer)));
     let mut degraded = shown.degraded;
-    if shown.timer.is_some() && !matches!(template, liveupdate::Template::Timer) {
+    if shown.timer.is_some()
+        && chronometer.is_none()
+        && !matches!(template, liveupdate::Template::Timer)
+    {
         note(&mut degraded, "timerText");
     }
+    // What a tap on the notification opens, where the device opens URLs and liveupdate takes this one.
+    let open_url = layout
+        .url
+        .as_ref()
+        .filter(|_| environment.links)
+        .and_then(|url| address(url, values));
 
     let large_icon = shown
         .files
@@ -135,8 +160,8 @@ pub(crate) fn project(
         (styled, "layout.styles"),
         (layout.background.is_some(), "layout.background"),
         (layout.keyline.is_some(), "layout.keyline"),
-        // The notification opens the application, not a URL of the layout.
-        (layout.url.is_some(), "layout.url"),
+        // Without it the notification opens the application, not a URL of the layout.
+        (layout.url.is_some() && open_url.is_none(), "layout.url"),
     ] {
         if part.0 {
             degraded.push(part.1.to_owned());
@@ -155,6 +180,8 @@ pub(crate) fn project(
                 large_icon: large_icon.map(liveupdate::IconSource::AppFile),
                 actions: shown.actions,
                 samsung_now_bar,
+                chronometer,
+                open_url,
                 ..liveupdate::AndroidPresentation::new(style)
             }),
         },
@@ -175,10 +202,15 @@ struct Shown {
     degraded: Vec<String>,
     /// Whether a locked screen shows the notification's content, and so what a node marks as private.
     public: bool,
+    /// Whether the device opens URLs, and so whether a link becomes an action.
+    links: bool,
+    /// How many links of the tree came so far, hidden ones counted: a link's id is its place among them.
+    links_seen: usize,
 }
 
 fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
     if !visible(node, values) {
+        shown.links_seen += links_in(node);
         return;
     }
     // A notification changes without a transition. One that a locked screen hides shows nothing private there.
@@ -194,10 +226,7 @@ fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
         | Element::Zstack { children, .. } => {
             children.iter().for_each(|child| walk(child, values, shown));
         }
-        Element::Text { .. } => match shown.texts.len() {
-            0 | 1 => shown.texts.push(text(node, values).unwrap_or_default()),
-            _ => note(&mut shown.degraded, "text"),
-        },
+        Element::Text { .. } => say(shown, text(node, values).unwrap_or_default()),
         Element::Progress { bind, .. } if shown.progress.is_none() => {
             shown.progress = Some(number(values.get(bind)).clamp(0.0, 1.0));
         }
@@ -217,38 +246,85 @@ fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
             ..
         } => shown.files.push(file.clone()),
         Element::Button { action_id, child } => {
-            let mut inside = Vec::new();
-            let label = button_label(child, values, shown.public, &mut inside);
-            // liveupdate takes each action id once.
-            let fresh = !shown.actions.iter().any(|action| &action.id == action_id);
-            match label {
-                Some(label) if fresh && shown.actions.len() < MAX_ACTIONS => {
-                    shown.actions.push(liveupdate::NotificationAction::new(
-                        action_id.clone(),
-                        cut(&label, MAX_ACTION_TITLE),
-                    ));
-                    inside
-                        .iter()
-                        .for_each(|kind| note(&mut shown.degraded, kind));
-                }
-                _ => note(&mut shown.degraded, "button"),
-            }
+            let (title, inside) = action_title(node, child, values, shown.public);
+            let action =
+                title.map(|title| liveupdate::NotificationAction::new(action_id.clone(), title));
+            act(shown, action, &inside, "button");
         }
-        element => note(&mut shown.degraded, kind(element)),
+        Element::Link { url, child } => {
+            shown.links_seen += 1;
+            let id = format!("link:{}", shown.links_seen);
+            let (title, inside) = action_title(node, child, values, shown.public);
+            // Where the device opens no URL, or liveupdate does not take this one, the link is left out.
+            let url = Some(url)
+                .filter(|_| shown.links)
+                .and_then(|url| address(url, values));
+            let action = title
+                .zip(url)
+                .map(|(title, url)| liveupdate::NotificationAction {
+                    open_url: Some(url),
+                    ..liveupdate::NotificationAction::new(id, title)
+                });
+            act(shown, action, &inside, "link");
+        }
+        // A second progress or timer: the notification has one of each.
+        element if drawn(element) => note(&mut shown.degraded, kind(element)),
+        // What Android cannot draw. Decoration is left out without a word; what says in words what it is becomes a
+        // text; the rest is named.
+        element => match &node.accessibility {
+            Some(accessibility) if accessibility.hidden == Some(true) => {}
+            _ => match spoken(node, values) {
+                Some(words) => say(shown, words),
+                None => note(&mut shown.degraded, kind(element)),
+            },
+        },
     }
 }
 
-/// The first shown text inside a button, which labels its action. `inside` gets what the action leaves out: every
-/// other shown node, a transition, and on a notification that a locked screen shows (`public`) a privacy mark.
-fn button_label(
-    node: &Node,
+/// Takes `words` as a text of the notification: the first is its title, the second its status, a third is left out.
+fn say(shown: &mut Shown, words: String) {
+    match shown.texts.len() {
+        0 | 1 => shown.texts.push(words),
+        _ => note(&mut shown.degraded, "text"),
+    }
+}
+
+/// Adds `action`, the action of a button or a link, and names what stands beside its title. liveupdate takes three
+/// actions and each id once: an action without a title, without room or with an id that is taken is left out and
+/// named as `kind`.
+fn act(
+    shown: &mut Shown,
+    action: Option<liveupdate::NotificationAction>,
+    inside: &[&'static str],
+    kind: &str,
+) {
+    let room = shown.actions.len() < MAX_ACTIONS;
+    match action {
+        Some(action) if room && shown.actions.iter().all(|other| other.id != action.id) => {
+            shown.actions.push(action);
+            inside
+                .iter()
+                .for_each(|kind| note(&mut shown.degraded, kind));
+        }
+        _ => note(&mut shown.degraded, kind),
+    }
+}
+
+/// The title of the action of `owner`, a button or a link, cut to liveupdate's length, and what the action leaves
+/// out of `child`. The title is the first shown text inside. Without one it is what the first picture inside says
+/// in words, and then what the owner says itself. Left out is every other shown node, a transition, and on a
+/// notification that a locked screen shows (`public`) a privacy mark; decoration is left out without a word.
+fn action_title(
+    owner: &Node,
+    child: &Node,
     values: &BTreeMap<String, Value>,
     public: bool,
-    inside: &mut Vec<&'static str>,
-) -> Option<String> {
-    let mut label = None;
-    let mut first = true;
-    visit_shown(node, values, &mut |node| {
+) -> (Option<String>, Vec<&'static str>) {
+    let mut first_text: Option<Option<String>> = None;
+    // The first picture with words, and its place among what is left out.
+    let mut worded_picture: Option<(usize, String)> = None;
+    let mut inside = Vec::new();
+    visit_shown(child, values, &mut |node| {
         if node.transition.is_some() {
             inside.push("transition");
         }
@@ -257,14 +333,119 @@ fn button_label(
         }
         match &node.element {
             Element::Vstack { .. } | Element::Hstack { .. } | Element::Zstack { .. } => {}
-            Element::Text { .. } if first => {
-                first = false;
-                label = text(node, values).filter(|text| !blank(text));
+            Element::Text { .. } if first_text.is_none() => {
+                first_text = Some(text(node, values).filter(|text| !blank(text)));
             }
-            element => inside.push(kind(element)),
+            _ if node
+                .accessibility
+                .as_ref()
+                .is_some_and(|accessibility| accessibility.hidden == Some(true)) => {}
+            element => {
+                if worded_picture.is_none()
+                    && let Some(words) = spoken(node, values)
+                {
+                    worded_picture = Some((inside.len(), words));
+                }
+                inside.push(kind(element));
+            }
         }
     });
-    label
+    let title = match (first_text.flatten(), worded_picture) {
+        (Some(text), _) => Some(text),
+        (None, Some((place, words))) => {
+            inside.remove(place);
+            Some(words)
+        }
+        (None, None) => spoken(owner, values),
+    };
+    (title.map(|title| cut(&title, MAX_ACTION_TITLE)), inside)
+}
+
+/// What a node says in words to a screen reader, as a notification can show it: its label, its value, or both.
+/// A member bound to a value reads as a text shows that value, and says nothing when the value is empty.
+fn spoken(node: &Node, values: &BTreeMap<String, Value>) -> Option<String> {
+    let accessibility = node.accessibility.as_ref()?;
+    let words: Vec<String> = [&accessibility.label, &accessibility.value]
+        .into_iter()
+        .flatten()
+        .filter_map(|member| resolved(member, values))
+        .filter(|words| !blank(words))
+        .collect();
+    (!words.is_empty()).then(|| words.join(", "))
+}
+
+/// Whether a node has a label or a value and is no decoration: what [`spoken`] reads, values aside.
+fn worded(node: &Node) -> bool {
+    node.accessibility.as_ref().is_some_and(|accessibility| {
+        accessibility.hidden != Some(true)
+            && (accessibility.label.is_some() || accessibility.value.is_some())
+    })
+}
+
+/// Whether a notification shows something of the element itself: `walk` has an arm for it.
+fn drawn(element: &Element) -> bool {
+    matches!(
+        element,
+        Element::Vstack { .. }
+            | Element::Hstack { .. }
+            | Element::Zstack { .. }
+            | Element::Text { .. }
+            | Element::Progress { .. }
+            | Element::TimerText { .. }
+            | Element::Button { .. }
+            | Element::Link { .. }
+            | Element::Image {
+                source: ImageSource::File { .. },
+                ..
+            }
+    )
+}
+
+/// A text member as it reads now: the literal, or the value it is bound to as a text shows it.
+fn resolved(member: &Bindable<String>, values: &BTreeMap<String, Value>) -> Option<String> {
+    match member {
+        Bindable::Literal(text) => Some(text.clone()),
+        Bindable::Bound(bound) => values.get(&bound.bind).map(display),
+    }
+}
+
+/// The URL of a layout or of a link as it reads now, when it is one liveupdate opens: a lowercase scheme that it
+/// does not refuse, and printable ASCII.
+fn address(url: &Bindable<String>, values: &BTreeMap<String, Value>) -> Option<String> {
+    let url = resolved(url, values)?;
+    let opened = liveupdate::AndroidPresentation {
+        open_url: Some(url.clone()),
+        ..liveupdate::AndroidPresentation::new(liveupdate::PresentationStyle::Standard)
+    };
+    opened.validate().is_ok().then_some(url)
+}
+
+/// How many links the tree under `node` has, `node` included.
+fn links_in(node: &Node) -> usize {
+    let mut links = 0;
+    visit_all(node, false, &mut |node, _| {
+        if matches!(node.element, Element::Link { .. }) {
+            links += 1;
+        }
+    });
+    links
+}
+
+/// Whether a layout could use what only some devices offer: a URL or a link, and a timer beside a progress. A
+/// layout that could not costs no question to the device.
+pub(crate) fn could_use(layout: &Layout) -> (bool, bool) {
+    let (mut link, mut progress, mut timer) = (layout.url.is_some(), false, false);
+    visit_all(
+        &layout.lock_screen,
+        false,
+        &mut |node, _| match &node.element {
+            Element::Link { .. } => link = true,
+            Element::Progress { .. } => progress = true,
+            Element::TimerText { .. } => timer = true,
+            _ => {}
+        },
+    );
+    (link, progress && timer)
 }
 
 /// The timer of a Timer template when none shows: the first in the tree, with its keys' current values.

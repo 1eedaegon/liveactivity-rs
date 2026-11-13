@@ -35,7 +35,8 @@ Each requirement is a row of `docs/requirements.md` with the test that is its ev
 
 ## Still planned
 
-Not built here. Each needs a decision of this crate, not only a newer engine, and gets its own requirements.
+Not built in this change. Each needs a decision of this crate, not only a newer engine, and gets its own
+requirements. The first five rows are built since: [a layout on Android](../layout-on-android/PRD.md).
 
 | Feature | Engine | What this crate would do |
 | --- | --- | --- |

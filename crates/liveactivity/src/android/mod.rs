@@ -109,7 +109,7 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
         &self.engine
     }
 
-    /// Drains the taps and dismissals Android queued and hands each to the event sink, oldest first. Answers how
+    /// Drains the taps, dismissals and openings Android queued and hands each to the event sink, oldest first. Answers how
     /// many it handed over. A host calls this, or `sync_events`, when its Android side signals a stored event and when the
     /// application starts or resumes: liveupdate's receiver stores taps also while the app does not run.
     ///
@@ -143,7 +143,12 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
                         activity_key: None,
                         state: crate::ActivityState::Dismissed,
                     })),
-                    // A kind the contract has no event for, such as an activity that was opened.
+                    EventKind::Opened { action_id } => Some(Event::Opened(crate::OpenedEvent {
+                        activity_id: event.activity_id,
+                        activity_key: None,
+                        action_id,
+                    })),
+                    // A kind that a later liveupdate adds, and the contract has no event for.
                     _ => None,
                 })
                 .collect(),

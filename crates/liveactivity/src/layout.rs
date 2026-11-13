@@ -50,6 +50,19 @@ pub enum AndroidVisibility {
     Secret,
 }
 
+/// How Android keys the notification of an activity.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AndroidPlacement {
+    /// A notification of its own, beside the application's others (the default).
+    Tagged,
+    /// The notification that a foreground service of the application holds, so that the service shows no second
+    /// one. One running activity has this placement at a time. The service is the application's: it attaches
+    /// itself with liveupdate's `LiveUpdateForeground` on the Android side.
+    Foreground,
+}
+
 /// Options of a start that only Android reads. iOS ignores them. More may come: build it with
 /// [`AndroidOptions::new`].
 #[non_exhaustive]
@@ -58,12 +71,25 @@ pub enum AndroidVisibility {
 pub struct AndroidOptions {
     /// Lock screen visibility of the notification.
     pub visibility: AndroidVisibility,
+    /// What a secure lock screen shows in place of the content, for a private activity. It goes with every
+    /// snapshot that has no public version of its own. Where the device offers none, the record names
+    /// `publicVersion` in `degradedFeatures`.
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
+    pub public_version: Option<PublicVersion>,
+    /// How Android keys the notification; tagged when absent. A device that does not offer the foreground
+    /// placement answers `UNSUPPORTED_FEATURE`.
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
+    pub placement: Option<AndroidPlacement>,
 }
 
 impl AndroidOptions {
-    /// The options with this lock screen visibility.
+    /// The options with this lock screen visibility, and nothing else.
     pub fn new(visibility: AndroidVisibility) -> Self {
-        Self { visibility }
+        Self {
+            visibility,
+            public_version: None,
+            placement: None,
+        }
     }
 }
 
@@ -447,11 +473,30 @@ impl LayoutStartInput {
     }
 }
 
+impl LayoutStartInput {
+    /// The rule of the public version among the Android options: liveupdate's bounds for its two texts, and a
+    /// private activity, since a locked screen shows the content of any other or nothing of it.
+    fn public_version_of_the_start_fits(&self) -> bool {
+        let Some(android) = &self.android else {
+            return true;
+        };
+        let Some(public_version) = &android.public_version else {
+            return true;
+        };
+        let bounded = AndroidPresentation {
+            public_version: Some(public_version.clone()),
+            ..AndroidPresentation::new(PresentationStyle::Standard)
+        };
+        android.visibility == AndroidVisibility::Private && bounded.validate().is_ok()
+    }
+}
+
 impl Validate for LayoutStartInput {
     fn validate(&self) -> Result<()> {
         self.validate_contract()?;
         self.snapshot.beside_the_layout()?;
         require(self.takes_public_version_of(&self.snapshot))?;
+        require(self.public_version_of_the_start_fits())?;
         unmarked(&self.snapshot)
     }
 }

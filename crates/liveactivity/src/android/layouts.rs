@@ -11,9 +11,9 @@ use super::{
 };
 use crate::{
     ActionEvent, ActivityState, Backend, EndPolicy, Error, Event, LayoutActivityRecord,
-    LayoutEndInput, LayoutSnapshot, LayoutStartInput, LayoutUpdateInput, Result, StateEvent,
-    Visibility,
-    layout::{AndroidVisibility, Element, Node},
+    LayoutEndInput, LayoutSnapshot, LayoutStartInput, LayoutUpdateInput, OpenedEvent, Result,
+    StateEvent, Visibility,
+    layout::{AndroidOptions, AndroidPlacement, AndroidVisibility, Element, Node},
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, io::Read, path::PathBuf, sync::Mutex};
@@ -25,6 +25,8 @@ const MAX_ICON_BYTES: u64 = 1_048_576;
 const PENDING: &str = "pending:";
 /// What a record names when an update asked for an alert on a device that alerts once.
 const ALERT: &str = "alert";
+/// What a record names when the start gave a public version on a device that shows none.
+const PUBLIC_VERSION: &str = "publicVersion";
 /// How many action ids of its Android contents an activity keeps.
 const ACTIONS_KEPT: usize = 32;
 
@@ -115,6 +117,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         let input = LayoutStartInput {
             push: None,
             snapshot: for_android(input.snapshot),
+            android: input.android.map(by_default),
             ..input
         };
         let _guard = self.lock.lock().map_err(|_| Error::native())?;
@@ -134,35 +137,57 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                 "a running activity of this key started with another request",
             ));
         }
-        // The style of the first snapshot: its content's, or else the one the layout projects to.
+        // The same request as a running activity that Android shows is that activity, whatever this device would
+        // make of the request now: what a projection uses follows what the device offers, which may have changed.
+        // One that Android does not show yet goes on to liveupdate, which posts it again.
+        let shown_already = records
+            .iter()
+            .filter(|record| running(record) && record.state != liveupdate::ActivityState::Unknown)
+            .find_map(|record| {
+                let entry = entries.get(&record.id)?;
+                (entry.origin == input).then_some((record, entry))
+            });
+        if let Some((record, entry)) = shown_already {
+            return Ok(layout_record(record, entry));
+        }
         let mut offered = Offered::of(updates);
-        let projection = self.sent(&mut offered, &input, &input.snapshot, false)?;
-        let template = projection
-            .snapshot
-            .template()
-            .map_err(android_liveupdate::error)?;
-        let request = liveupdate::StartRequest {
-            activity_key: input.activity_key.clone(),
-            schema_version: 2,
-            template,
-            fallback: android_liveupdate::fallback(input.fallback),
-            visibility: visibility(&input),
-            snapshot: projection.snapshot,
-            placement: liveupdate::Placement::Tagged,
-        };
         let pending = format!("{PENDING}{}", input.activity_key);
-        let entry = Entry {
-            origin: input.clone(),
-            snapshot: input.snapshot.clone(),
-            degraded: projection.degraded,
-            actions: with_actions(Vec::new(), &input.snapshot),
+        // The second turn, when there is one, sends the projection without its links: see `unlinked`.
+        let mut links = true;
+        let (record, entry) = loop {
+            let projection = self.sent(&mut offered, &input, &input.snapshot, false, links)?;
+            let retry = links && unlinked(&input.snapshot, &projection.snapshot);
+            // The style of the first snapshot: its content's, or else the one the layout projects to.
+            let template = projection
+                .snapshot
+                .template()
+                .map_err(android_liveupdate::error)?;
+            let request = liveupdate::StartRequest {
+                activity_key: input.activity_key.clone(),
+                schema_version: 2,
+                template,
+                fallback: android_liveupdate::fallback(input.fallback),
+                visibility: visibility(&input),
+                snapshot: projection.snapshot,
+                placement: placement(&input),
+            };
+            let entry = Entry {
+                origin: input.clone(),
+                snapshot: input.snapshot.clone(),
+                degraded: projection.degraded,
+                actions: with_actions(Vec::new(), &input.snapshot),
+            };
+            entries.insert(pending.clone(), entry.clone());
+            self.store.save(&entries)?;
+            // A failure leaves the pending entry: the next reconciliation adopts it when liveupdate posted the
+            // activity after all (an answer lost on the way back), and drops it otherwise, as after a content
+            // that Android refused to post, of which liveupdate keeps no receipt.
+            match updates.start(request) {
+                Ok(record) => break (record, entry),
+                Err(error) if retry && refuses_links(&error) => links = false,
+                Err(error) => return Err(android_liveupdate::error(error)),
+            }
         };
-        entries.insert(pending.clone(), entry.clone());
-        self.store.save(&entries)?;
-        // A failure leaves the pending entry: the next reconciliation adopts it when liveupdate posted the activity
-        // after all (an answer lost on the way back), and drops it otherwise, as after a content that Android
-        // refused to post, of which liveupdate keeps no receipt.
-        let record = updates.start(request).map_err(android_liveupdate::error)?;
         entries.remove(&pending);
         // The same start again answers the running activity, whose entry has the latest values.
         let entry = entries.entry(record.id.clone()).or_insert(entry).clone();
@@ -238,7 +263,8 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
     }
 
     /// The events in liveupdate's queue, as the backend passes them on, oldest first: the taps, with the
-    /// activity's key and without those on action ids that the activity never declared, and the dismissals.
+    /// activity's key and without those on action ids that the activity never declared, the dismissals and the
+    /// openings.
     pub(crate) fn events(&self, updates: &liveupdate::LiveUpdate<D>) -> Result<Vec<Event>> {
         // The entries are read before the queue is drained, under the lock, so that a start settles first and a
         // tap on its activity finds the entry; a store that cannot be read loses no event, only the keys.
@@ -267,7 +293,16 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                         activity_key,
                         state: ActivityState::Dismissed,
                     })),
-                    // A kind the contract has no event for, such as an activity that was opened.
+                    // An opening is the host's report of an intent that liveupdate made and checked: its
+                    // action is passed on as it is, declared by the activity's present content or not.
+                    liveupdate::EventKind::Opened { action_id } => {
+                        Some(Event::Opened(OpenedEvent {
+                            activity_id: event.activity_id,
+                            activity_key,
+                            action_id,
+                        }))
+                    }
+                    // A kind that a later liveupdate adds, and the contract has no event for.
                     _ => None,
                 }
             })
@@ -307,25 +342,32 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
             };
         }
         let mut offered = Offered::of(updates);
-        let projection = self.sent(&mut offered, &entry.origin, &snapshot, alert)?;
-        // Another style than the one the activity shows needs a device that changes styles. The request is valid;
-        // a device that keeps the style cannot show it.
-        let style = projection.snapshot.template();
-        if style.map_err(android_liveupdate::error)? != current.template
-            && !offered.get()?.style_change
-        {
-            return Err(Error::unsupported_feature(
-                "This device keeps the notification style an activity shows",
-            ));
-        }
-        let record = updates
-            .update(id, projection.snapshot)
-            .map_err(android_liveupdate::error)?;
+        // The second turn, when there is one, sends the projection without its links: see `unlinked`.
+        let mut links = true;
+        let (record, degraded) = loop {
+            let projection = self.sent(&mut offered, &entry.origin, &snapshot, alert, links)?;
+            let retry = links && unlinked(&snapshot, &projection.snapshot);
+            // Another style than the one the activity shows needs a device that changes styles. The request is
+            // valid; a device that keeps the style cannot show it.
+            let style = projection.snapshot.template();
+            if style.map_err(android_liveupdate::error)? != current.template
+                && !offered.get()?.style_change
+            {
+                return Err(Error::unsupported_feature(
+                    "This device keeps the notification style an activity shows",
+                ));
+            }
+            match updates.update(id, projection.snapshot) {
+                Ok(record) => break (record, projection.degraded),
+                Err(error) if retry && refuses_links(&error) => links = false,
+                Err(error) => return Err(android_liveupdate::error(error)),
+            }
+        };
         let entry = Entry {
             origin: entry.origin.clone(),
             actions: with_actions(entry.actions.clone(), &snapshot),
             snapshot,
-            degraded: projection.degraded,
+            degraded,
         };
         entries.insert(id.to_owned(), entry);
         self.store.save(entries)?;
@@ -369,15 +411,18 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
     /// What liveupdate is sent for `snapshot` on this device, and what the record names as left out of it. A
     /// content that uses what the device does not offer cannot be shown as given, and is refused. An alert, asked
     /// for by the update or by the content itself, marks the revision as one that alerts where the device alerts
-    /// again; elsewhere the revision is silent and `alert` is named, until the next snapshot.
+    /// again; elsewhere the revision is silent and `alert` is named, until the next snapshot. The public version
+    /// of the start goes with a snapshot that has none of its own, where the device shows one; elsewhere
+    /// `publicVersion` is named. `links` says whether a projection may give the notification URLs to open.
     fn sent(
         &self,
         offered: &mut Offered<'_, D>,
         input: &LayoutStartInput,
         snapshot: &LayoutSnapshot,
         alert: bool,
+        links: bool,
     ) -> Result<android_layout::Projection> {
-        let shown = self.shown(input, snapshot);
+        let shown = self.shown(offered, input, snapshot, links)?;
         let presentation = shown.snapshot.presentation.as_ref();
         let needed = presentation.map(extensions).unwrap_or_default();
         if !needed.is_empty() {
@@ -390,12 +435,24 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         }
         let asked = alert || presentation.is_some_and(|presentation| presentation.alert);
         let alerts = asked && offered.get()?.alert;
+        // The public version of the start, for a snapshot that has none of its own.
+        let of_the_start = input
+            .android
+            .as_ref()
+            .and_then(|android| android.public_version.as_ref())
+            .filter(|_| presentation.is_some_and(|shown| shown.public_version.is_none()));
+        let public_version = match of_the_start {
+            Some(version) if offered.get()?.public_version => Some(version.clone()),
+            _ => None,
+        };
+        let unshown = of_the_start.is_some() && public_version.is_none();
         Ok(android_layout::Projection {
-            snapshot: alerting(shown.snapshot, alerts),
+            snapshot: marked(shown.snapshot, alerts, public_version),
             degraded: shown
                 .degraded
                 .into_iter()
                 .chain((asked && !alerts).then(|| ALERT.to_owned()))
+                .chain(unshown.then(|| PUBLIC_VERSION.to_owned()))
                 .collect(),
         })
     }
@@ -404,37 +461,51 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
     /// in the style the layout projects to with every snapshot.
     fn shown(
         &self,
+        offered: &mut Offered<'_, D>,
         input: &LayoutStartInput,
         snapshot: &LayoutSnapshot,
-    ) -> android_layout::Projection {
+        links: bool,
+    ) -> Result<android_layout::Projection> {
         match &snapshot.android {
-            Some(content) => android_layout::Projection {
+            Some(content) => Ok(android_layout::Projection {
                 snapshot: content.snapshot(snapshot.revision, snapshot.stale_at),
                 degraded: Vec::new(),
-            },
-            None => self.project(input, snapshot),
+            }),
+            None => self.project(offered, input, snapshot, links),
         }
     }
 
+    /// The projection of the layout, with what the device offers of links and of a clock beside a style. The
+    /// device is asked only for a layout that could use one of them.
     fn project(
         &self,
+        offered: &mut Offered<'_, D>,
         input: &LayoutStartInput,
         snapshot: &LayoutSnapshot,
-    ) -> android_layout::Projection {
+        links: bool,
+    ) -> Result<android_layout::Projection> {
+        let (linked, clocked) = android_layout::could_use(&input.layout);
+        let device = if (links && linked) || clocked {
+            offered.get()?
+        } else {
+            liveupdate::PresentationCapabilities::default()
+        };
         let image = |name: &str| self.image(name);
         let environment = Environment {
             app_name: &self.settings.app_name,
             samsung_now_bar: self.settings.samsung_now_bar,
             image: &image,
             public: visibility(input) == liveupdate::Visibility::Public,
+            links: links && device.links,
+            chronometer: device.chronometer,
         };
-        android_layout::project(
+        Ok(android_layout::project(
             &input.layout,
             input.styles.is_some(),
             snapshot,
             android_layout::template(&input.layout),
             &environment,
-        )
+        ))
     }
 
     /// The app-file path of a picture `write_image` wrote, when liveupdate can draw it.
@@ -527,16 +598,59 @@ fn extensions(presentation: &liveupdate::AndroidPresentation) -> Vec<(&'static s
         .collect()
 }
 
-/// `snapshot` as a revision that alerts, or as one that does not.
-fn alerting(snapshot: liveupdate::Snapshot, alerts: bool) -> liveupdate::Snapshot {
+/// `snapshot` as a revision that alerts or as one that does not, and with `public_version` when it has none of
+/// its own.
+fn marked(
+    snapshot: liveupdate::Snapshot,
+    alerts: bool,
+    public_version: Option<liveupdate::PublicVersion>,
+) -> liveupdate::Snapshot {
     liveupdate::Snapshot {
         presentation: snapshot
             .presentation
             .map(|presentation| liveupdate::AndroidPresentation {
                 alert: alerts,
+                public_version: presentation.public_version.or(public_version),
                 ..presentation
             }),
         ..snapshot
+    }
+}
+
+/// Whether `sent`, what a layout snapshot projected to, has URLs that it can be sent without. Only the device
+/// knows whether an activity of the application opens a URL, and liveupdate refuses a post whose URL none opens.
+/// A layout that iOS takes is not refused for that: it is sent again without its links, which the record then
+/// names. An Android content is the application's own word for Android and is never changed.
+fn unlinked(snapshot: &LayoutSnapshot, sent: &liveupdate::Snapshot) -> bool {
+    snapshot.android.is_none()
+        && sent.presentation.as_ref().is_some_and(|shown| {
+            shown.open_url.is_some() || shown.actions.iter().any(|action| action.open_url.is_some())
+        })
+}
+
+/// Whether liveupdate's answer may be about the links of a projection: the device refused the post, or the
+/// activity runs already and began without its links, so that the same start with them reads as another request.
+fn refuses_links(error: &liveupdate::Error) -> bool {
+    matches!(
+        error.code,
+        liveupdate::ErrorCode::InvalidInput | liveupdate::ErrorCode::Conflict
+    )
+}
+
+/// The options as they are kept and compared: a placement that names the default is the default.
+fn by_default(options: AndroidOptions) -> AndroidOptions {
+    AndroidOptions {
+        placement: options
+            .placement
+            .filter(|placement| *placement != AndroidPlacement::Tagged),
+        ..options
+    }
+}
+
+fn placement(input: &LayoutStartInput) -> liveupdate::Placement {
+    match input.android.as_ref().and_then(|android| android.placement) {
+        Some(AndroidPlacement::Foreground) => liveupdate::Placement::Foreground,
+        _ => liveupdate::Placement::Tagged,
     }
 }
 

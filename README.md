@@ -72,12 +72,13 @@ cargo run -p liveactivity --example features --features testkit
 | [Progress and timer](#progress-and-timer-activities) | `start`, `update`, `end`, `list` | ✓ | ✓ |
 | [Layouts](#layout-activities) | `start_layout`, `update_layout`, `end_layout`, `list_layout` | ✓ | ✓ projected onto a notification |
 | [Buttons and taps](#buttons-and-taps) | a `button` node, `Event::Action` | ✓ | ✓ up to three |
-| [Links](#links-accessibility-and-motion) | a `link` node, `Layout.url` | ✓ | through an [Android content](#android-content); named as left out of a layout |
-| [Accessibility, motion, privacy](#links-accessibility-and-motion) | members of a node and of a style | ✓ | a notification has none; motion and privacy are named as left out |
+| [Links](#links-accessibility-and-motion) | a `link` node, `Layout.url` | ✓ | ✓ the notification and its actions open them, where the device opens URLs |
+| [Accessibility, motion, privacy](#links-accessibility-and-motion) | members of a node and of a style | ✓ | a label is the text of what a notification cannot draw; motion and privacy are named as left out |
 | [Alerts](#alerts-and-relevance) | `LayoutUpdateInput.alert` | ✓ | ✓ where the device alerts again; else silent, reported as `alert` |
 | [Relevance](#alerts-and-relevance) | `LayoutSnapshot.relevance` | ✓ | ignored |
 | [Android content](#android-content) | `LayoutSnapshot.android` | ignored | ✓ |
 | [A last content that stays](#ending) | `EndPolicy::After` | ✓ up to four hours | ✓ where the device offers it |
+| [A lock screen version, a foreground service](#android-options) | `LayoutStartInput.android` | ignored | ✓ where the device offers them |
 | [Images](#images) | `write_image`, an `image` node | ✓ needs an App Group | ✓ as the large icon |
 | [Pushes](#pushes) | `LayoutStartInput.push`, `push_tokens` | ✓ | none |
 | [Events](#events) | the event sink, `sync_events` | ✓ as they come | ✓ on `sync_events` |
@@ -201,17 +202,28 @@ let layout = Layout {
     url: Some("myapp://delivery/9".into()),
 };
 let record = live.start_layout(start).await?;
-// On Android: layout.transition, layout.link and layout.url.
+// On Android the links open too, and the record names layout.transition.
 println!("left out: {:?}", record.degraded_features);
 ```
 
-The application receives a URL as any URL it is opened with (`onOpenURL` on
-iOS); no event reports it. A style's `content_transition` says how its text
-changes with an update, and `IslandExpanded::priority`,
-`IslandExpanded::below_if_too_wide` and `Island::margins` are the Dynamic
-Island's own options. On Android a notification opens the application, so the
-projection shows no link: say where the notification leads with
-[an Android content](#android-content).
+The application receives a URL as any URL it is opened with: `onOpenURL` on
+iOS, the intent of the activity that declares the URL's scheme on Android. A
+style's `content_transition` says how its text changes with an update, and
+`IslandExpanded::priority`, `IslandExpanded::below_if_too_wide` and
+`Island::margins` are the Dynamic Island's own options.
+
+On Android the same layout gives the notification what it can show of this:
+
+- `Layout.url` is what a tap on the notification opens, and a `link` is an
+  action that opens its URL. When nothing in the application opens a URL the
+  request does not fail: the links are left out and named in
+  `degraded_features`.
+- A timer beside a progress is the clock in the notification's header.
+- A node that a notification cannot draw, such as a symbol or a gauge, is shown
+  as the text of its label and value. A button whose label is a symbol is
+  titled by the symbol's label; without one it is no action.
+- A node with `Accessibility::new().hidden()` is decoration and is left out
+  without being named.
 
 ### Alerts and relevance
 
@@ -315,6 +327,33 @@ device offers `style_change`; elsewhere that is `UNSUPPORTED_FEATURE`, and the
 activity keeps what it shows. The backend needs the app's files for a content:
 see [Platform setup](#platform-setup). `Timer` is `liveactivity::liveupdate::Timer`.
 
+### Android options
+
+What only Android reads of a start. iOS ignores it.
+
+```rust
+let mut options = AndroidOptions::new(AndroidVisibility::Private);
+// What a secure lock screen shows in place of the content of a private activity.
+options.public_version = Some(PublicVersion {
+    title: "Delivery".into(),
+    status: "On the way".into(),
+});
+// The notification is the one a foreground service of the application holds.
+if offered.foreground_placement {
+    options.placement = Some(AndroidPlacement::Foreground);
+}
+start.android = Some(options);
+let record = live.start_layout(start).await?;
+if record.degraded_features.iter().any(|left| left == "publicVersion") {
+    println!("this device shows no public version");
+}
+```
+
+The public version goes with every snapshot that has none of its own. One
+running activity has the foreground placement at a time, and a device that
+does not offer it answers `UNSUPPORTED_FEATURE`. The service is the
+application's: [docs/android-setup.md](docs/android-setup.md#a-foreground-service).
+
 ### Ending
 
 ```rust
@@ -376,6 +415,7 @@ started as `Event::Started`. The steps are in
 | `Event::PushToken` | an activity got a push token, or a new one | ✓ | |
 | `Event::PushToStartToken` | the app got its push-to-start token | ✓ | |
 | `Event::Permissions` | the person changed what the app may do | ✓ | |
+| `Event::Opened` | the person opened the application from a notification | the application gets the URL itself | ✓ when the host reports the opening intent |
 
 The enum may grow: match with a `_` arm. An activity is over when a `State`
 event says `ended` or `dismissed`, on either platform:

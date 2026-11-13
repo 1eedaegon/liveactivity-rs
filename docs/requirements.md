@@ -129,11 +129,21 @@ Evidence: `ios::tests::req_i_001_a_relevance_reaches_the_kit_and_the_record_repo
 
 ## REQ-I-002 Alert of an update
 
-The alert of an update reaches ActivityKit. Android updates silently and names `alert` in the record's
-`degradedFeatures`.
+The alert of an update reaches ActivityKit. Android alerts again with that revision where the device offers
+`alert`; elsewhere it updates silently and names `alert` in the record's `degradedFeatures`.
 
 Evidence: `ios::tests::req_i_002_an_alert_reaches_the_kit_with_its_update` and
-`exchange::req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection`.
+`exchange::req_i_002_an_alert_alerts_on_android_where_the_device_offers_it`.
+
+## REQ-I-003 The iOS surface of a layout
+
+What activitykit 0.4 added to a layout reaches ActivityKit as written: a node's `accessibility`, `transition` and
+`privacy`, the `link` node, the layout's `url`, a style's `contentTransition`, and the island's `priority`,
+`belowIfTooWide` and `margins`. A request that breaks one of activitykit's rules for them is `INVALID_INPUT` on
+every platform.
+
+Evidence: `ios::tests::req_i_003_the_ios_surface_of_a_layout_reaches_the_kit` and
+`contract::req_i_003_a_wrong_member_of_the_ios_surface_reaches_no_backend`.
 
 ## REQ-E-002 Started, state and permission events
 
@@ -159,9 +169,50 @@ Evidence: `exchange::req_a_002_taps_of_a_content_and_dismissals_reach_the_sink`.
 
 ## REQ-A-003 Style support in the capabilities
 
-Capabilities report which notification styles the device draws, when the Android backend runs layouts.
+Capabilities report which notification styles the device draws and which extensions it offers, when the Android
+backend runs layouts. `foregroundPlacement` is false: the contract has no member that asks for it.
 
 Evidence: `exchange::req_a_003_capabilities_report_the_styles_the_device_draws`.
+
+## REQ-A-004 What Android leaves out of the iOS surface
+
+The projection names `layout.link` for a shown link, whose label it does not show, `layout.url` for a layout with
+a URL, `layout.transition` for a shown node with a transition, and `layout.privacy` for a shown node marked
+sensitive when a locked screen shows the notification's content. Accessibility members are named nowhere: they
+are read by iOS only.
+
+Evidence: `android::layout::tests::req_a_004_the_projection_names_what_android_leaves_out_of_the_ios_surface`
+and `exchange::req_a_004_a_public_activity_names_the_privacy_a_notification_cannot_keep`.
+
+## REQ-A-005 A style that changes between snapshots
+
+A layout projects to its own style with every snapshot. A snapshot of another style than the one the activity
+shows is shown where the device offers `styleChange`, and is `UNSUPPORTED_FEATURE` elsewhere.
+
+Evidence: `exchange::req_a_005_a_snapshot_of_another_style_is_shown_where_the_device_changes_styles`.
+
+## REQ-A-006 An end that keeps the last content
+
+`EndPolicy::After` keeps the last content of a template or a layout activity on Android until its time, where the
+device offers `delayedEnd`. Elsewhere it is `UNSUPPORTED_FEATURE` and the activity stays. An end sent again
+answers the record, with or without a final content, which an activity that is over does not take; without a
+time it removes a last content that is still shown.
+
+Evidence: `exchange::req_a_006_a_delayed_end_keeps_the_last_content_where_the_device_offers_it`.
+
+## REQ-A-007 Extensions of an Android content
+
+An Android content takes what liveupdate 0.2 added to a presentation: the URL a tap opens, an action that opens a
+URL, a clock in the header, a revision that alerts, a public version, a small icon, an accent color and a sub
+text. A start that gives a public version to an activity that is not private is `INVALID_INPUT` on every
+platform. A content that uses a member the device does not offer is `UNSUPPORTED_FEATURE` on Android, except the
+alert, which is left out and named in `degradedFeatures`. A content that Android refuses when it posts it, such
+as one whose URL nothing in the application opens, is `INVALID_INPUT`: a start that is refused leaves no activity
+and its key free, and an update that is refused leaves the activity as it is shown.
+
+Evidence: `layout::tests::req_a_007_a_content_takes_the_extensions_of_a_presentation`,
+`exchange::req_a_007_the_extensions_of_a_content_reach_android` and
+`exchange::req_a_007_a_content_that_android_refuses_at_the_post_leaves_nothing_behind`.
 
 ## REQ-N-001 No framework in the crate
 

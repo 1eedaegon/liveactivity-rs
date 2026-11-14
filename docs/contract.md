@@ -167,8 +167,11 @@ The policy is `{ "kind": "immediate" }`, `{ "kind": "default" }` or
 | `default` | keeps it on the Lock Screen for up to four hours | removes the notification |
 | `after` | keeps it until `at` or four hours after the end, whichever comes first; a past time removes it at once | keeps the last content, no longer ongoing, until `at`, where the device offers `delayedEnd`; `UNSUPPORTED_FEATURE` elsewhere, and the activity stays |
 
-The answer is the record with `"state": "ended"`. A template end takes no final content. On Android
-an end without a time, sent again, removes a last content that is still shown.
+The answer is the record with `"state": "ended"`. On iOS it says so also when ActivityKit has
+already reported the activity as `dismissed`: after an end that removes it at once, the sink can
+hear `dismissed` before the answer comes, and the list says `dismissed` then. A template end takes
+no final content. On Android an end without a time, sent again, removes a last content that is still
+shown.
 
 ### list
 

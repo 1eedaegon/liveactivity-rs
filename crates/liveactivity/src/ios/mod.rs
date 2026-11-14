@@ -449,7 +449,12 @@ impl<K: Kit> Apple<K> {
         let handle = self.find(&input.id, Kind::is_layout).await?;
         handle.end(end_spec(input.policy, input.snapshot)).await?;
         self.keep_ended(&handle);
-        Ok(layout_record(&handle))
+        // The handle says what ActivityKit reported last, which can be `dismissed` by now: that report follows an
+        // end that removes the activity at once. The answer of an end says `ended`.
+        Ok(LayoutActivityRecord {
+            state: ActivityState::Ended,
+            ..layout_record(&handle)
+        })
     }
 
     pub(crate) async fn list_layout(&self) -> Result<Vec<LayoutActivityRecord>> {
@@ -486,7 +491,12 @@ impl<K: Kit> Apple<K> {
         let handle = self.find(&input.id, Kind::is_template).await?;
         handle.end(end_spec(input.policy, None)).await?;
         self.keep_ended(&handle);
-        template_record(&handle).ok_or_else(Error::native)
+        let record = template_record(&handle).ok_or_else(Error::native)?;
+        // As for a layout: `ended`, whatever ActivityKit reported since.
+        Ok(ActivityRecord {
+            state: ActivityState::Ended,
+            ..record
+        })
     }
 
     pub(crate) async fn list_templates(&self) -> Result<Vec<ActivityRecord>> {

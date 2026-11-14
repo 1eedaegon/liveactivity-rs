@@ -22,6 +22,9 @@ liveupdate's `StartRequest` as a struct literal, through the re-export: it has t
   scheduled, and whether it begins at its time or when Android chooses. The time is exact with the permission for
   exact alarms, which the application declares and the person grants; the Android setup says how, and how a
   start survives a restart of the device.
+- On a Galaxy S23 with Android 17, with the application's process ended: a start 30 s ahead was shown 25 s after
+  its time without the permission for exact alarms and at its time with it, one that was ended before its time
+  showed nothing, and one whose notifications were turned off was `dismissed` at the next launch.
 - liveupdate 0.3.3 and 0.4.0 also bring: from Android 15 a post whose header clock is more than 14 days old is
   refused with `INVALID_INPUT` in place of being dropped by Android without a word, and `LiveUpdateForeground.attach`
   works again for an activity that Rust started.

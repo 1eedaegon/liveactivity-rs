@@ -1034,3 +1034,61 @@ fn req_i_007_the_sound_of_an_alert_reaches_the_kit() {
         .and_then(|scheduled| scheduled.alert.sound.as_deref());
     assert_eq!(sound, Some("start.caf"));
 }
+
+#[test]
+fn req_i_008_an_end_answers_ended_also_once_the_system_dismissed_the_activity() {
+    // REQ-I-008
+    let (apple, kit) = apple();
+    kit.dismiss_at_an_end();
+    let at_once = |id: &str| end(id, EndPolicy::Immediate {}, None);
+    let layout = block_on(apple.start_layout(start("demo:1", "green"))).unwrap();
+    let ended = block_on(apple.end_layout(at_once(&layout.id))).unwrap();
+    assert_eq!(
+        (ended.id.as_str(), ended.state),
+        (layout.id.as_str(), ActivityState::Ended)
+    );
+    // An end sent again finds the handle as the system left it, and answers the same.
+    assert_eq!(
+        block_on(apple.end_layout(at_once(&layout.id)))
+            .unwrap()
+            .state,
+        ActivityState::Ended
+    );
+    let template = block_on(apple.start_template(progress("job:1", 1, 0.5))).unwrap();
+    let ending =
+        serde_json::from_value::<EndInput>(json!({"id":template.id,"policy":{"kind":"immediate"}}))
+            .unwrap();
+    for _ in 0..2 {
+        assert_eq!(
+            block_on(apple.end_template(ending.clone())).unwrap().state,
+            ActivityState::Ended
+        );
+    }
+    // An activity that waits for its scheduled start has nothing on the screen to remove.
+    let later = start_showing(
+        json!({"type":"text","bind":"status"}),
+        json!({"activityKey":"demo:later",
+            "scheduled":{"at":fake::NOW + 600_000,"alert":{"title":"Soon","body":"It starts now"}}}),
+    );
+    let pending = block_on(apple.start_layout(later)).unwrap();
+    assert_eq!(pending.state, ActivityState::Pending);
+    assert_eq!(
+        block_on(apple.end_layout(at_once(&pending.id)))
+            .unwrap()
+            .state,
+        ActivityState::Ended
+    );
+    // The list stays the system's account. An end with the default policy keeps the activity listed, so the list
+    // can be asked about it.
+    let kept = block_on(apple.start_layout(start("demo:2", "green"))).unwrap();
+    let ended = block_on(apple.end_layout(end(&kept.id, EndPolicy::Default {}, None))).unwrap();
+    assert_eq!(ended.state, ActivityState::Ended);
+    let listed = block_on(apple.list_layout()).unwrap();
+    let state = |id: &str| {
+        listed
+            .iter()
+            .find(|record| record.id == id)
+            .map(|record| record.state)
+    };
+    assert_eq!(state(&kept.id), Some(ActivityState::Dismissed));
+}

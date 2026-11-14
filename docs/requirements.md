@@ -179,6 +179,15 @@ and it reaches ActivityKit. A name that is no file name of the contract is `INVA
 Evidence: `ios::tests::req_i_007_the_sound_of_an_alert_reaches_the_kit` and
 `contract::req_i_007_a_wrong_sound_reaches_no_backend`.
 
+## REQ-I-008 The answer of an end
+
+An end answers the record as `ended`, a template's and a layout's, also when ActivityKit has already reported the
+activity as `dismissed`. After an end that removes the activity at once, that report can reach the handle before
+the answer is read: an iPhone 16 with iOS 27.2 did not answer `ended` for such an end in half of twelve runs. The
+list and the state events go on saying what ActivityKit says.
+
+Evidence: `ios::tests::req_i_008_an_end_answers_ended_also_once_the_system_dismissed_the_activity`.
+
 ## REQ-E-002 Started, state and permission events
 
 The sink receives a layout activity that began, a new lifecycle state of any activity, and the permissions after

@@ -54,6 +54,8 @@ pub(crate) struct Book {
     pub(crate) ends: Vec<EndSpec>,
     /// The answer of the next call instead of its result.
     pub(crate) fail: Option<Error>,
+    /// Whether the system's report that an activity left the screen reaches its handle before an end returns.
+    pub(crate) dismisses_at_an_end: bool,
     pub(crate) authorization: Option<Authorization>,
     /// The handles alive in this process, by id; they share one token, as activitykit's share their state.
     alive: HashMap<String, Weak<()>>,
@@ -118,6 +120,12 @@ impl FakeKit {
             .iter_mut()
             .filter(|entry| entry.id == id)
             .for_each(|entry| entry.state = state);
+    }
+
+    /// What an iPhone does after an end that removes the activity: its report of `dismissed` reaches the handle
+    /// before the end returns, so the handle never says `ended` to the caller.
+    pub(crate) fn dismiss_at_an_end(&self) {
+        self.book().dismisses_at_an_end = true;
     }
 
     /// A tap as activitykit's events give it, to the subscriber of [`Kit::events`].
@@ -425,6 +433,7 @@ impl Handle for FakeHandle {
         async move {
             let mut guard = book.lock().unwrap();
             take(&mut guard, format!("end {id}"))?;
+            let dismisses = guard.dismisses_at_an_end;
             let Some(entry) = guard.entries.iter_mut().find(|entry| entry.id == id) else {
                 return Err(Error::NotFound(
                     "The activity is no longer available.".into(),
@@ -441,6 +450,9 @@ impl Handle for FakeHandle {
                 entry.relevance = end.relevance.or(entry.relevance);
                 entry.state = State::Ended;
                 entry.listed = !matches!(end.policy, crate::models::EndPolicy::Immediate {});
+            }
+            if dismisses {
+                entry.state = State::Dismissed;
             }
             guard.ends.push(end);
             Ok(())

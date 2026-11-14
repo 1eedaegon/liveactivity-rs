@@ -4,6 +4,13 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+- On iOS an end answers the record as `ended`, as the contract says, also when ActivityKit has already reported
+  the activity as `dismissed`. That report follows an end that removes the activity at once, and the answer was
+  read from the handle after it. On an iPhone 16 with iOS 27.2 such an end did not answer `ended` in half of
+  twelve runs: five times a template's, which answered `dismissed` where the state was looked at, and once that
+  of a layout that waited for its scheduled start. The list and the state events are unchanged: they say what
+  ActivityKit says.
+
 ## 0.5.1 - 2026-11-13
 
 - fix: a progress of a layout is posted on Android 16, with liveupdate 0.3.2 (#12) (`554421a`)

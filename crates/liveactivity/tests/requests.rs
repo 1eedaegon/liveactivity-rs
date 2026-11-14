@@ -1,7 +1,9 @@
 //! Requests that arrive as JSON, at the limits of the contract: the templates' requests of contract v1, a number's
 //! way through the reader, the one error of a refusal, and what a layout request says beside its layout.
 
-use liveactivity::{Error, LayoutStartInput, Validate, validate_request};
+use liveactivity::{
+    AndroidContent, Error, LayoutStartInput, PresentationStyle, Timer, Validate, validate_request,
+};
 use serde_json::{Value, json};
 
 const LARGEST_REVISION: u64 = 9_007_199_254_740_991;
@@ -310,14 +312,36 @@ fn req_c_010_a_refusal_repeats_nothing_of_the_request() {
         assert_eq!(error, Error::invalid());
         assert!(!format!("{error:?} {error}").contains(secret));
     }
-    // A command that the contract does not have is refused the same way.
-    assert_eq!(validate_request("endAll", json!({})), refused());
 }
 
 /// A start of a layout that the contract takes.
 fn layout() -> Value {
     json!({"activityKey":"demo:1","schemaVersion":2,"fallback":"none",
         "layout":{"lockScreen":{"type":"text","value":"a"}},"snapshot":{"revision":0,"values":{}}})
+}
+
+#[test]
+fn req_c_005_a_request_is_read_under_its_own_command_and_under_no_other_name() {
+    // REQ-C-005
+    assert_eq!(validate_request("start", progress()), Ok(()));
+    assert_eq!(validate_request("start_layout", layout()), Ok(()));
+    // The two contracts do not mix: a start of one is no start of the other.
+    assert_eq!(validate_request("start", layout()), refused());
+    assert_eq!(validate_request("start_layout", progress()), refused());
+    // A name that is none of the six commands takes no request, not that of the command it resembles.
+    for command in [
+        "start ",
+        "Start",
+        "startLayout",
+        "start_layout ",
+        "list_layout",
+        "endAll",
+        "",
+    ] {
+        for request in [json!({}), progress(), layout(), end()] {
+            assert_eq!(validate_request(command, request), refused(), "{command:?}");
+        }
+    }
 }
 
 /// The verdict on a start of a layout with one more member, on an update of one and on an end of one.
@@ -542,5 +566,102 @@ fn req_c_011_a_typed_start_writes_its_members_as_it_read_them() {
         let typed: LayoutStartInput = serde_json::from_value(start.clone()).unwrap();
         assert_eq!(typed.validate(), Ok(()), "{start}");
         assert_eq!(serde_json::to_value(&typed).unwrap(), start);
+    }
+}
+
+#[test]
+fn req_c_006_a_timer_style_of_an_android_content_reads_from_json_and_is_checked_in_full() {
+    // REQ-C-006
+    let content = |started_at: u64, ends_at: u64| {
+        json!({"title":"Mochi’s nap","status":"Dozing off","presentation":{"style":{"kind":"timer",
+            "value":{"timer":{"startedAt":started_at,"endsAt":ends_at},"countsDown":true}}}})
+    };
+    // The style's timer is liveupdate's type; a caller reads its members without naming it.
+    let typed: AndroidContent = serde_json::from_value(content(1_000, 2_000)).unwrap();
+    let PresentationStyle::Timer(style) = &typed.presentation.style else {
+        panic!("the style is a timer");
+    };
+    let read = (
+        style.timer.started_at,
+        style.timer.ends_at,
+        style.counts_down,
+    );
+    assert_eq!(read, (1_000, 2_000, true));
+    assert_eq!(serde_json::to_value(&typed).unwrap(), content(1_000, 2_000));
+    // The template's `Timer` is another type and writes the same two members.
+    let template = Timer {
+        started_at: 1_000,
+        ends_at: 2_000,
+    };
+    assert_eq!(
+        serde_json::to_value(&template).unwrap(),
+        content(1_000, 2_000)["presentation"]["style"]["value"]["timer"]
+    );
+
+    // liveupdate's rules for a timer hold before any backend: it ends after its start, and its value has its
+    // members, of their types, and no other.
+    let start = |android: Value| with(layout(), "/snapshot/android", android);
+    assert_eq!(
+        validate_request("start_layout", start(content(1_000, 2_000))),
+        Ok(())
+    );
+    let value = "/presentation/style/value";
+    for (case, broken) in [
+        ("ends at its start", content(2_000, 2_000)),
+        ("ends before its start", content(3_000, 2_000)),
+        (
+            "a null end",
+            with(
+                content(1_000, 2_000),
+                &format!("{value}/timer/endsAt"),
+                json!(null),
+            ),
+        ),
+        (
+            "a start of another type",
+            with(
+                content(1_000, 2_000),
+                &format!("{value}/timer/startedAt"),
+                json!("1000"),
+            ),
+        ),
+        (
+            "no start",
+            without(content(1_000, 2_000), &format!("{value}/timer/startedAt")),
+        ),
+        (
+            "no timer",
+            without(content(1_000, 2_000), &format!("{value}/timer")),
+        ),
+        (
+            "a member beside the timer's",
+            with(
+                content(1_000, 2_000),
+                &format!("{value}/timer/ends_at"),
+                json!(3_000),
+            ),
+        ),
+        (
+            "a member beside the style's",
+            with(content(1_000, 2_000), &format!("{value}/extra"), json!(1)),
+        ),
+        (
+            "a direction of another type",
+            with(
+                content(1_000, 2_000),
+                &format!("{value}/countsDown"),
+                json!("yes"),
+            ),
+        ),
+        (
+            "no direction",
+            without(content(1_000, 2_000), &format!("{value}/countsDown")),
+        ),
+    ] {
+        assert_eq!(
+            validate_request("start_layout", start(broken)),
+            refused(),
+            "{case}"
+        );
     }
 }

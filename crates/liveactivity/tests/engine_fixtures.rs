@@ -2,7 +2,9 @@
 //! activitykit keeps them beside its own validator and its Swift decoder; here they show that reading a request in
 //! this crate's types first gives the verdict activitykit gives, and where this crate's contract takes more.
 
-use liveactivity::{Error, LayoutEndInput, LayoutStartInput, LayoutUpdateInput, validate_request};
+use liveactivity::{
+    Error, LayoutEndInput, LayoutStartInput, LayoutUpdateInput, Validate, validate_request, weight,
+};
 use serde_json::Value;
 use std::{fs, path::Path, process::Command};
 
@@ -70,6 +72,54 @@ fn req_c_005_the_engines_fixtures_get_the_same_verdict_here() {
     }
     // Every exception names a fixture that exists: a change in activitykit's set shows here.
     assert_eq!(taken, TAKEN_HERE);
+}
+
+/// The weight that a fixture states for its request: the values of the snapshot, and with a start its layout and its
+/// styles, which weigh as an empty object where the start has none. Nothing else of a request weighs.
+fn stated_weight(input: &Value) -> usize {
+    let part = |pointer| input.pointer(pointer).map(weight);
+    let start = part("/layout").map(|layout| layout + part("/styles").unwrap_or(2));
+    part("/snapshot/values").unwrap() + start.unwrap_or(0)
+}
+
+#[test]
+fn req_c_005_the_valid_fixtures_read_into_the_typed_requests_and_weigh_the_same_written_back() {
+    // REQ-C-005
+    // By serde alone, as a caller reads a request that it does not hand to `parse_request`.
+    let fixtures = fixtures();
+    let mut weighed = 0;
+    for case in cases(&fixtures, "valid") {
+        let (name, input) = (&case["name"], case["input"].clone());
+        let written = match case["command"].as_str().unwrap() {
+            "start_layout" => {
+                let typed: LayoutStartInput = serde_json::from_value(input).unwrap();
+                assert_eq!(typed.validate(), Ok(()), "{name}");
+                serde_json::to_value(&typed).unwrap()
+            }
+            "update_layout" => {
+                let typed: LayoutUpdateInput = serde_json::from_value(input).unwrap();
+                assert_eq!(typed.validate(), Ok(()), "{name}");
+                serde_json::to_value(&typed).unwrap()
+            }
+            command => {
+                assert_eq!(command, "end_layout", "{name}");
+                let typed: LayoutEndInput = serde_json::from_value(input.clone()).unwrap();
+                assert_eq!(typed.validate(), Ok(()), "{name}");
+                let written = serde_json::to_value(&typed).unwrap();
+                // An end is written as it was read, with final content and without.
+                assert_eq!(written, input, "{name}");
+                written
+            }
+        };
+        // An end without final content has no weight of its own.
+        if written.get("snapshot").is_some() {
+            assert_eq!(case["weight"], stated_weight(&written), "{name}");
+            weighed += 1;
+        } else {
+            assert!(case.get("weight").is_none(), "{name}");
+        }
+    }
+    assert!(weighed >= 100);
 }
 
 /// The verdict on the update or the end of a case that names its start: the request's own check, and then the

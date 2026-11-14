@@ -12,7 +12,8 @@
    projected: `alert` in the presentation where the device offers it, `alert` named otherwise, `alert.sound`
    named for a sound.
 6. liveupdate's start gets `start_at`. Its record is `scheduled`, which the backend answers as `pending`. A time
-   that has passed is liveupdate's to begin at once.
+   that has passed is liveupdate's to begin at once: the record is then what a start now answers, `unknown` until
+   Android lists the notification or `active` already, and the sink is told `active` and no `pending`.
 
 ## Until the time
 

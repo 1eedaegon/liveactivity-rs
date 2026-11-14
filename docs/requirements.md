@@ -120,6 +120,66 @@ compares.
 Evidence: `ios::tests::req_c_007_android_members_never_reach_the_ios_engine` and
 `exchange::req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection`.
 
+## REQ-C-008 The limits of a template's request
+
+A `start`, an `update` and an `end` of contract v1 that arrive as JSON are checked at each limit: the last value
+within it is taken, and the first one past it is `INVALID_INPUT`.
+
+- A key has up to 128 bytes of ASCII letters, digits, `.`, `_`, `:` and `-`, and begins with a letter or a digit.
+- A title has up to 120 code points and a status up to 240, whatever their bytes. Neither is blank as
+  ECMAScript's `\S` reads it: a byte order mark alone is blank, and a next-line character is not.
+- A progress is a number from 0 to 1, a revision a whole number up to 2^53 - 1, and a stale time a whole number
+  up to 8,640,000,000,000,000.
+- A snapshot has one presentation, a progress or a timer, and a start the one of its template. A timer ends
+  after its start, by the largest time.
+- An id has up to 256 code points. An end names a time with `after`, up to the largest one, and with no other
+  policy.
+- No member is `null`, and none is one that the contract does not name.
+
+Evidence: `requests::req_c_008_the_fixtures_of_the_templates_get_their_verdict`, with the requests in
+`crates/liveactivity/tests/fixtures/requests.json`,
+`requests::req_c_008_a_template_request_is_taken_at_each_limit_and_refused_past_it`,
+`requests::req_c_008_a_template_request_of_a_wrong_shape_is_refused`,
+`requests::req_c_008_a_snapshot_has_the_one_presentation_of_its_template` and
+`requests::req_c_008_a_timer_ends_after_its_start_and_an_end_says_when_only_with_after`.
+
+## REQ-C-009 A number keeps its value
+
+A request arrives as JSON text, and each number in it reaches the check as the double that was written. A number
+just off what its member takes, past the end of a range or beside a whole number, is refused: no rounding on the
+way brings it back.
+
+Evidence: `requests::req_c_009_a_number_keeps_its_value_when_read_from_json_text`.
+
+## REQ-C-010 A refusal is one of two errors
+
+Whatever is wrong with a request, the error is `Error::invalid()` or `Error::payload_too_large()`, the whole
+error with its message: it names no member and repeats no value of the request.
+
+Evidence: `requests::req_c_010_a_refusal_repeats_nothing_of_the_request` and
+`engine_fixtures::req_c_010_every_refused_fixture_gets_one_of_the_two_errors`.
+
+## REQ-C-011 What a layout request says beside its layout, as JSON
+
+The options of a start (`ios`, `scheduled` and `android`) and the alert of an update belong to their command, and
+are an unknown member of any other. Each has its members and no other, each member has its JSON type, and none is
+`null`.
+
+- A scheduled time is a whole number up to the largest time, and comes with its alert.
+- The sound of an alert is the name of a file: up to 64 ASCII letters, digits, `.`, `_` and `-`, of which the
+  first is a letter or a digit.
+- A placement is `tagged` or `foreground`.
+- A public version has a title and a status within their lengths, and is of a private start only: in the options
+  of the start and in the Android content of its snapshot alike. An update does not say how its activity started.
+- A typed start writes these members as it read them: none that the request left out, and one that says its
+  default.
+
+Evidence: `requests::req_c_011_the_sound_of_an_alert_is_the_name_of_a_file`,
+`requests::req_c_011_the_options_of_a_start_have_their_members_and_their_json_types`,
+`requests::req_c_011_a_public_version_in_a_content_is_of_a_private_start`,
+`requests::req_c_011_each_member_belongs_to_its_command` and
+`requests::req_c_011_a_typed_start_writes_its_members_as_it_read_them`.
+
 ## REQ-I-001 Relevance
 
 The relevance of a snapshot reaches ActivityKit with a start, an update and an end, and the record reports it.

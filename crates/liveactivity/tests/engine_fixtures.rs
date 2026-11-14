@@ -2,7 +2,7 @@
 //! activitykit keeps them beside its own validator and its Swift decoder; here they show that reading a request in
 //! this crate's types first gives the verdict activitykit gives, and where this crate's contract takes more.
 
-use liveactivity::{LayoutEndInput, LayoutStartInput, LayoutUpdateInput, validate_request};
+use liveactivity::{Error, LayoutEndInput, LayoutStartInput, LayoutUpdateInput, validate_request};
 use serde_json::Value;
 use std::{fs, path::Path, process::Command};
 
@@ -72,33 +72,66 @@ fn req_c_005_the_engines_fixtures_get_the_same_verdict_here() {
     assert_eq!(taken, TAKEN_HERE);
 }
 
+/// The verdict on the update or the end of a case that names its start: the request's own check, and then the
+/// check against that start.
+fn after_its_start(case: &Value, request: &str) -> liveactivity::Result<()> {
+    let start = case["start"].clone();
+    assert_eq!(code(validate_request("start_layout", start.clone())), None);
+    let start: LayoutStartInput = serde_json::from_value(start).unwrap();
+    let following = case[request].clone();
+    if request == "update" {
+        validate_request("update_layout", following.clone()).and_then(|()| {
+            let update: LayoutUpdateInput = serde_json::from_value(following).unwrap();
+            start.validate_update(&update)
+        })
+    } else {
+        validate_request("end_layout", following.clone()).and_then(|()| {
+            let end: LayoutEndInput = serde_json::from_value(following).unwrap();
+            start.validate_end(&end)
+        })
+    }
+}
+
 #[test]
 fn req_c_005_updates_and_ends_are_checked_against_their_start_as_the_engine_does() {
     // REQ-C-005
     let fixtures = fixtures();
     let (updates, ends) = (cases(&fixtures, "updates"), cases(&fixtures, "ends"));
     assert!(updates.len() >= 20 && !ends.is_empty());
-    let started = |case: &Value| -> LayoutStartInput {
-        let start = case["start"].clone();
-        assert_eq!(code(validate_request("start_layout", start.clone())), None);
-        serde_json::from_value(start).unwrap()
-    };
-    for case in updates {
-        let start = started(case);
-        let verdict = validate_request("update_layout", case["update"].clone()).and_then(|()| {
-            let update: LayoutUpdateInput = serde_json::from_value(case["update"].clone()).unwrap();
-            start.validate_update(&update)
-        });
-        let expected = case.get("code").and_then(Value::as_str);
-        assert_eq!(code(verdict).as_deref(), expected, "{}", case["name"]);
+    for (group, request) in [(updates, "update"), (ends, "end")] {
+        for case in group {
+            let verdict = after_its_start(case, request);
+            let expected = case.get("code").and_then(Value::as_str);
+            assert_eq!(code(verdict).as_deref(), expected, "{}", case["name"]);
+        }
     }
-    for case in ends {
-        let start = started(case);
-        let verdict = validate_request("end_layout", case["end"].clone()).and_then(|()| {
-            let end: LayoutEndInput = serde_json::from_value(case["end"].clone()).unwrap();
-            start.validate_end(&end)
+}
+
+#[test]
+fn req_c_010_every_refused_fixture_gets_one_of_the_two_errors() {
+    // REQ-C-010
+    let fixtures = fixtures();
+    let alone = cases(&fixtures, "invalid").iter().map(|case| {
+        let command = case["command"].as_str().unwrap();
+        (case, validate_request(command, case["input"].clone()))
+    });
+    let after = [("updates", "update"), ("ends", "end")]
+        .into_iter()
+        .flat_map(|(group, request)| {
+            let group = cases(&fixtures, group).iter();
+            group.map(move |case| (case, after_its_start(case, request)))
         });
-        let expected = case.get("code").and_then(Value::as_str);
-        assert_eq!(code(verdict).as_deref(), expected, "{}", case["name"]);
-    }
+    let refusals: Vec<Error> = alone
+        .chain(after)
+        .filter_map(|(case, verdict)| {
+            let error = verdict.err()?;
+            // The whole error, with its message: it says nothing of the request it refuses.
+            let known = [Error::invalid(), Error::payload_too_large()].contains(&error);
+            assert!(known, "{}", case["name"]);
+            Some(error)
+        })
+        .collect();
+    assert!(refusals.len() >= 100);
+    assert!(refusals.contains(&Error::invalid()));
+    assert!(refusals.contains(&Error::payload_too_large()));
 }

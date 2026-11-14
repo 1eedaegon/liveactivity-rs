@@ -1,0 +1,57 @@
+[
+  {
+    "name": "starts progress with explicit notification fallback",
+    "valid": true,
+    "request": { "command": "start", "input": { "activityKey": "delivery:123", "schemaVersion": 1, "template": "progress", "fallback": "notification", "snapshot": { "revision": 0, "title": "배송", "status": "출발", "progress": 0 } } }
+  },
+  {
+    "name": "starts a timer with epoch milliseconds",
+    "valid": true,
+    "request": { "command": "start", "input": { "activityKey": "timer-1", "schemaVersion": 1, "template": "timer", "fallback": "none", "snapshot": { "revision": 1, "title": "집중", "status": "진행 중", "timer": { "startedAt": 1793808000000, "endsAt": 1793809500000 } } } }
+  },
+  {
+    "name": "updates a complete snapshot including an already stale timestamp",
+    "valid": true,
+    "request": { "command": "update", "input": { "id": "opaque-handle-1", "snapshot": { "revision": 2, "title": "Download", "status": "Complete", "progress": 1, "staleAt": 0 } } }
+  },
+  {
+    "name": "ends immediately",
+    "valid": true,
+    "request": { "command": "end", "input": { "id": "opaque-handle-1", "policy": { "kind": "immediate" } } }
+  },
+  {
+    "name": "ends using the system default policy",
+    "valid": true,
+    "request": { "command": "end", "input": { "id": "opaque-handle-1", "policy": { "kind": "default" } } }
+  },
+  {
+    "name": "accepts an after policy structurally pending native support checks",
+    "valid": true,
+    "request": { "command": "end", "input": { "id": "opaque-handle-1", "policy": { "kind": "after", "at": 1793809500000 } } }
+  },
+  {
+    "name": "rejects a partial update",
+    "valid": false,
+    "request": { "command": "update", "input": { "id": "opaque-handle-1", "snapshot": { "revision": 3, "progress": 0.5 } } }
+  },
+  {
+    "name": "rejects reversed timer bounds",
+    "valid": false,
+    "request": { "command": "update", "input": { "id": "opaque-handle-1", "snapshot": { "revision": 2, "title": "Timer", "status": "Running", "timer": { "startedAt": 20, "endsAt": 10 } } } }
+  },
+  {
+    "name": "rejects an unknown command",
+    "valid": false,
+    "request": { "command": "endAll", "input": {} }
+  },
+  {
+    "name": "rejects a title containing only ECMAScript BOM whitespace",
+    "valid": false,
+    "request": { "command": "start", "input": { "activityKey": "unicode:bom", "schemaVersion": 1, "template": "progress", "fallback": "notification", "snapshot": { "revision": 0, "title": "\uFEFF", "status": "Running", "progress": 0 } } }
+  },
+  {
+    "name": "accepts NEL as non-whitespace under the shared ECMAScript contract",
+    "valid": true,
+    "request": { "command": "start", "input": { "activityKey": "unicode:nel", "schemaVersion": 1, "template": "progress", "fallback": "notification", "snapshot": { "revision": 0, "title": "\u0085", "status": "Running", "progress": 0 } } }
+  }
+]

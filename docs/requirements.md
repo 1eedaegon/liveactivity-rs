@@ -98,18 +98,27 @@ activitykit does not know are taken; an unknown member, a `null`, a request that
 and a request under another command's name are refused.
 
 The request fixtures of the activitykit version this crate builds with get the same verdict here, except where
-this crate's contract takes a member that activitykit's does not.
+this crate's contract takes a member that activitykit's does not. Each valid one also reads by serde alone into
+this crate's typed requests, passes their check, and weighs written back what the fixture states; an end is
+written as it was read.
 
-Evidence: `layout::tests::req_c_005_a_request_is_read_strictly_in_this_crates_types` and
-`engine_fixtures::req_c_005_the_engines_fixtures_get_the_same_verdict_here`.
+A name that is none of the six commands takes no request, not that of the command it resembles, and a start of
+contract v1 is no start of a layout, nor the other way round.
+
+Evidence: `layout::tests::req_c_005_a_request_is_read_strictly_in_this_crates_types`,
+`engine_fixtures::req_c_005_the_engines_fixtures_get_the_same_verdict_here`,
+`engine_fixtures::req_c_005_the_valid_fixtures_read_into_the_typed_requests_and_weigh_the_same_written_back` and
+`requests::req_c_005_a_request_is_read_under_its_own_command_and_under_no_other_name`.
 
 ## REQ-C-006 The same check on every platform
 
 A relevance is finite, an alert has a title and a body within their lengths, and an Android content is one
-liveupdate takes. The check runs before any backend, whatever the platform.
+liveupdate takes: a timer style, for one, ends after its start and has its members, of their types, and no
+other. The check runs before any backend, whatever the platform.
 
-Evidence: `layout::tests::req_c_006_what_a_request_says_beside_the_layout_is_checked` and
-`contract::req_c_006_a_wrong_member_of_another_platform_reaches_no_backend`.
+Evidence: `layout::tests::req_c_006_what_a_request_says_beside_the_layout_is_checked`,
+`contract::req_c_006_a_wrong_member_of_another_platform_reaches_no_backend` and
+`requests::req_c_006_a_timer_style_of_an_android_content_reads_from_json_and_is_checked_in_full`.
 
 ## REQ-C-007 Platform members stay with their platform
 

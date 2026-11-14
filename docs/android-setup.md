@@ -1,7 +1,7 @@
 # Android setup
 
 On Android `liveactivity` runs on the [liveupdate](https://github.com/1eedaegon/liveupdate-rs)
-crate (0.3.2 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
+crate (0.4.0 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
 Live Update. liveupdate keeps the lifecycle, the revisions and the receipts in Rust; a small AAR
 talks to Android's `NotificationManager`.
 
@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.3.2.aar` from liveupdate's
+Put `liveupdate-android-0.4.0.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too:
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.3.2.aar"))
+    implementation(files("libs/liveupdate-android-0.4.0.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
 }
 ```
@@ -46,12 +46,14 @@ There is nothing to write. The AAR merges these into the application's manifest:
 <application>
     <receiver android:name=".LiveUpdateActionReceiver" android:exported="false" />
     <receiver android:name=".LiveUpdateDismissReceiver" android:exported="false" />
+    <receiver android:name=".LiveUpdateStartReceiver" android:exported="false" />
 </application>
 ```
 
 The receivers belong to the AAR's namespace, `io.github.eedaegon.liveupdate`. One stores taps on a
-notification's actions, the other dismissals. Neither is exported. The AAR installs no foreground
-service and no background work.
+notification's actions, another dismissals, and the third posts
+[a scheduled start](#a-scheduled-start) when its alarm fires. None is exported. The AAR installs no
+foreground service and no background work, and declares no permission for alarms.
 
 ## 3. Choose a transport
 
@@ -321,6 +323,66 @@ One running activity has the placement at a time: a second start with it is `SYS
 device that does not offer `foregroundPlacement` answers `UNSUPPORTED_FEATURE`. Without a service
 the notification is an ordinary one.
 
+### A scheduled start
+
+A start with `scheduled` is stored now and begins at its time, also while the application does not
+run: the AAR sets an alarm, and its receiver posts the notification from what it stored. No Rust is
+loaded then. Until the time the record is `pending`, and what happened meanwhile is answered at
+the application's next call ([the contract](contract.md#a-scheduled-start) has the rules).
+
+```rust
+let offered = live.capabilities().await?.android_presentation.unwrap_or_default();
+if offered.scheduled_start {
+    let mut later = start.clone();
+    later.scheduled = Some(ScheduledStart::new(at, Alert::new("Your ride", "It starts now")));
+    let record = live.start_layout(later).await?;
+    assert_eq!(record.state, ActivityState::Pending);
+}
+```
+
+How close to its time it begins is Android's to say:
+
+| The application | Begins |
+| --- | --- |
+| may set exact alarms: `exact_start` is true | at its time, also while the device dozes |
+| may not, as most applications | within about ten minutes while the device is awake, later while it dozes |
+
+The manifest is the application's for both of the following; the AAR declares neither.
+
+- **On the minute.** Declare `SCHEDULE_EXACT_ALARM` and send the person to the "Alarms &
+  reminders" setting: from Android 14 it is off until they allow it. `USE_EXACT_ALARM` is for alarm
+  and calendar applications only, by Google Play's policy.
+
+  ```xml
+  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+  ```
+
+- **After a restart of the device.** Android drops alarms when the device restarts, when the person
+  force-stops the application, and when they take the permission for exact alarms away. The
+  activity then begins late, at the application's next call. To have the alarm set again after a
+  restart, declare the AAR's receiver for it:
+
+  ```xml
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+  <receiver
+      android:name="io.github.eedaegon.liveupdate.LiveUpdateStartReceiver"
+      android:exported="false">
+      <intent-filter>
+          <action android:name="android.intent.action.BOOT_COMPLETED" />
+      </intent-filter>
+  </receiver>
+  ```
+
+An application that runs at the time and asks the backend when [`next_check`](#states) says has the
+activity begin on the dot, whatever the alarm does. An activity that must not appear late is the
+application's to end: compare the time with the clock at launch. Android asks that a Live Update
+appears only when its activity is imminent, and mostly for activities the person started: schedule
+the start of something they asked for, not a reminder.
+
+Not verified on a device by liveupdate: the timing of an inexact alarm while the device dozes, a
+real restart, and the battery savers of device makers.
+
 ## 5. Permissions
 
 `live.permissions()` reports what Android allows:
@@ -419,8 +481,8 @@ let delivered = backend.pump_events()?;
 ### States
 
 The sink is told the state an activity has when the backend asks, if it is another than the one it
-was told last: `active` once Android shows it, `stale` after its stale time, `active` again after
-an update that makes it fresh, `ended`, `dismissed`. A start, an update, an end and a list report
+was told last: `pending` while a scheduled start waits, `active` once Android shows it, `stale`
+after its stale time, `active` again after an update that makes it fresh, `ended`, `dismissed`. A start, an update, an end and a list report
 the states that are due with them; the others come with a drain. A state that came and went
 between two asks is not reported.
 
@@ -521,8 +583,9 @@ fn main() {
 - **Staleness.** Nothing redraws a notification when a time passes. A layout whose nodes say
   `ifStale` is drawn as it is while fresh, and the record names `layout.ifStale`. The sink is told
   `stale` ([States](#states)): update the content then if the notification should say so.
-- **A scheduled start.** `UNSUPPORTED_FEATURE`: a notification is posted when it is asked for.
-  The application starts the activity itself when the time comes.
+- **A scheduled start.** The AAR posts the notification at the time, through an alarm and a
+  receiver of its own: see [A scheduled start](#a-scheduled-start). With an AAR older than 0.4 it
+  is `UNSUPPORTED_FEATURE`.
 - **Updates need the process.** Android has no push that updates a notification. In the
   background an application updates from a foreground service or from a data message that wakes
   it. A start with the foreground placement lets such a service hold the notification
@@ -565,6 +628,16 @@ it with `with_files` (step 4). A builder without a backend never has them.
 **`request_permissions` answers `UNSUPPORTED_FEATURE`.** The default backend cannot show a dialog.
 Wrap it (step 5).
 
+**A start with `scheduled` answers `UNSUPPORTED_FEATURE`.** The application packages an AAR of
+liveupdate older than 0.4, or the host's own Android side does not report `scheduledStart`; or the
+start asks for the foreground placement, which a scheduled start cannot have.
+
+**A scheduled activity begins minutes late.** The application may not set exact alarms
+(`exactStart` is false): see [A scheduled start](#a-scheduled-start).
+
+**A scheduled activity is `pending` and never begins.** Its start answered an error: the alarm
+could not be set, and the activity is kept without one. Send the same start again, or end it.
+
 **`end` answers `UNSUPPORTED_FEATURE`.** The policy is `after` and the device does not offer
 `delayedEnd`: the AAR is older than 0.2, or the host's own Android side does not report it.
 
@@ -573,7 +646,7 @@ activity shows, and the device does not offer `styleChange`.
 
 **A layout with a `progress`, or a content of the progress style, answers `NATIVE_ERROR` on
 Android 16.** The application packages an AAR of liveupdate older than 0.3.2, which calls, for
-every segment and point of a progress, a method that only Android 17 has. Take the AAR of 0.3.2:
+every segment and point of a progress, a method that only Android 17 has. Take the AAR this guide names:
 the correction is in the AAR, so a newer crate alone does not bring it. The progress and timer
 templates were not touched, nor were Android 15 and earlier or Android 17.
 

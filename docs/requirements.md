@@ -365,11 +365,65 @@ Evidence: `exchange::req_a_013_a_toggle_is_an_action_on_android_and_its_tap_says
 
 Android draws a layout as it is while fresh: a node for stale content is left out, one for fresh content is
 drawn, and the record names `layout.ifStale`. The sink is told `stale` (REQ-E-005), so the application can
-update. A scheduled start is `UNSUPPORTED_FEATURE` and leaves nothing. The iOS options are no part of what
-Android keeps and compares. The sound of an alert is named `alert.sound` where the update alerts.
+update. A scheduled start is `UNSUPPORTED_FEATURE` and leaves nothing where the device offers none (REQ-A-015).
+The iOS options are no part of what Android keeps and compares. The sound of an alert is named `alert.sound` where
+the update alerts.
 
 Evidence: `exchange::req_a_014_android_names_what_it_leaves_of_staleness_and_sounds_and_refuses_a_schedule` and
 `android::layout::tests::req_a_014_a_layout_is_drawn_as_while_fresh_and_its_staleness_is_named`.
+
+## REQ-A-015 A scheduled start on Android
+
+A start with `scheduled` is taken on Android where liveupdate offers it: the time reaches liveupdate, whose
+Android library begins the activity then, also while the application does not run, and the record is `pending`.
+Where it is not offered, as with an older Android library in the application, the start is
+`UNSUPPORTED_FEATURE` and nothing is kept. A time that has passed begins the activity at once: its record is
+never `pending`.
+
+Evidence: `exchange::req_a_015_a_scheduled_start_waits_on_android_and_begins_at_its_time`.
+
+## REQ-A-016 The rules of a pending activity on Android
+
+A pending activity follows the rules of the contract. The same start again answers it, whatever its time and
+also without one, and a scheduling that failed is made again by it: until then that activity has no alarm, and
+nothing begins it. Another request under its key is `CONFLICT`. An update is `CONFLICT`. An end ends it, with any
+policy, and nothing is ever shown: a final content that comes with the end is checked and not applied. Its key is
+free then.
+
+Evidence: `exchange::req_a_016_a_pending_activity_keeps_its_key_takes_no_update_and_can_be_ended`.
+
+## REQ-A-017 The alert of a scheduled start on Android
+
+The activity alerts when it begins, where the device offers an alert: the contract's scheduled start always
+carries one. A device that offers none begins it silently, and the record names `alert`. A sound the alert names
+is named `alert.sound` where it alerts. The alert's title and body are iOS's: a notification alerts with its own
+content.
+
+Evidence: `exchange::req_a_017_a_scheduled_start_alerts_when_it_begins_where_the_device_alerts`.
+
+## REQ-A-018 The states of a scheduled start on Android
+
+The sink is told `pending` once, and `active` once when the activity has begun, also when it began while the
+application did not run. An activity that the person removed before the application ran again, or that Android
+could not post at its time, is told `dismissed` without an `active`. One whose alarm was lost begins at the
+application's next call. The time the backend should next be asked at is the earliest start time, with the stale
+times.
+
+Evidence: `exchange::req_a_018_the_sink_hears_pending_and_what_became_of_the_start`.
+
+## REQ-A-019 Capabilities of a scheduled start
+
+The capabilities of the Android presentation say whether a scheduled start is offered (`scheduledStart`) and
+whether its alarm is exact (`exactStart`), as liveupdate reports both.
+
+Evidence: `exchange::req_a_019_the_capabilities_say_whether_a_start_can_be_scheduled_and_how_exactly`.
+
+## REQ-A-020 A scheduled start and the foreground placement
+
+A scheduled start with the foreground placement is `UNSUPPORTED_FEATURE`, and nothing is kept: a service holds a
+notification that is there.
+
+Evidence: `exchange::req_a_020_a_scheduled_start_takes_no_foreground_placement`.
 
 ## REQ-N-001 No framework in the crate
 

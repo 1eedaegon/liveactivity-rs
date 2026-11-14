@@ -115,7 +115,8 @@ impl IosOptions {
 
 /// A start at a later time. Until then the activity is `pending`: it holds its key, it can be ended, and it takes
 /// no update (`CONFLICT`), since it begins with the content of its start. The sink receives `State` with `active`
-/// when it begins. iOS 26 and later; an older system and Android answer `UNSUPPORTED_FEATURE`.
+/// when it begins. iOS 26 and later, and Android where liveupdate's library begins it
+/// (`android_presentation.scheduled_start`); elsewhere the start is `UNSUPPORTED_FEATURE`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScheduledStart {

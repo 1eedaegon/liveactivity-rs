@@ -312,17 +312,44 @@ does not keep them. In Rust: `IosOptions::new(transient)`.
 | `at` | Required. A time in epoch milliseconds. One that has passed starts the activity at once |
 | `alert` | Required: the system shows an alert when it starts the activity. An [alert](#update_layout) as an update's |
 
-The activity starts at that time instead of now (iOS 26). Until then its record is `pending`:
+The activity starts at that time instead of now, where the system can begin it by itself: iOS 26,
+and Android with liveupdate's library 0.4 or later (`androidPresentation.scheduledStart`). Until
+then its record is `pending`:
 
-- it holds its key, so the same start again answers it, whatever its time;
-- it can be ended;
+- it holds its key, so the same start again answers it, whatever its time, and so does that
+  request without a time: when an activity begins is no part of what makes two starts the same;
+- it can be ended, with any policy, and nothing is shown;
 - an update is `CONFLICT`: the activity begins with the content of its start, whatever was sent
   meanwhile;
 - the sink receives `Event::State` with `active` when it begins.
 
-An older iOS and Android answer `UNSUPPORTED_FEATURE`, and nothing is kept: a notification is
-posted when it is asked for, and showing the activity at once would show it at the wrong time. In
-Rust: `ScheduledStart::new(at, alert)`.
+Elsewhere the start is `UNSUPPORTED_FEATURE`, and nothing is kept: showing the activity at once
+would show it at the wrong time. In Rust: `ScheduledStart::new(at, alert)`.
+
+On Android the notification is posted at the time by liveupdate's library, also while the
+application does not run:
+
+- **How close to the time.** With the permission for exact alarms (`androidPresentation.exactStart`)
+  at its time. Without it Android chooses the moment: within about ten minutes while the device is
+  awake, later while it dozes. An application that runs then and asks the backend at the time
+  [`next_check`](#events) names has it begin on the dot.
+- **The alert.** The notification alerts when it is posted, where the device offers an alert, with
+  its own content: the alert's title and body are iOS's. Elsewhere it begins silently and the record
+  names `alert`. A `sound` is named `alert.sound`.
+- **What happened meanwhile** is answered at the application's next call. An activity that began is
+  `active`, and the sink is told so once. One that the person removed before the application ran
+  again, or that could not be posted because notifications were off by then, is `dismissed`, with
+  no `active` before it. One whose alarm Android dropped, as after a restart of the device, begins
+  at that call.
+- **The sink** is told `pending` once, as it is told every state on Android.
+- **Not with the foreground placement**: `UNSUPPORTED_FEATURE`, since a service holds a notification
+  that is there.
+- **The end** takes no final content: nothing was shown, and nothing will be. The content is checked
+  as that of any end, and not applied.
+- **A start that failed.** When the alarm could not be set, the start answers the error
+  (`NATIVE_ERROR`), and the activity is kept as `pending` without an alarm: the list has it, the
+  sink is not told, and nothing begins it. The same start again sets the alarm, or begins the
+  activity when its time has passed. So repeat a start that failed, or end the activity.
 
 ### update_layout
 
@@ -509,15 +536,18 @@ and for the rules that follow a device:
   "standard": true, "bigText": true, "timer": true, "progressStyle": true, "metricStyle": false,
   "actions": true, "images": true, "events": true, "samsungNowBar": false,
   "chronometer": true, "links": true, "styleChange": true, "delayedEnd": true,
-  "foregroundPlacement": true, "alert": true, "publicVersion": true, "branding": true
+  "foregroundPlacement": true, "alert": true, "publicVersion": true, "branding": true,
+  "scheduledStart": true, "exactStart": false
 }
 ```
 
 `progressStyle` needs Android 16 and `metricStyle` Android 17. `styleChange` lets a snapshot have
 another style than the activity shows, `delayedEnd` is the `after` policy, `alert` an update that
-alerts, and `foregroundPlacement` the `placement` of a start. `links` and `chronometer` also decide
-what [a layout shows](#what-android-shows). A member that the Android side does not report is
-false. Elsewhere `androidPresentation` is absent.
+alerts, and `foregroundPlacement` the `placement` of a start. `scheduledStart` is
+[a scheduled start](#a-scheduled-start), and `exactStart` says whether it begins at its time or
+when Android chooses. `links` and `chronometer` also decide what
+[a layout shows](#what-android-shows). A member that the Android side does not report is false.
+Elsewhere `androidPresentation` is absent.
 
 A feature is `supported`, `unsupported` or `unknown`, and unknown never counts as supported. On iOS
 `actions` follows the device's support for buttons. On Android `layout` and `actions` are supported

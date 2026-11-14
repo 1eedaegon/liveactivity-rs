@@ -27,7 +27,7 @@ Each requirement is a row of `docs/requirements.md` with the test that is its ev
 | REQ-I-006 | A start takes `scheduled`, a time and the alert the system shows then, and the iOS option `transient`. A scheduled start answers a record that is `pending`. A time or an alert that is none of the contract is `INVALID_INPUT` on every platform. |
 | REQ-I-007 | An alert takes `sound`, the file name of a sound of the application, for an update and for a scheduled start. A name that is no file name of the contract is `INVALID_INPUT` on every platform. |
 | REQ-A-013 | On Android a toggle is an action of the notification: its title is the toggle's label, with a check mark before it while the value is on. Its tap reaches the sink with `on`, the other state than the value the activity shows. It takes a place among the notification's actions as a button does. |
-| REQ-A-014 | Android draws a layout as it is while fresh and names `layout.ifStale` for one whose nodes follow staleness; the sink is told `stale` (REQ-E-005). A scheduled start is `UNSUPPORTED_FEATURE`. The `transient` option is iOS's and is no part of what Android keeps. An alert's sound is named as `alert.sound` where the update alerts. |
+| REQ-A-014 | Android draws a layout as it is while fresh and names `layout.ifStale` for one whose nodes follow staleness; the sink is told `stale` (REQ-E-005). A scheduled start is `UNSUPPORTED_FEATURE` (taken since, where the device offers it: REQ-A-015). The `transient` option is iOS's and is no part of what Android keeps. An alert's sound is named as `alert.sound` where the update alerts. |
 
 ## Decisions
 

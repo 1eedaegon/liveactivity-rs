@@ -113,13 +113,6 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         updates: &liveupdate::LiveUpdate<D>,
         input: LayoutStartInput,
     ) -> Result<LayoutActivityRecord> {
-        // A notification is posted when it is asked for. Starting at once in place of later would show the
-        // activity at the wrong time, so the start is refused, before anything is kept.
-        if input.scheduled.is_some() {
-            return Err(Error::unsupported_feature(
-                "Android starts an activity when it is asked to, not at a later time",
-            ));
-        }
         // Android has no pushes, no relevance and none of the iOS options: what the start says of them is dropped
         // here, so that it is no part of the request the activity keeps and a repeated start is compared without
         // it.
@@ -132,40 +125,54 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         };
         let _guard = self.lock.lock().map_err(|_| Error::native())?;
         let (mut entries, records) = self.reconciled(updates)?;
-        // liveupdate compares the projections; two starts that project the same may still differ.
-        let conflicting = records
+        // The activity that runs or waits under the key, with the request it keeps.
+        let under_the_key = records
             .iter()
             .filter(|record| running(record))
-            .any(|record| {
-                entries.get(&record.id).is_some_and(|entry| {
-                    entry.origin.activity_key == input.activity_key && entry.origin != input
-                })
+            .find_map(|record| {
+                let entry = entries.get(&record.id)?;
+                (entry.origin.activity_key == input.activity_key).then_some((record, entry))
             });
-        if conflicting {
+        // liveupdate compares the projections; two starts that project the same may still differ.
+        if under_the_key.is_some_and(|(_, entry)| !same_start(&entry.origin, &input)) {
             return Err(Error::new(
                 "CONFLICT",
                 "a running activity of this key started with another request",
             ));
         }
-        // The same request as a running activity that Android shows is that activity, whatever this device would
-        // make of the request now: what a projection uses follows what the device offers, which may have changed.
-        // One that Android does not show yet goes on to liveupdate, which posts it again.
-        let shown_already = records
-            .iter()
-            .filter(|record| running(record) && record.state != liveupdate::ActivityState::Unknown)
-            .find_map(|record| {
-                let entry = entries.get(&record.id)?;
-                (entry.origin == input).then_some((record, entry))
-            });
-        if let Some((record, entry)) = shown_already {
-            return Ok(layout_record(record, entry));
-        }
+        let input = match under_the_key {
+            Some((record, entry)) if record.state == liveupdate::ActivityState::Scheduled => {
+                return waiting(updates, record, entry);
+            }
+            // The same request as a running activity that Android shows is that activity, whatever this device
+            // would make of the request now: what a projection uses follows what the device offers, which may
+            // have changed.
+            Some((record, entry)) if record.state != liveupdate::ActivityState::Unknown => {
+                return Ok(layout_record(record, entry));
+            }
+            // One that Android does not show yet goes on to liveupdate, which posts it again: with the time it
+            // was started with, which liveupdate compares.
+            Some((_, entry)) => LayoutStartInput {
+                scheduled: entry.origin.scheduled.clone(),
+                ..input
+            },
+            None => input,
+        };
         let mut offered = Offered::of(updates);
+        let begins = input.scheduled.as_ref();
+        // A scheduled start alerts when it begins, as an update with an alert does.
+        let alert = begins.map(|scheduled| &scheduled.alert);
+        // The request is one of the contract, which liveupdate would call invalid: Android cannot serve it.
+        if begins.is_some() && placement(&input) == liveupdate::Placement::Foreground {
+            return Err(Error::unsupported_feature(
+                "A service holds a notification that is there: a scheduled start takes no foreground placement",
+            ));
+        }
         let pending = format!("{PENDING}{}", input.activity_key);
         // The second turn, when there is one, sends the projection without its links: see `unlinked`.
         let mut links = true;
         let (record, entry) = loop {
-            let projection = self.sent(&mut offered, &input, &input.snapshot, None, links)?;
+            let projection = self.sent(&mut offered, &input, &input.snapshot, alert, links)?;
             let retry = links && unlinked(&input.snapshot, &projection.snapshot);
             // The style of the first snapshot: its content's, or else the one the layout projects to.
             let template = projection
@@ -180,6 +187,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                 visibility: visibility(&input),
                 snapshot: projection.snapshot,
                 placement: placement(&input),
+                start_at: begins.map(|scheduled| scheduled.at),
             };
             let entry = Entry {
                 origin: input.clone(),
@@ -229,15 +237,20 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         let entry = entries.get(&input.id).ok_or_else(not_found)?;
         // An activity that is over takes no content: its end again answers its record, and an end without a time
         // removes a last content that an earlier end kept.
-        let live = records
+        // Nor does one that waits for its scheduled start: it ends before anything is shown.
+        let state = records
             .iter()
-            .any(|record| record.id == input.id && running(record));
-        let last = input.snapshot.filter(|_| live).map(for_android);
+            .find(|record| record.id == input.id && running(record))
+            .map(|record| record.state);
+        let waits = state == Some(liveupdate::ActivityState::Scheduled);
+        let live = state.is_some() && !waits;
+        let last = input.snapshot.filter(|_| state.is_some()).map(for_android);
         // The final content is checked before the device is asked, so that a request that is wrong everywhere is
-        // not answered as one this device cannot serve.
+        // not answered as one this device cannot serve; also that of an activity that waits, which is not sent.
         if let Some(snapshot) = &last {
             fits(entry, &input.id, snapshot)?;
         }
+        let last = last.filter(|_| live);
         // liveupdate refuses a delayed end where the device offers none. Asked here first, the refusal comes
         // before the final snapshot is shown, and the activity stays as it was.
         let delayed = matches!(input.policy, EndPolicy::After { .. });
@@ -249,8 +262,14 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         if let Some(snapshot) = last {
             self.replace(updates, &mut entries, &records, &input.id, snapshot, None)?;
         }
+        // An activity that waits has no last content to keep until a time: any policy ends it, on any device.
+        let policy = if waits {
+            EndPolicy::Default {}
+        } else {
+            input.policy
+        };
         let record = updates
-            .end(&input.id, android_liveupdate::end_policy(input.policy))
+            .end(&input.id, android_liveupdate::end_policy(policy))
             .map_err(android_liveupdate::error)?;
         let entry = entries.get(&input.id).ok_or_else(not_found)?;
         Ok(layout_record(&record, entry))
@@ -333,6 +352,12 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
             .iter()
             .find(|record| record.id == id && running(record))
             .ok_or_else(not_found)?;
+        if current.state == liveupdate::ActivityState::Scheduled {
+            return Err(Error::new(
+                "CONFLICT",
+                "a scheduled activity takes no update before it began",
+            ));
+        }
         if snapshot.revision < entry.snapshot.revision {
             return Err(Error::new(
                 "STALE_REVISION",
@@ -739,6 +764,38 @@ fn control(node: &Node, action_id: &str) -> bool {
         }
         _ => false,
     }
+}
+
+/// Whether two starts are the same request. When and how the activity begins is no part of it, as on iOS: the
+/// same request under a key answers the activity that waits or runs, whatever its time, and with or without one.
+fn same_start(kept: &LayoutStartInput, asked: &LayoutStartInput) -> bool {
+    let asked = LayoutStartInput {
+        scheduled: kept.scheduled.clone(),
+        ..asked.clone()
+    };
+    *kept == asked
+}
+
+/// The answer to the same start as that of an activity that waits for its time. liveupdate is asked with the
+/// request it keeps, which its own record holds: it answers the activity, and hands it to its Android side again
+/// where that had failed. It asks the device first, so this fails as a start does while notifications are off.
+fn waiting<D: liveupdate::Driver>(
+    updates: &liveupdate::LiveUpdate<D>,
+    record: &liveupdate::ActivityRecord,
+    entry: &Entry,
+) -> Result<LayoutActivityRecord> {
+    let kept = liveupdate::StartRequest {
+        activity_key: record.activity_key.clone(),
+        schema_version: 2,
+        template: record.template,
+        fallback: android_liveupdate::fallback(entry.origin.fallback),
+        visibility: visibility(&entry.origin),
+        snapshot: record.snapshot.clone(),
+        placement: placement(&entry.origin),
+        start_at: record.start_at,
+    };
+    let record = updates.start(kept).map_err(android_liveupdate::error)?;
+    Ok(layout_record(&record, entry))
 }
 
 fn running(record: &liveupdate::ActivityRecord) -> bool {

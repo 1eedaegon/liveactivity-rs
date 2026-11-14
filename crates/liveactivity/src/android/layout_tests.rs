@@ -844,6 +844,32 @@ fn req_a_013_a_toggle_is_titled_by_its_label_and_its_value() {
 }
 
 #[test]
+fn req_a_021_the_small_region_is_named_and_never_drawn() {
+    // REQ-A-021
+    let with_small: Layout = serde_json::from_value(json!({
+        "lockScreen": { "type": "vstack", "children": [text("Ride"), text("Gate 4")] },
+        "small": { "type": "hstack", "children": [
+            { "type": "symbol", "name": "car.fill" },
+            text("On the wrist"),
+            { "type": "progress", "bind": "p" },
+        ] },
+        "island": { "minimal": text("m") },
+    }))
+    .unwrap();
+    let projection = projected(&with_small, json!({ "p": 0.5 }));
+    // The notification is the Lock Screen tree: nothing of the small region shows in it.
+    assert_eq!(projection.snapshot.title, "Ride");
+    assert_eq!(projection.snapshot.status, "Gate 4");
+    // Its progress does not make the notification one with a progress either.
+    assert_eq!(template(&with_small), liveupdate::Template::BigText);
+    // The region is named after the island, with the other parts of the layout that Android does not draw.
+    assert_eq!(projection.degraded, ["layout.island", "layout.small"]);
+
+    let without = layout(json!({ "type": "vstack", "children": [text("Ride"), text("Gate 4")] }));
+    assert!(projected(&without, json!({})).degraded.is_empty());
+}
+
+#[test]
 fn req_a_014_a_layout_is_drawn_as_while_fresh_and_its_staleness_is_named() {
     // REQ-A-014
     let tree = layout(json!({ "type": "vstack", "children": [

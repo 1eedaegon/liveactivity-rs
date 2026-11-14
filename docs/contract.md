@@ -743,12 +743,20 @@ an Android content, or `link:<n>` for the nth `link` of the layout's lock screen
   },
   "background": Color | Binding,   // optional; tint of the activity background
   "keyline": Color | Binding,      // optional; tint of the Dynamic Island keyline
-  "url": Url | Binding             // optional; what a tap on the activity opens the app with
+  "url": Url | Binding,            // optional; what a tap on the activity opens the app with
+  "small": Node                    // optional; for a paired Apple Watch and CarPlay
 }
 ```
 
 Without `url` a tap opens the app without a URL. [Links and URLs](#links-and-urls) has the rule of
 a URL.
+
+`small` is what the activity shows where iOS asks for the small family: the Smart Stack of a paired Apple Watch
+(iOS 18) and CarPlay (iOS 26). It is drawn only when the widget extension's Info.plist sets
+`ActivityKitSmallFamily` to true ([iOS setup](ios-setup.md)); the extension then also draws the compact parts of
+a layout without the region in a row. Without the key iOS shows the compact parts itself, and the record of a
+layout with `small` names `layout.small`. A notification has no place for the region: Android draws nothing of it
+and names `layout.small`.
 
 On iOS an island part that the layout leaves out is drawn with a default: `expanded` is the lock
 screen tree in the bottom region; `compactLeading` and `minimal` are the first `symbol` node of the
@@ -811,7 +819,7 @@ Limits of a tree:
 - Depth at most 8. The root of a region has depth 1; a node in `children` or the `child` of a
   button, a toggle or a link is one deeper.
 - Nodes per region, containers included: `lockScreen` 40, each expanded region 12,
-  `compactLeading`, `compactTrailing` and `minimal` 3 each.
+  `compactLeading`, `compactTrailing` and `minimal` 3 each, `small` 12.
 - Buttons, toggles and links only in `lockScreen` and the expanded regions, never inside one of
   them, at most 4 per region, all three together.
 
@@ -1079,7 +1087,7 @@ progress is shown and no timer. A bound text shows its value as text.
    notification that a locked screen hides shows nothing private there, so the mark leaves nothing
    out;
 3. `layout.ifStale` when a node of the lock screen follows staleness, then `layout.island`,
-   `layout.styles`, `layout.background` and `layout.keyline`, when the request has them, and
+   `layout.small`, `layout.styles`, `layout.background` and `layout.keyline`, when the request has them, and
    `layout.url` when the notification does not open it. A notification draws no styles, so a bound
    color changes nothing on Android;
 4. `alert` when an update asked for one on a device that does not offer it, `alert.sound` when an

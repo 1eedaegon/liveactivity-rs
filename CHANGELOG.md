@@ -4,6 +4,14 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on activitykit 0.6.1, whose vocabulary this crate re-exports. Breaking for a Rust caller: `Layout`, which
+is activitykit's `LayoutRegions`, has the new public member `small`. JSON written for 0.6 reads unchanged.
+
+- A layout takes `small`: what the activity shows in the Smart Stack of a paired Apple Watch (iOS 18) and in
+  CarPlay (iOS 26), a tree of at most 12 nodes without buttons, toggles or links. iOS draws it when the widget
+  extension's Info.plist sets `ActivityKitSmallFamily` to true, and names `layout.small` otherwise.
+- Android draws nothing of the region, which a notification has no place for, and names `layout.small`.
+
 ## 0.6.0 - 2026-11-14
 
 - feat: a scheduled start on Android, with liveupdate 0.4 (#15) (`899c088`)

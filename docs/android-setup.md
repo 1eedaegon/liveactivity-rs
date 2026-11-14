@@ -583,6 +583,8 @@ fn main() {
 - **Staleness.** Nothing redraws a notification when a time passes. A layout whose nodes say
   `ifStale` is drawn as it is while fresh, and the record names `layout.ifStale`. The sink is told
   `stale` ([States](#states)): update the content then if the notification should say so.
+- **The small region.** A watch and a car show the notification by themselves. Nothing of a
+  layout's `small` is drawn, and the record names `layout.small`.
 - **A scheduled start.** The AAR posts the notification at the time, through an alarm and a
   receiver of its own: see [A scheduled start](#a-scheduled-start). With an AAR older than 0.4 it
   is `UNSUPPORTED_FEATURE`.

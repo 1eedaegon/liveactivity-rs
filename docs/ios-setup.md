@@ -146,6 +146,7 @@ templates, which this crate starts as layout activities with a fixed tree.
 | `NSSupportsLiveActivitiesFrequentUpdates` | app | `YES`, only for frequent pushes |
 | `ActivityKitLayout` | widget extension | the integer `2` |
 | `ActivityKitAppGroup` | widget extension | the App Group for images, only with `write_image` |
+| `ActivityKitSmallFamily` | widget extension | the Boolean `true`, to draw a layout's `small` region on a paired Apple Watch (iOS 18) and in CarPlay (iOS 26); without it iOS shows the compact parts there |
 | `UIAppFonts` | widget extension | the fonts the extension bundles, for the style member `fontFamily` |
 
 ## 6. An App Group, for images

@@ -122,6 +122,8 @@ pub(crate) fn layout(template: Template) -> (Layout, BTreeMap<String, Style>) {
         ),
         keyline: None,
         url: None,
+        // A watch and CarPlay show the compact parts of a template, as the system arranges them.
+        small: None,
     };
     (layout, styles())
 }

@@ -166,6 +166,8 @@ pub(crate) fn project(
         // The stale variant of the layout is never drawn.
         (follows_staleness(&layout.lock_screen), "layout.ifStale"),
         (layout.island.is_some(), "layout.island"),
+        // A watch and a car show the notification by themselves: the region for them is drawn nowhere.
+        (layout.small.is_some(), "layout.small"),
         (styled, "layout.styles"),
         (layout.background.is_some(), "layout.background"),
         (layout.keyline.is_some(), "layout.keyline"),

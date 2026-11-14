@@ -174,7 +174,8 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
     ///
     /// - `Now`: a state is due.
     /// - `Soon`: Android has not shown a post yet. Ask shortly, a little later each time, and give up after a few.
-    /// - `At`: the earliest stale time ahead, in epoch milliseconds. One that has passed means now.
+    /// - `At`: the earliest time ahead, in epoch milliseconds: a stale time, or the time of a scheduled start. One
+    ///   that has passed means now.
     /// - `Never`: nothing until the next call of the application or the next stored event.
     ///
     /// It reads liveupdate's receipts and asks Android nothing, so it does not know that the person removed a

@@ -250,7 +250,7 @@ pub struct Permissions {
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub enum ActivityState {
-    /// Scheduled and not started yet (iOS 26 reports it for a scheduled start).
+    /// Scheduled and not started yet: the state of a scheduled start until its time, on iOS 26 and on Android.
     Pending,
     /// On screen and taking updates.
     Active,

@@ -49,6 +49,8 @@ pub struct MemoryState {
     pub schedules: usize,
     /// How many of the next such hand-overs fail, as an alarm that could not be set.
     pub failing_schedules: usize,
+    /// The ids the lifecycle asked to take away: a notification, or the alarm of a scheduled receipt.
+    pub cancelled: Vec<String>,
 }
 
 impl MemoryState {
@@ -94,10 +96,12 @@ impl MemoryState {
         }
     }
 
-    /// Begins the scheduled receipts whose time has come, each once.
+    /// Begins the scheduled receipts whose time has come, each once. A receipt whose hand-over was not confirmed
+    /// has no alarm: it waits for the start that hands it over again.
     fn begin_due(&mut self) {
         let due = |record: &&DriverRecord| {
             record.state == ActivityState::Scheduled
+                && !record.post_failed
                 && record.origin.start_at.is_some_and(|at| at <= self.now)
                 && !self.begun.contains(&record.id)
         };
@@ -153,6 +157,7 @@ impl Default for MemoryDriver {
                 begun: BTreeSet::new(),
                 schedules: 0,
                 failing_schedules: 0,
+                cancelled: Vec::new(),
             })),
         }
     }
@@ -335,7 +340,9 @@ impl Driver for MemoryDriver {
     }
 
     fn cancel(&self, id: &str) -> liveupdate::Result<()> {
-        self.lock().observed.remove(id);
+        let mut state = self.lock();
+        state.observed.remove(id);
+        state.cancelled.push(id.to_owned());
         Ok(())
     }
 

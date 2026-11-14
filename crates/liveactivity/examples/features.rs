@@ -190,8 +190,9 @@ fn asked_to_mute(event: &Event) -> Option<bool> {
     }
 }
 
-/// A start at a later time, with the alert the system shows then and its sound, and a transient activity. Both are
-/// iOS's: Android refuses a scheduled start, keeps nothing of the iOS options, and names an alert's sound.
+/// A start at a later time, with the alert the system shows then and its sound, and a transient activity. Android
+/// takes a scheduled start where liveupdate's library begins one, keeps nothing of the iOS options, and names an
+/// alert's sound.
 async fn start_options_and_sounds(
     live: &LiveActivity,
     start: LayoutStartInput,

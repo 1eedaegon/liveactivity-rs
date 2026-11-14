@@ -384,10 +384,11 @@ Evidence: `exchange::req_a_015_a_scheduled_start_waits_on_android_and_begins_at_
 
 ## REQ-A-016 The rules of a pending activity on Android
 
-A pending activity follows the rules of the contract. The same start again answers it, whatever its time, and a
-scheduling that failed is made again by it. Another request under its key is `CONFLICT`. An update is `CONFLICT`.
-An end ends it, with any policy, and nothing is ever shown: a final content that comes with the end is not
-applied.
+A pending activity follows the rules of the contract. The same start again answers it, whatever its time and
+also without one, and a scheduling that failed is made again by it: until then that activity has no alarm, and
+nothing begins it. Another request under its key is `CONFLICT`. An update is `CONFLICT`. An end ends it, with any
+policy, and nothing is ever shown: a final content that comes with the end is checked and not applied. Its key is
+free then.
 
 Evidence: `exchange::req_a_016_a_pending_activity_keeps_its_key_takes_no_update_and_can_be_ended`.
 

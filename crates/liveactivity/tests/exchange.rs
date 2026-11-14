@@ -2218,24 +2218,70 @@ fn req_a_016_a_pending_activity_keeps_its_key_takes_no_update_and_can_be_ended()
     block_on(live.end_layout(liveactivity::LayoutEndInput::immediate(&began.id))).unwrap();
     driver.lock().posts = 0;
 
-    // An end ends it, and nothing is shown at its time.
+    // When and how an activity begins is no part of what makes two starts the same: the request without a time
+    // is the activity that waits.
+    let at_once = block_on(live.start_layout(muted_ride("ride:7", none()))).unwrap();
+    assert_eq!(
+        (at_once.id.as_str(), at_once.state),
+        (pending.id.as_str(), ActivityState::Pending)
+    );
+
+    // An end ends it: its alarm is taken away, nothing is shown at its time, and its key is free.
     let ended = block_on(live.end_layout(liveactivity::LayoutEndInput::immediate(&pending.id)));
     assert_eq!(ended.unwrap().state, ActivityState::Ended);
-    // With any policy, also on a device that keeps no last content, and its final content is not applied.
-    let last = serde_json::json!({ "id": retried.id, "policy": { "kind": "after", "at": 500_000 },
-        "snapshot": { "revision": 1, "values": { "eta": "Arrived", "muted": false } } });
-    let last = liveactivity::parse_request("end_layout", last).unwrap();
-    let ended = block_on(live.end_layout(last)).unwrap();
+    assert!(driver.lock().cancelled.contains(&pending.id));
+    assert_ne!(start("ride:7", 60_000).unwrap().id, pending.id);
+    // With any policy, also on a device that keeps no last content. Its final content is checked as that of any
+    // end, and is not applied.
+    let last = |values: serde_json::Value| {
+        let end = serde_json::json!({ "id": retried.id, "policy": { "kind": "after", "at": 500_000 },
+            "snapshot": { "revision": 1, "values": values } });
+        liveactivity::parse_request::<liveactivity::LayoutEndInput>("end_layout", end).unwrap()
+    };
+    let undeclared =
+        last(serde_json::json!({ "eta": "Arrived", "muted": false, "driver": "Mochi" }));
+    assert_eq!(
+        block_on(live.end_layout(undeclared)).unwrap_err().code,
+        "INVALID_INPUT"
+    );
+    let arrived = last(serde_json::json!({ "eta": "Arrived", "muted": false }));
+    let ended = block_on(live.end_layout(arrived)).unwrap();
     assert_eq!(
         (ended.state, ended.snapshot.revision),
         (ActivityState::Ended, 0)
     );
+    for id in block_on(live.list_layout())
+        .unwrap()
+        .into_iter()
+        .map(|record| record.id)
+    {
+        block_on(live.end_layout(liveactivity::LayoutEndInput::immediate(&id))).unwrap();
+    }
     driver.lock().now = 90_000;
     driver.fire_alarms();
     block_on(live.list_layout()).unwrap();
-    let state = driver.lock();
-    assert_eq!(state.posts, 0);
-    assert!(state.observed.is_empty() && state.finals.is_empty());
+    {
+        let state = driver.lock();
+        assert_eq!(state.posts, 0);
+        assert!(state.observed.is_empty() && state.finals.is_empty());
+    }
+
+    // A scheduling that failed has no alarm: its time passes and nothing begins it, neither the alarm nor a
+    // call of the application. The same start does, at once.
+    let (live, _events, driver) = android_on(scheduling(), "pending-unset");
+    driver.lock().failing_schedules = 1;
+    assert!(block_on(live.start_layout(scheduled_ride("ride:7", 60_000, none()))).is_err());
+    driver.lock().now = 60_000;
+    driver.fire_alarms();
+    let listed = block_on(live.list_layout()).unwrap();
+    assert_eq!(listed[0].state, ActivityState::Pending);
+    assert_eq!(driver.lock().posts, 0);
+    let begun = block_on(live.start_layout(scheduled_ride("ride:7", 60_000, none()))).unwrap();
+    assert_eq!(
+        (begun.id.as_str(), begun.state),
+        (listed[0].id.as_str(), ActivityState::Active)
+    );
+    assert_eq!(driver.posted(&begun.id).title, "6 min");
 }
 
 #[test]
@@ -2264,7 +2310,11 @@ fn req_a_017_a_scheduled_start_alerts_when_it_begins_where_the_device_alerts() {
     driver.lock().now = 60_000;
     driver.fire_alarms();
     for record in [&loud, &plain] {
-        assert!(driver.posted(&record.id).presentation.unwrap().alert);
+        let posted = driver.posted(&record.id);
+        assert!(posted.presentation.as_ref().unwrap().alert);
+        // The notification alerts with its own content: the alert's title and body are iOS's.
+        let written = serde_json::to_string(&posted).unwrap();
+        assert!(!written.contains("Your ride") && !written.contains("It starts now"));
     }
 
     // A device that alerts once begins it silently, and the record names the alert.

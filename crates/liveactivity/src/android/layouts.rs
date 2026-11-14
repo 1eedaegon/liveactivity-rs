@@ -141,21 +141,8 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
             ));
         }
         let input = match under_the_key {
-            // One that waits for its time is asked of liveupdate as the request liveupdate keeps: it answers
-            // the activity, and hands it to the Android side again where that failed.
             Some((record, entry)) if record.state == liveupdate::ActivityState::Scheduled => {
-                let again = liveupdate::StartRequest {
-                    activity_key: record.activity_key.clone(),
-                    schema_version: 2,
-                    template: record.template,
-                    fallback: android_liveupdate::fallback(input.fallback),
-                    visibility: visibility(&input),
-                    snapshot: record.snapshot.clone(),
-                    placement: placement(&input),
-                    start_at: record.start_at,
-                };
-                let record = updates.start(again).map_err(android_liveupdate::error)?;
-                return Ok(layout_record(&record, entry));
+                return waiting(updates, record, entry);
             }
             // The same request as a running activity that Android shows is that activity, whatever this device
             // would make of the request now: what a projection uses follows what the device offers, which may
@@ -173,6 +160,8 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         };
         let mut offered = Offered::of(updates);
         let begins = input.scheduled.as_ref();
+        // A scheduled start alerts when it begins, as an update with an alert does.
+        let alert = begins.map(|scheduled| &scheduled.alert);
         // The request is one of the contract, which liveupdate would call invalid: Android cannot serve it.
         if begins.is_some() && placement(&input) == liveupdate::Placement::Foreground {
             return Err(Error::unsupported_feature(
@@ -183,8 +172,6 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         // The second turn, when there is one, sends the projection without its links: see `unlinked`.
         let mut links = true;
         let (record, entry) = loop {
-            // A scheduled start alerts when it begins, as an update with an alert does.
-            let alert = begins.map(|scheduled| &scheduled.alert);
             let projection = self.sent(&mut offered, &input, &input.snapshot, alert, links)?;
             let retry = links && unlinked(&input.snapshot, &projection.snapshot);
             // The style of the first snapshot: its content's, or else the one the layout projects to.
@@ -257,12 +244,13 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
             .map(|record| record.state);
         let waits = state == Some(liveupdate::ActivityState::Scheduled);
         let live = state.is_some() && !waits;
-        let last = input.snapshot.filter(|_| live).map(for_android);
+        let last = input.snapshot.filter(|_| state.is_some()).map(for_android);
         // The final content is checked before the device is asked, so that a request that is wrong everywhere is
-        // not answered as one this device cannot serve.
+        // not answered as one this device cannot serve; also that of an activity that waits, which is not sent.
         if let Some(snapshot) = &last {
             fits(entry, &input.id, snapshot)?;
         }
+        let last = last.filter(|_| live);
         // liveupdate refuses a delayed end where the device offers none. Asked here first, the refusal comes
         // before the final snapshot is shown, and the activity stays as it was.
         let delayed = matches!(input.policy, EndPolicy::After { .. });
@@ -778,14 +766,36 @@ fn control(node: &Node, action_id: &str) -> bool {
     }
 }
 
-/// Whether two starts are the same request. The time of a scheduled start and its alert are no part of it, as on
-/// iOS: the same request under a key answers the activity that waits, whatever its time.
+/// Whether two starts are the same request. When and how the activity begins is no part of it, as on iOS: the
+/// same request under a key answers the activity that waits or runs, whatever its time, and with or without one.
 fn same_start(kept: &LayoutStartInput, asked: &LayoutStartInput) -> bool {
-    let unscheduled = |input: &LayoutStartInput| LayoutStartInput {
-        scheduled: None,
-        ..input.clone()
+    let asked = LayoutStartInput {
+        scheduled: kept.scheduled.clone(),
+        ..asked.clone()
     };
-    unscheduled(kept) == unscheduled(asked)
+    *kept == asked
+}
+
+/// The answer to the same start as that of an activity that waits for its time. liveupdate is asked with the
+/// request it keeps, which its own record holds: it answers the activity, and hands it to its Android side again
+/// where that had failed. It asks the device first, so this fails as a start does while notifications are off.
+fn waiting<D: liveupdate::Driver>(
+    updates: &liveupdate::LiveUpdate<D>,
+    record: &liveupdate::ActivityRecord,
+    entry: &Entry,
+) -> Result<LayoutActivityRecord> {
+    let kept = liveupdate::StartRequest {
+        activity_key: record.activity_key.clone(),
+        schema_version: 2,
+        template: record.template,
+        fallback: android_liveupdate::fallback(entry.origin.fallback),
+        visibility: visibility(&entry.origin),
+        snapshot: record.snapshot.clone(),
+        placement: placement(&entry.origin),
+        start_at: record.start_at,
+    };
+    let record = updates.start(kept).map_err(android_liveupdate::error)?;
+    Ok(layout_record(&record, entry))
 }
 
 fn running(record: &liveupdate::ActivityRecord) -> bool {

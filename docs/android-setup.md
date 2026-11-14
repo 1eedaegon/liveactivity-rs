@@ -635,6 +635,9 @@ start asks for the foreground placement, which a scheduled start cannot have.
 **A scheduled activity begins minutes late.** The application may not set exact alarms
 (`exactStart` is false): see [A scheduled start](#a-scheduled-start).
 
+**A scheduled activity is `pending` and never begins.** Its start answered an error: the alarm
+could not be set, and the activity is kept without one. Send the same start again, or end it.
+
 **`end` answers `UNSUPPORTED_FEATURE`.** The policy is `after` and the device does not offer
 `delayedEnd`: the AAR is older than 0.2, or the host's own Android side does not report it.
 

@@ -316,7 +316,8 @@ The activity starts at that time instead of now, where the system can begin it b
 and Android with liveupdate's library 0.4 or later (`androidPresentation.scheduledStart`). Until
 then its record is `pending`:
 
-- it holds its key, so the same start again answers it, whatever its time;
+- it holds its key, so the same start again answers it, whatever its time, and so does that
+  request without a time: when an activity begins is no part of what makes two starts the same;
 - it can be ended, with any policy, and nothing is shown;
 - an update is `CONFLICT`: the activity begins with the content of its start, whatever was sent
   meanwhile;
@@ -343,7 +344,12 @@ application does not run:
 - **The sink** is told `pending` once, as it is told every state on Android.
 - **Not with the foreground placement**: `UNSUPPORTED_FEATURE`, since a service holds a notification
   that is there.
-- **The end** takes no final content: nothing was shown, and nothing will be.
+- **The end** takes no final content: nothing was shown, and nothing will be. The content is checked
+  as that of any end, and not applied.
+- **A start that failed.** When the alarm could not be set, the start answers the error
+  (`NATIVE_ERROR`), and the activity is kept as `pending` without an alarm: the list has it, the
+  sink is not told, and nothing begins it. The same start again sets the alarm, or begins the
+  activity when its time has passed. So repeat a start that failed, or end the activity.
 
 ### update_layout
 

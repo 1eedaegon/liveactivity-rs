@@ -4,6 +4,28 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.4.0: an application takes `liveupdate-android-0.4.0.aar`. Breaking for a host that writes
+liveupdate's `StartRequest` as a struct literal, through the re-export: it has the new member `start_at`.
+
+- A scheduled start is taken on Android. liveupdate's Android library sets an alarm and posts the notification at
+  the time, also while the application does not run. Until then the record is `pending`, with the rules the
+  contract has for it: the same start again answers it, whatever its time; an update is `CONFLICT`; an end ends it,
+  with any policy, and nothing is shown. A start with the foreground placement, and one on a device whose library
+  is older than 0.4, is `UNSUPPORTED_FEATURE`, as every scheduled start on Android was.
+- The notification alerts when it begins, where the device offers an alert; elsewhere the record names `alert`. A
+  sound of the alert is named `alert.sound`.
+- The sink is told `pending` once and `active` once when the activity has begun, also when it began while the
+  application did not run. One that the person removed meanwhile, or that Android could not post, is told
+  `dismissed` with no `active`. One whose alarm was lost begins at the application's next call. `next_check` names
+  the start time.
+- The capabilities of the Android presentation have `scheduledStart` and `exactStart`: whether a start can be
+  scheduled, and whether it begins at its time or when Android chooses. The time is exact with the permission for
+  exact alarms, which the application declares and the person grants; the Android setup says how, and how a
+  start survives a restart of the device.
+- liveupdate 0.3.3 and 0.4.0 also bring: from Android 15 a post whose header clock is more than 14 days old is
+  refused with `INVALID_INPUT` in place of being dropped by Android without a word, and `LiveUpdateForeground.attach`
+  works again for an activity that Rust started.
+
 ## 0.5.2 - 2026-11-14
 
 - fix: an end answers ended on iOS, also when the system has reported dismissed (#13) (`46570ab`)

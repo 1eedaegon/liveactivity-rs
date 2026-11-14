@@ -22,7 +22,7 @@ Each requirement is a row of `docs/requirements.md` with the test that is its ev
 | Id | Requirement |
 | --- | --- |
 | REQ-A-015 | A start with `scheduled` is taken on Android where liveupdate offers it: the time reaches liveupdate, and the record is `pending`. Where it does not offer it, as with an older Android library in the application, the start is `UNSUPPORTED_FEATURE` and nothing is kept, as before. A time that has passed begins the activity at once. |
-| REQ-A-016 | A pending activity follows the rules of the contract: the same start again answers it, whatever its time; another request under its key is `CONFLICT`; an update is `CONFLICT`; an end ends it, and nothing is ever shown. |
+| REQ-A-016 | A pending activity follows the rules of the contract: the same start again answers it, whatever its time, and makes a scheduling that failed again; another request under its key is `CONFLICT`; an update is `CONFLICT`; an end ends it, with any policy, and nothing is ever shown: a final content that comes with the end is not applied. |
 | REQ-A-017 | The activity alerts when it begins, where the device offers an alert: the contract's scheduled start always carries one. A sound the alert names is reported as `alert.sound`. The alert's title and body are iOS's: a notification alerts with its own content. |
 | REQ-A-018 | The sink is told `pending` once, and `active` once when the activity has begun; an activity that the person removed before the application ran again, or that Android could not post at its time, is told `dismissed` without an `active`. The time the backend should next be asked at is the earliest start time, with the stale times. |
 | REQ-A-019 | The capabilities say whether a scheduled start is offered and whether its alarm is exact, as liveupdate reports both. |
@@ -41,8 +41,11 @@ Each requirement is a row of `docs/requirements.md` with the test that is its ev
   begins at the application's next call. The record says `active` then. An application that must not show a late
   activity compares the time with its clock and ends it.
 - **`scheduled` is no part of what makes two starts the same.** As on iOS, the same request under a key answers
-  the pending activity whatever its time; liveupdate itself would call another time a conflict, so the crate
-  answers from the request it keeps before it asks.
+  the pending activity whatever its time. liveupdate itself would call another time a conflict, so the crate
+  compares with the request it keeps, and then asks liveupdate with the request liveupdate keeps: liveupdate
+  answers the activity, and hands it to its Android side again when that had failed.
+- **An end of a pending activity needs no device that keeps a last content.** Nothing was shown, so the policy
+  has nothing to say, and liveupdate is asked for an end without a time.
 
 ## Not in this change
 

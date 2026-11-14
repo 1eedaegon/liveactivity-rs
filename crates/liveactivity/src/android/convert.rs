@@ -13,6 +13,8 @@ pub(crate) fn start_request(input: StartInput) -> liveupdate::StartRequest {
         visibility: liveupdate::Visibility::Private,
         snapshot: live_snapshot(input.snapshot),
         placement: liveupdate::Placement::Tagged,
+        // The template contract has no scheduled start.
+        start_at: None,
     }
 }
 
@@ -200,6 +202,8 @@ pub(crate) fn activity_state(value: liveupdate::ActivityState) -> ActivityState 
         liveupdate::ActivityState::Stale => ActivityState::Stale,
         liveupdate::ActivityState::Ended => ActivityState::Ended,
         liveupdate::ActivityState::Dismissed => ActivityState::Dismissed,
+        // An activity that waits for its scheduled start.
+        liveupdate::ActivityState::Scheduled => ActivityState::Pending,
         liveupdate::ActivityState::Unknown => ActivityState::Unknown,
         _ => ActivityState::Unknown,
     }
@@ -268,6 +272,7 @@ mod tests {
             degraded_features: vec!["nativeLiveActivity".into()],
             promotion_requested: true,
             promotion_state: liveupdate::PromotionState::NotPromoted,
+            start_at: None,
         })
         .unwrap();
 
@@ -311,6 +316,7 @@ mod tests {
             degraded_features: Vec::new(),
             promotion_requested: false,
             promotion_state: liveupdate::PromotionState::NotApplicable,
+            start_at: None,
         });
         assert_eq!(record.unwrap_err().code, "NATIVE_ERROR");
     }

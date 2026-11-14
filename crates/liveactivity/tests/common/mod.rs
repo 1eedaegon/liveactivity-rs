@@ -2,17 +2,19 @@
 //! a notification observable, `cancel` removes it, and storage keeps exactly what `write` received. The post of
 //! an ended record is its last content, which Android shows until its time and no longer observes. A post whose
 //! content names a URL of the scheme [`UNOPENED`] is refused, as Android refuses a URL that nothing in the
-//! application opens.
+//! application opens. A scheduled receipt is posted when the device's clock has reached its time: by
+//! [`MemoryDriver::fire_alarms`], which is the alarm while the application does not run, or when the lifecycle asks
+//! for the starts, which is how a start whose alarm was lost begins.
 #![allow(dead_code)]
 
 use liveactivity::liveupdate::{
     self, ActivityEvent, ActivityState, Bridge, Capabilities, Driver, DriverRecord, EventBatch,
-    Observation, PresentationCapabilities, PromotionState,
+    Observation, PresentationCapabilities, PromotionState, StartOutcome, StartReport,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex, MutexGuard},
 };
 
@@ -41,6 +43,80 @@ pub struct MemoryState {
     pub observations: usize,
     /// How many of the next such questions fail.
     pub failing_observations: usize,
+    /// The scheduled receipts that the Android side has begun, by id: each is posted once.
+    pub begun: BTreeSet<String>,
+    /// How often a receipt was handed over to begin at its time.
+    pub schedules: usize,
+    /// How many of the next such hand-overs fail, as an alarm that could not be set.
+    pub failing_schedules: usize,
+}
+
+impl MemoryState {
+    /// Counts a post, and fails it while posts are set to fail.
+    fn attempt(&mut self) -> liveupdate::Result<()> {
+        self.posts += 1;
+        if self.failing_posts > 0 {
+            self.failing_posts -= 1;
+            return Err(liveupdate::Error::new(
+                liveupdate::ErrorCode::NativeError,
+                "Posting failed.",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Shows `record` as Android does: listed at once, or a moment later while `delay_listing` is set.
+    fn list(&mut self, record: &DriverRecord) {
+        let promotion_state = if record.promotion_requested {
+            PromotionState::Promoted
+        } else {
+            PromotionState::NotApplicable
+        };
+        let observation = Observation {
+            id: record.id.clone(),
+            snapshot: record.snapshot.clone(),
+            state: ActivityState::Active,
+            promotion_requested: record.promotion_requested,
+            promotion_state,
+        };
+        if self.delay_listing {
+            self.unlisted.insert(record.id.clone(), observation);
+        } else {
+            self.observed.insert(record.id.clone(), observation);
+        }
+    }
+
+    /// Posts a scheduled receipt whose time has come. One that cannot be posted shows nothing.
+    fn begin(&mut self, record: &DriverRecord) {
+        self.begun.insert(record.id.clone());
+        if self.attempt().is_ok() {
+            self.list(record);
+        }
+    }
+
+    /// Begins the scheduled receipts whose time has come, each once.
+    fn begin_due(&mut self) {
+        let due = |record: &&DriverRecord| {
+            record.state == ActivityState::Scheduled
+                && record.origin.start_at.is_some_and(|at| at <= self.now)
+                && !self.begun.contains(&record.id)
+        };
+        let due: Vec<DriverRecord> = self.records.iter().filter(due).cloned().collect();
+        for record in due {
+            self.begin(&record);
+        }
+    }
+}
+
+/// Whether `record` names a URL that nothing in the application opens.
+fn unopened(record: &DriverRecord) -> bool {
+    record.snapshot.presentation.as_ref().is_some_and(|shown| {
+        let of_actions = shown.actions.iter().map(|action| &action.open_url);
+        std::iter::once(&shown.open_url)
+            .chain(of_actions)
+            .flatten()
+            .any(|url| url.starts_with(UNOPENED))
+    })
 }
 
 #[derive(Clone)]
@@ -74,6 +150,9 @@ impl Default for MemoryDriver {
                 unlisted: BTreeMap::new(),
                 observations: 0,
                 failing_observations: 0,
+                begun: BTreeSet::new(),
+                schedules: 0,
+                failing_schedules: 0,
             })),
         }
     }
@@ -136,6 +215,12 @@ impl MemoryDriver {
         self.lock().events.events.push(event);
     }
 
+    /// The alarm of the Android side, which fires while the application does not run: the scheduled receipts
+    /// whose time has come are posted.
+    pub fn fire_alarms(&self) {
+        self.lock().begin_due();
+    }
+
     /// The snapshot liveupdate last posted for `id`.
     pub fn posted(&self, id: &str) -> liveupdate::Snapshot {
         self.lock().observed[id].snapshot.clone()
@@ -188,22 +273,8 @@ impl Driver for MemoryDriver {
 
     fn post(&self, record: &DriverRecord) -> liveupdate::Result<()> {
         let mut state = self.lock();
-        state.posts += 1;
-        if state.failing_posts > 0 {
-            state.failing_posts -= 1;
-            return Err(liveupdate::Error::new(
-                liveupdate::ErrorCode::NativeError,
-                "Posting failed.",
-            ));
-        }
-        let unopened = record.snapshot.presentation.as_ref().is_some_and(|shown| {
-            let of_actions = shown.actions.iter().map(|action| &action.open_url);
-            std::iter::once(&shown.open_url)
-                .chain(of_actions)
-                .flatten()
-                .any(|url| url.starts_with(UNOPENED))
-        });
-        if unopened {
+        state.attempt()?;
+        if unopened(record) {
             return Err(liveupdate::Error::new(
                 liveupdate::ErrorCode::InvalidInput,
                 "No activity of the application opens the URL.",
@@ -214,24 +285,53 @@ impl Driver for MemoryDriver {
             state.finals.insert(record.id.clone(), record.clone());
             return Ok(());
         }
-        let promotion_state = if record.promotion_requested {
-            PromotionState::Promoted
-        } else {
-            PromotionState::NotApplicable
-        };
-        let observation = Observation {
-            id: record.id.clone(),
-            snapshot: record.snapshot.clone(),
-            state: ActivityState::Active,
-            promotion_requested: record.promotion_requested,
-            promotion_state,
-        };
-        if state.delay_listing {
-            state.unlisted.insert(record.id.clone(), observation);
-        } else {
-            state.observed.insert(record.id.clone(), observation);
+        state.list(record);
+        Ok(())
+    }
+
+    fn schedule(&self, record: &DriverRecord) -> liveupdate::Result<()> {
+        let mut state = self.lock();
+        state.schedules += 1;
+        if state.failing_schedules > 0 {
+            state.failing_schedules -= 1;
+            return Err(liveupdate::Error::new(
+                liveupdate::ErrorCode::NativeError,
+                "The alarm could not be set.",
+            ));
+        }
+        // The receipt is checked as a post is.
+        if unopened(record) {
+            return Err(liveupdate::Error::new(
+                liveupdate::ErrorCode::InvalidInput,
+                "No activity of the application opens the URL.",
+            ));
+        }
+        // A time that has passed begins the activity at once.
+        if record.origin.start_at.is_some_and(|at| at <= state.now) {
+            state.begin(record);
         }
         Ok(())
+    }
+
+    fn starts(&self) -> liveupdate::Result<Vec<StartReport>> {
+        let mut state = self.lock();
+        state.begin_due();
+        // Of the receipts it began, those that Android does not list: posted a moment ago, or not shown.
+        let scheduled = |id: &&String| {
+            let waits = |record: &DriverRecord| {
+                record.id == **id && record.state == ActivityState::Scheduled
+            };
+            state.records.iter().any(waits) && !state.observed.contains_key(*id)
+        };
+        let report = |id: &String| StartReport {
+            id: id.clone(),
+            outcome: if state.unlisted.contains_key(id) {
+                StartOutcome::Posted
+            } else {
+                StartOutcome::Gone
+            },
+        };
+        Ok(state.begun.iter().filter(scheduled).map(report).collect())
     }
 
     fn cancel(&self, id: &str) -> liveupdate::Result<()> {
@@ -270,6 +370,10 @@ impl Bridge for StringBridge {
                 .cancel(&member::<String>(&payload, "id"))
                 .map(|()| Value::Null),
             "events" => driver.drain_events().map(|data| json!(data)),
+            "schedule" => driver
+                .schedule(&member::<DriverRecord>(&payload, "record"))
+                .map(|()| Value::Null),
+            "starts" => driver.starts().map(|data| json!(data)),
             other => panic!("unknown bridge command {other}"),
         };
         let envelope = match data {

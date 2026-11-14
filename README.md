@@ -78,7 +78,7 @@ cargo run -p liveactivity --example features --features testkit
 | [Links](#links-accessibility-and-motion) | a `link` node, `Layout.url` | ✓ | ✓ the notification and its actions open them, where the device opens URLs |
 | [Accessibility, motion, privacy](#links-accessibility-and-motion) | members of a node and of a style | ✓ | a label is the text of what a notification cannot draw; motion and privacy are named as left out |
 | [Alerts](#alerts-and-relevance) | `LayoutUpdateInput.alert` | ✓ | ✓ where the device alerts again; else silent, reported as `alert` |
-| [A scheduled start](#start-options-and-sounds) | `LayoutStartInput.scheduled` | ✓ from iOS 26 | `UNSUPPORTED_FEATURE` |
+| [A scheduled start](#start-options-and-sounds) | `LayoutStartInput.scheduled` | ✓ from iOS 26 | ✓ with liveupdate's library 0.4; on the minute with the exact-alarm permission |
 | [A transient activity, an alert's sound](#start-options-and-sounds) | `LayoutStartInput.ios`, `Alert::with_sound` | ✓ | not kept; a sound is reported as `alert.sound` |
 | [Relevance](#alerts-and-relevance) | `LayoutSnapshot.relevance` | ✓ | ignored |
 | [Android content](#android-content) | `LayoutSnapshot.android` | ignored | ✓ |
@@ -311,9 +311,13 @@ live.start_layout(transient).await?;
 ```
 
 - **A scheduled start** begins at `at`, in epoch milliseconds, with the alert
-  the system shows then (iOS 26). The sink receives `State` with `active` when
-  it begins. An older iOS and Android answer `UNSUPPORTED_FEATURE`: a
-  notification is posted when it is asked for.
+  the system shows then, also while the application does not run: iOS 26, and
+  Android where `android_presentation.scheduled_start` says so (liveupdate's
+  library 0.4 or later). The sink receives `State` with `active` when it
+  begins. Android begins it at its time with the permission for exact alarms
+  (`exact_start`), and within some minutes without; see
+  [Android setup](docs/android-setup.md#a-scheduled-start). Elsewhere the
+  start is `UNSUPPORTED_FEATURE`.
 - **`ios`** holds what only iOS reads, as `android` does for Android. It is no
   part of what makes two starts the same activity.
 - **A sound** is the name of a file in the application's bundle or in its

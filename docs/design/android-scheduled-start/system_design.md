@@ -6,8 +6,10 @@
 2. The backend drops what Android has no use for (pushes, the iOS options) and reconciles with liveupdate.
 3. A running or pending activity under the key is compared without `scheduled`: the same request answers that
    activity, another is `CONFLICT`.
-4. Where liveupdate does not offer a scheduled start, or the start asks for the foreground placement, the answer
-   is `UNSUPPORTED_FEATURE`, and nothing is kept.
+4. A start that asks for the foreground placement is `UNSUPPORTED_FEATURE` before anything is kept. Where
+   liveupdate does not offer a scheduled start, its own refusal is the answer, `UNSUPPORTED_FEATURE` as well: it
+   keeps no receipt, and the entry the backend wrote for the start goes at the next reconciliation, as after any
+   start that Android refused.
 5. The layout is projected as for a start now, with the alert of `scheduled` as the alert of an update is
    projected: `alert` in the presentation where the device offers it, `alert` named otherwise, `alert.sound`
    named for a sound.
@@ -19,10 +21,10 @@
 
 | Call | Answer |
 | --- | --- |
-| The same start, whatever its time | the pending record |
+| The same start, whatever its time | the pending record: liveupdate is asked with the request it keeps, and sets the alarm again where that had failed |
 | Another start under the key | `CONFLICT` |
 | An update | `CONFLICT` |
-| An end, with any policy | the record, `ended`; nothing is shown |
+| An end, with any policy and on any device | the record, `ended`; nothing is shown, and a final content is not applied |
 | A list | the record, `pending` |
 
 ## At the time

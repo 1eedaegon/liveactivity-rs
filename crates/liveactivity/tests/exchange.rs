@@ -2088,3 +2088,304 @@ fn req_a_014_android_names_what_it_leaves_of_staleness_and_sounds_and_refuses_a_
     assert!(!driver.posted(&record.id).presentation.unwrap().alert);
     assert!(named(&updated, "alert") && !named(&updated, "alert.sound"));
 }
+
+/// A [`muted_ride`] that begins at `at`, with the alert the contract asks of a scheduled start, and what else the
+/// start says in `more`.
+fn scheduled_ride(key: &str, at: u64, more: serde_json::Value) -> liveactivity::LayoutStartInput {
+    let mut members = serde_json::json!({ "scheduled": { "at": at,
+        "alert": { "title": "Your ride", "body": "It starts now" } } });
+    let more = more.as_object().unwrap().clone();
+    members.as_object_mut().unwrap().extend(more);
+    muted_ride(key, members)
+}
+
+/// A device whose liveupdate begins an activity at a time.
+fn scheduling() -> MemoryDriver {
+    MemoryDriver::offering(|offered| offered.scheduled_start = true)
+}
+
+#[test]
+fn req_a_015_a_scheduled_start_waits_on_android_and_begins_at_its_time() {
+    // REQ-A-015
+    let none = || serde_json::json!({});
+    let (live, _events, driver) = android_on(scheduling(), "scheduled");
+    driver.lock().now = 1_000;
+    let record = block_on(live.start_layout(scheduled_ride("ride:7", 60_000, none()))).unwrap();
+    assert_eq!(record.state, ActivityState::Pending);
+    // The time reached liveupdate, which handed the receipt to its Android side: nothing is posted.
+    {
+        let state = driver.lock();
+        assert_eq!((state.schedules, state.posts), (1, 0));
+        assert_eq!(state.records[0].origin.start_at, Some(60_000));
+        assert!(state.observed.is_empty());
+    }
+    let listed = block_on(live.list_layout()).unwrap();
+    assert_eq!(listed[0].state, ActivityState::Pending);
+    // At its time the Android side posts it, while the application does not run. The next call finds it running.
+    driver.lock().now = 60_000;
+    driver.fire_alarms();
+    let listed = block_on(live.list_layout()).unwrap();
+    assert_eq!(
+        (listed[0].id.as_str(), listed[0].state),
+        (record.id.as_str(), ActivityState::Active)
+    );
+    assert_eq!(driver.posted(&record.id).title, "6 min");
+    // A time that has passed begins the activity at once: its record is never pending.
+    let late = block_on(live.start_layout(scheduled_ride("ride:8", 59_000, none()))).unwrap();
+    assert_eq!(late.state, ActivityState::Active);
+    assert_eq!(driver.posted(&late.id).title, "6 min");
+
+    // Where liveupdate offers no scheduled start, the start is refused and nothing is kept: nothing reaches the
+    // Android side, and the key starts an activity.
+    let (bare, _events, driver) = android_with_files("scheduled-none");
+    let refused = block_on(bare.start_layout(scheduled_ride("ride:7", 60_000, none())));
+    assert_eq!(refused.unwrap_err().code, "UNSUPPORTED_FEATURE");
+    {
+        let state = driver.lock();
+        assert_eq!((state.schedules, state.posts), (0, 0));
+        assert!(state.records.is_empty());
+    }
+    assert!(block_on(bare.list_layout()).unwrap().is_empty());
+    let now = block_on(bare.start_layout(muted_ride("ride:7", none()))).unwrap();
+    assert_eq!(driver.posted(&now.id).title, "6 min");
+}
+
+#[test]
+fn req_a_016_a_pending_activity_keeps_its_key_takes_no_update_and_can_be_ended() {
+    // REQ-A-016
+    let none = || serde_json::json!({});
+    let (live, _events, driver) = android_on(scheduling(), "pending");
+    driver.lock().now = 1_000;
+    let start = |key: &str, at: u64| block_on(live.start_layout(scheduled_ride(key, at, none())));
+    let kept = |key: &str| {
+        let state = driver.lock();
+        let of_key =
+            |record: &&liveactivity::liveupdate::DriverRecord| record.origin.activity_key == key;
+        state
+            .records
+            .iter()
+            .filter(of_key)
+            .map(|record| record.origin.start_at)
+            .collect::<Vec<_>>()
+    };
+    let pending = start("ride:7", 60_000).unwrap();
+
+    // The same start again answers it, and so does the same start with another time: the activity keeps its own.
+    for at in [60_000, 90_000] {
+        let again = start("ride:7", at).unwrap();
+        assert_eq!(
+            (again.id.as_str(), again.state),
+            (pending.id.as_str(), ActivityState::Pending)
+        );
+    }
+    assert_eq!(kept("ride:7"), [Some(60_000)]);
+    assert_eq!(driver.lock().schedules, 1);
+    // Another request under its key is a conflict.
+    let mut other = serde_json::to_value(scheduled_ride("ride:7", 60_000, none())).unwrap();
+    other["snapshot"]["values"]["eta"] = serde_json::json!("9 min");
+    let other = liveactivity::parse_request("start_layout", other).unwrap();
+    assert_eq!(
+        block_on(live.start_layout(other)).unwrap_err().code,
+        "CONFLICT"
+    );
+    // It begins with the content of its start: an update is a conflict, also one that repeats that content, and
+    // reaches nothing.
+    for (revision, eta) in [(1, "5 min"), (0, "6 min")] {
+        let early = muted_update(&pending.id, revision, eta, false, none());
+        assert_eq!(
+            block_on(live.update_layout(early)).unwrap_err().code,
+            "CONFLICT"
+        );
+    }
+    assert_eq!(driver.lock().posts, 0);
+
+    // A scheduling that failed is made again by the same start, at the time the activity keeps.
+    driver.lock().failing_schedules = 1;
+    assert!(start("ride:8", 70_000).is_err());
+    let retried = start("ride:8", 75_000).unwrap();
+    assert_eq!(retried.state, ActivityState::Pending);
+    assert_eq!(kept("ride:8"), [Some(70_000)]);
+    assert_eq!(driver.lock().schedules, 3);
+
+    // A start whose time has passed began at once. Until Android lists it, the same start with another time is
+    // still that activity: liveupdate is asked with the time the activity keeps.
+    driver.lock().delay_listing = true;
+    let began = start("ride:9", 500).unwrap();
+    assert_eq!(began.state, ActivityState::Unknown);
+    assert_eq!(start("ride:9", 800).unwrap().id, began.id);
+    assert_eq!(kept("ride:9"), [Some(500)]);
+    driver.show_unlisted();
+    block_on(live.end_layout(liveactivity::LayoutEndInput::immediate(&began.id))).unwrap();
+    driver.lock().posts = 0;
+
+    // An end ends it, and nothing is shown at its time.
+    let ended = block_on(live.end_layout(liveactivity::LayoutEndInput::immediate(&pending.id)));
+    assert_eq!(ended.unwrap().state, ActivityState::Ended);
+    // With any policy, also on a device that keeps no last content, and its final content is not applied.
+    let last = serde_json::json!({ "id": retried.id, "policy": { "kind": "after", "at": 500_000 },
+        "snapshot": { "revision": 1, "values": { "eta": "Arrived", "muted": false } } });
+    let last = liveactivity::parse_request("end_layout", last).unwrap();
+    let ended = block_on(live.end_layout(last)).unwrap();
+    assert_eq!(
+        (ended.state, ended.snapshot.revision),
+        (ActivityState::Ended, 0)
+    );
+    driver.lock().now = 90_000;
+    driver.fire_alarms();
+    block_on(live.list_layout()).unwrap();
+    let state = driver.lock();
+    assert_eq!(state.posts, 0);
+    assert!(state.observed.is_empty() && state.finals.is_empty());
+}
+
+#[test]
+fn req_a_017_a_scheduled_start_alerts_when_it_begins_where_the_device_alerts() {
+    // REQ-A-017
+    let none = || serde_json::json!({});
+    let named = |record: &liveactivity::LayoutActivityRecord, feature: &str| {
+        record.degraded_features.iter().any(|name| name == feature)
+    };
+    let with_a_sound = |key: &str| {
+        let scheduled = serde_json::json!({ "scheduled": { "at": 60_000,
+            "alert": { "title": "Your ride", "body": "It starts now", "sound": "chime.aiff" } } });
+        muted_ride(key, scheduled)
+    };
+    let alerting = MemoryDriver::offering(|offered| {
+        offered.scheduled_start = true;
+        offered.alert = true;
+    });
+    let (live, _events, driver) = android_on(alerting, "scheduled-alert");
+    driver.lock().now = 1_000;
+    // The receipt that the Android side posts at the time alerts. The sound is the channel's, and is named.
+    let loud = block_on(live.start_layout(with_a_sound("ride:7"))).unwrap();
+    assert!(named(&loud, "alert.sound") && !named(&loud, "alert"));
+    let plain = block_on(live.start_layout(scheduled_ride("ride:8", 60_000, none()))).unwrap();
+    assert!(!named(&plain, "alert.sound") && !named(&plain, "alert"));
+    driver.lock().now = 60_000;
+    driver.fire_alarms();
+    for record in [&loud, &plain] {
+        assert!(driver.posted(&record.id).presentation.unwrap().alert);
+    }
+
+    // A device that alerts once begins it silently, and the record names the alert.
+    let (live, _events, driver) = android_on(scheduling(), "scheduled-quiet");
+    let quiet = block_on(live.start_layout(with_a_sound("ride:7"))).unwrap();
+    assert!(named(&quiet, "alert") && !named(&quiet, "alert.sound"));
+    driver.lock().now = 60_000;
+    driver.fire_alarms();
+    assert!(!driver.posted(&quiet.id).presentation.unwrap().alert);
+}
+
+#[test]
+fn req_a_018_the_sink_hears_pending_and_what_became_of_the_start() {
+    // REQ-A-018
+    use liveactivity::liveupdate::NextCheck;
+    let none = || serde_json::json!({});
+    let driver = scheduling();
+    let files = liveactivity::android::AndroidFiles::new("Mochi", app_files("scheduled-states"));
+    let backend = Arc::new(LiveUpdateBackend::new(driver.clone()).with_files(files));
+    let (live, events) = connect(backend.clone());
+    let told = |id: &str, key: &str, state: ActivityState| {
+        assert_eq!(events.try_recv().unwrap(), state_of(id, key, state));
+        assert!(events.try_recv().is_err());
+    };
+    driver.lock().now = 1_000;
+
+    // Pending, once. The backend is next asked at the start time.
+    let mut request = scheduled_ride("ride:7", 60_000, none());
+    request.snapshot.stale_at = Some(900_000);
+    let ride = block_on(live.start_layout(request)).unwrap();
+    told(&ride.id, "ride:7", ActivityState::Pending);
+    assert_eq!(backend.next_check().unwrap(), NextCheck::At(60_000));
+    block_on(live.sync_events()).unwrap();
+    assert!(events.try_recv().is_err());
+    // It began while the application did not run: active, once, and the stale time is what is ahead.
+    driver.lock().now = 60_000;
+    driver.fire_alarms();
+    block_on(live.sync_events()).unwrap();
+    told(&ride.id, "ride:7", ActivityState::Active);
+    assert_eq!(backend.next_check().unwrap(), NextCheck::At(900_000));
+
+    // The person removed it before the application ran again: dismissed, with no active before it.
+    let removed = block_on(live.start_layout(scheduled_ride("ride:8", 120_000, none()))).unwrap();
+    told(&removed.id, "ride:8", ActivityState::Pending);
+    driver.lock().now = 120_000;
+    driver.fire_alarms();
+    driver.dismiss(&removed.id, 1);
+    block_on(live.sync_events()).unwrap();
+    told(&removed.id, "ride:8", ActivityState::Dismissed);
+    // Android could not post it at its time: the same.
+    let unposted = block_on(live.start_layout(scheduled_ride("ride:9", 180_000, none()))).unwrap();
+    told(&unposted.id, "ride:9", ActivityState::Pending);
+    driver.lock().now = 180_000;
+    driver.lock().failing_posts = 1;
+    driver.fire_alarms();
+    block_on(live.sync_events()).unwrap();
+    told(&unposted.id, "ride:9", ActivityState::Dismissed);
+
+    // The alarm was lost: the activity begins at the application's next call.
+    let lost = block_on(live.start_layout(scheduled_ride("ride:10", 240_000, none()))).unwrap();
+    told(&lost.id, "ride:10", ActivityState::Pending);
+    driver.lock().now = 240_000;
+    let listed = block_on(live.list_layout()).unwrap();
+    let state = |id: &str| {
+        listed
+            .iter()
+            .find(|record| record.id == id)
+            .map(|record| record.state)
+    };
+    assert_eq!(state(&lost.id), Some(ActivityState::Active));
+    assert_eq!(driver.posted(&lost.id).title, "6 min");
+    told(&lost.id, "ride:10", ActivityState::Active);
+
+    // A time that has passed: active, and no pending.
+    let late = block_on(live.start_layout(scheduled_ride("ride:11", 239_000, none()))).unwrap();
+    told(&late.id, "ride:11", ActivityState::Active);
+}
+
+#[test]
+fn req_a_019_the_capabilities_say_whether_a_start_can_be_scheduled_and_how_exactly() {
+    // REQ-A-019
+    let offered = |driver: MemoryDriver, test: &str| {
+        let (live, _events, _driver) = android_on(driver, test);
+        let capabilities = block_on(live.capabilities()).unwrap();
+        let json = serde_json::to_value(&capabilities).unwrap();
+        let presentation = capabilities.android_presentation.unwrap();
+        let read = (presentation.scheduled_start, presentation.exact_start);
+        let written = &json["androidPresentation"];
+        assert_eq!(written["scheduledStart"], serde_json::json!(read.0));
+        assert_eq!(written["exactStart"], serde_json::json!(read.1));
+        read
+    };
+    let exact = MemoryDriver::offering(|offered| {
+        offered.scheduled_start = true;
+        offered.exact_start = true;
+    });
+    assert_eq!(offered(exact, "capabilities-exact"), (true, true));
+    assert_eq!(offered(scheduling(), "capabilities-inexact"), (true, false));
+    assert_eq!(
+        offered(MemoryDriver::default(), "capabilities-unscheduled"),
+        (false, false)
+    );
+}
+
+#[test]
+fn req_a_020_a_scheduled_start_takes_no_foreground_placement() {
+    // REQ-A-020
+    let placed = |placement: &str| serde_json::json!({ "android": { "visibility": "private", "placement": placement } });
+    let offering = MemoryDriver::offering(|offered| {
+        offered.scheduled_start = true;
+        offered.foreground_placement = true;
+    });
+    let (live, _events, driver) = android_on(offering, "scheduled-foreground");
+    let held = block_on(live.start_layout(scheduled_ride("ride:7", 60_000, placed("foreground"))));
+    assert_eq!(held.unwrap_err().code, "UNSUPPORTED_FEATURE");
+    // Nothing is kept: nothing reached the Android side, and the key starts a scheduled activity that is tagged.
+    {
+        let state = driver.lock();
+        assert_eq!(state.schedules, 0);
+        assert!(state.records.is_empty());
+    }
+    let tagged = block_on(live.start_layout(scheduled_ride("ride:7", 60_000, placed("tagged"))));
+    assert_eq!(tagged.unwrap().state, ActivityState::Pending);
+}

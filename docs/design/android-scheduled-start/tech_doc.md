@@ -15,11 +15,13 @@
   activity keeps leaves `scheduled` out on both sides. The projection takes the alert of `scheduled` where it took
   none; the request gets `start_at`.
 - `android::convert`: `Scheduled` is `Pending`, in records and in states; the two capabilities.
-- `android::layouts::update`: a pending activity answers `CONFLICT` before liveupdate is asked, so that the
-  message is the contract's.
-- `layout::PresentationCapabilities`: `scheduled_start` and `exact_start`, absent from an older store or engine as
-  false.
-- The memory driver of the tests keeps a clock already; it gets the schedule and the reports of its starts.
+- `android::layouts::update`: a pending activity answers `CONFLICT` before liveupdate is asked, whatever the
+  revision: liveupdate would answer an update that repeats the content of the start.
+- `android::layouts::end`: a pending activity ends without a final content and without a time.
+- `layout::PresentationCapabilities` is liveupdate's type: `scheduled_start` and `exact_start` come with the
+  dependency, absent from an older library as false.
+- The memory driver of the tests keeps a clock already; it gets the schedule, an alarm the tests fire, and the
+  reports of its starts.
 
 ## What is checked on a device
 

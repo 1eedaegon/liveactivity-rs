@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.5.2 - 2026-11-14
+
+- fix: an end answers ended on iOS, also when the system has reported dismissed (#13) (`46570ab`)
+
 - On iOS an end answers the record as `ended`, as the contract says, also when ActivityKit has already reported
   the activity as `dismissed`. That report follows an end that removes the activity at once, and the answer was
   read from the handle after it. On an iPhone 16 with iOS 27.2 such an end did not answer `ended` in half of

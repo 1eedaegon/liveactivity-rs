@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.6.0 - 2026-11-14
+
+- feat: a scheduled start on Android, with liveupdate 0.4 (#15) (`899c088`)
+
 Built on liveupdate 0.4.0: an application takes `liveupdate-android-0.4.0.aar`. Breaking for a host that writes
 liveupdate's `StartRequest` as a struct literal, through the re-export: it has the new member `start_at`.
 

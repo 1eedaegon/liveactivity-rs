@@ -960,14 +960,11 @@ fn req_i_009_the_small_region_reaches_the_kit() {
     assert_eq!(starts[1].layout.small, None);
 
     // The region is a glance: no control, twelve nodes. The contract refuses the rest on every platform.
-    let refused = |small: Json| {
+    let read = |small: Json| {
         let request = json!({"activityKey":"ride:9","schemaVersion":2,"fallback":"none",
             "layout":{"lockScreen":text(),"small":small},
             "snapshot":{"revision":0,"values":{"status":"On the way","muted":false}}});
-        code(crate::parse_request::<LayoutStartInput>(
-            "start_layout",
-            request,
-        ))
+        crate::parse_request::<LayoutStartInput>("start_layout", request)
     };
     let label = || json!({"type":"text","value":"a"});
     for small in [
@@ -978,8 +975,11 @@ fn req_i_009_the_small_region_reaches_the_kit() {
         json!({"type":"hstack","children":vec![label(); 12]}),
         json!({"type":"text","bind":"absent"}),
     ] {
-        assert_eq!(refused(small.clone()), "INVALID_INPUT", "{small}");
+        assert_eq!(code(read(small.clone())), "INVALID_INPUT", "{small}");
     }
+    // A row of eleven is twelve nodes with the row itself: the most the region holds.
+    let twelve = read(json!({"type":"hstack","children":vec![label(); 11]})).unwrap();
+    assert!(twelve.layout.small.is_some());
 }
 
 #[test]

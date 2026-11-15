@@ -317,7 +317,8 @@ live.start_layout(transient).await?;
   Android where `android_presentation.scheduled_start` says so (liveupdate's
   library 0.4 or later). The sink receives `State` with `active` when it
   begins. Android begins it at its time with the permission for exact alarms
-  (`exact_start`), and within some minutes without; see
+  (`exact_start`), and up to ten minutes late without, an hour while the
+  device dozes; see
   [Android setup](docs/android-setup.md#a-scheduled-start). Elsewhere the
   start is `UNSUPPORTED_FEATURE`.
 - **`ios`** holds what only iOS reads, as `android` does for Android. It is no

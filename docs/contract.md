@@ -330,9 +330,9 @@ On Android the notification is posted at the time by liveupdate's library, also 
 application does not run:
 
 - **How close to the time.** With the permission for exact alarms (`androidPresentation.exactStart`)
-  at its time. Without it Android chooses the moment: within about ten minutes while the device is
-  awake, later while it dozes. An application that runs then and asks the backend at the time
-  [`next_check`](#events) names has it begin on the dot.
+  at its time. Without it Android chooses the moment: late by up to three quarters of the wait, ten
+  minutes at most while the device is awake and an hour while it dozes. An application that runs
+  then and asks the backend at the time [`next_check`](#events) names has it begin on the dot.
 - **The alert.** The notification alerts when it is posted, where the device offers an alert, with
   its own content: the alert's title and body are iOS's. Elsewhere it begins silently and the record
   names `alert`. A `sound` is named `alert.sound`.

@@ -4,6 +4,15 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.4.1: an application takes `liveupdate-android-0.4.1.aar`. The correction is in the AAR,
+and nothing changes in Rust.
+
+- A scheduled start still begins when the person takes the permission for exact alarms back while it waits:
+  the AAR sets an inexact alarm beside the exact one, which Android keeps. With 0.4.0 Android removed the one
+  alarm there was and stopped the application, and the activity began at the application's next call.
+- The documents say how late a start without exact alarms can be, by liveupdate's measurements: up to three
+  quarters of the wait, ten minutes at most while the device is awake and an hour while it dozes.
+
 ## 0.7.0 - 2026-11-15
 
 - test: requests as JSON at the limits of the contract (#16) (`0faded1`)

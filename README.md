@@ -35,6 +35,7 @@ other call answers `UNSUPPORTED_PLATFORM`.
 | [docs/ios-setup.md](docs/ios-setup.md) | the widget extension, the App Group and pushes of an iOS app |
 | [docs/android-setup.md](docs/android-setup.md) | the AAR, the permissions and the files of an Android app |
 | [docs/framework-integration.md](docs/framework-integration.md) | writing a framework plugin: commands, events, lifecycle, threads |
+| [docs/design/engine-small-family](docs/design/engine-small-family/PRD.md) | the small region for a paired Apple Watch and CarPlay, on activitykit 0.6 |
 | [docs/design/engine-interaction](docs/design/engine-interaction/PRD.md) | toggles, staleness, scheduled and transient starts and alert sounds, on activitykit 0.5 |
 | [docs/design/engine-extensions](docs/design/engine-extensions/PRD.md) | what the engines opened in activitykit 0.4 and liveupdate 0.2, what this crate does with it, and what is still planned |
 
@@ -75,6 +76,7 @@ cargo run -p liveactivity --example features --features testkit
 | [Buttons and taps](#buttons-and-taps) | a `button` node, `Event::Action` | ✓ | ✓ up to three |
 | [Toggles](#toggles-and-staleness) | a `toggle` node, `ActionEvent.on` | ✓ a switch, from iOS 17 | ✓ an action, with a check mark while on |
 | [Staleness](#toggles-and-staleness) | `when_stale()` and `unless_stale()` on a node | ✓ drawn by the system when the time has passed | drawn as while fresh, reported as `layout.ifStale`; the sink is told `stale` |
+| [Apple Watch and CarPlay](docs/contract.md#layout) | `Layout.small` | ✓ where the widget extension sets `ActivityKitSmallFamily`; else the compact parts, reported as `layout.small` | the watch and the car show the notification; reported as `layout.small` |
 | [Links](#links-accessibility-and-motion) | a `link` node, `Layout.url` | ✓ | ✓ the notification and its actions open them, where the device opens URLs |
 | [Accessibility, motion, privacy](#links-accessibility-and-motion) | members of a node and of a style | ✓ | a label is the text of what a notification cannot draw; motion and privacy are named as left out |
 | [Alerts](#alerts-and-relevance) | `LayoutUpdateInput.alert` | ✓ | ✓ where the device alerts again; else silent, reported as `alert` |

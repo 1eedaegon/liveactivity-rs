@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "activitykit"
-version = "0.5.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf7a5c23c507ca6eee6f6381b30ff4b2e571132de5c5c6d6c2f124d9d65a18fb"
+checksum = "ab0296221d41c696370bfe9431e202bd580e41999c3d9b851c1b20e9b19d5559"
 dependencies = [
  "async-channel",
  "serde",

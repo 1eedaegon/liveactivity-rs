@@ -15,7 +15,7 @@ use liveactivity::{
     PermissionState, PresentationStyle, ProgressSegment, ProgressStyle, PublicVersion, Result,
     ScheduledStart, StartInput, TimerStyle, Transition, UpdateInput,
     activitykit::{
-        layout::{button, link, progress, text, toggle, vstack},
+        layout::{button, hstack, link, progress, symbol, text, toggle, vstack},
         values,
     },
     android::LiveUpdateBackend,
@@ -104,6 +104,12 @@ async fn layout(live: &LiveActivity) -> Result<String> {
         background: None,
         keyline: None,
         url: None,
+        // What a paired Apple Watch and CarPlay show, when the widget extension draws the small family: a glance,
+        // without buttons. Android has no place for it and names `layout.small`.
+        small: Some(hstack([
+            symbol("shippingbox.fill"),
+            text(Bound::key("title")),
+        ])),
     };
     let values = values! { "title" => "Delivery 7", "done" => 0.4 }.into_inner();
     let start = LayoutStartInput::new("delivery:7", layout, LayoutSnapshot::new(0, values));
@@ -142,6 +148,7 @@ async fn links_accessibility_and_motion(live: &LiveActivity) -> Result<()> {
         keyline: None,
         // A tap anywhere else on the activity.
         url: Some("myapp://delivery/9".into()),
+        small: None,
     };
     let values = values! {
         "done" => 0.4, "percent" => "40 percent", "address" => "12 Hill Street", "arrived" => false,
@@ -170,6 +177,7 @@ async fn toggle_and_staleness(live: &LiveActivity, stale_at: u64) -> Result<()> 
         background: None,
         keyline: None,
         url: None,
+        small: None,
     };
     let values = values! { "eta" => "6 min", "muted" => false }.into_inner();
     let mut snapshot = LayoutSnapshot::new(0, values);
@@ -478,6 +486,7 @@ fn main() -> Result<()> {
                 background: None,
                 keyline: None,
                 url: None,
+                small: None,
             },
             LayoutSnapshot::new(0, Default::default()),
         );

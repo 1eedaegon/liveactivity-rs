@@ -316,6 +316,7 @@ pub(crate) fn start_spec(request: LayoutStartInput) -> StartSpec {
         background: request.layout.background,
         keyline: request.layout.keyline,
         url: request.layout.url,
+        small: request.layout.small,
         styles: request.styles.unwrap_or_default(),
     };
     StartSpec {

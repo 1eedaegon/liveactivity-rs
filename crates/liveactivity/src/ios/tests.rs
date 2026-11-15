@@ -938,6 +938,51 @@ fn req_i_005_a_node_that_follows_staleness_reaches_the_kit() {
 }
 
 #[test]
+fn req_i_009_the_small_region_reaches_the_kit() {
+    // REQ-I-009
+    use crate::layout::Element;
+    let text = || json!({"type":"text","bind":"status"});
+    let small = json!({"type":"hstack","children":[
+        {"type":"symbol","name":"car.fill"},
+        {"type":"text","bind":"status","ifStale":false}]});
+    let with = |small: Json| json!({"layout":{"lockScreen":text(),"small":small}});
+    let (apple, kit) = apple();
+    block_on(apple.start_layout(start_showing(text(), with(small)))).unwrap();
+    block_on(apple.start_layout(start_showing(text(), json!({"activityKey":"ride:8"})))).unwrap();
+    let starts = kit.book().starts.clone();
+    let region = starts[0].layout.small.as_ref().expect("a small region");
+    let Element::Hstack { children, .. } = &region.element else {
+        panic!("a row")
+    };
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[1].if_stale, Some(false));
+    // A layout without the region asks for none: the system shows the compact parts.
+    assert_eq!(starts[1].layout.small, None);
+
+    // The region is a glance: no control, twelve nodes. The contract refuses the rest on every platform.
+    let read = |small: Json| {
+        let request = json!({"activityKey":"ride:9","schemaVersion":2,"fallback":"none",
+            "layout":{"lockScreen":text(),"small":small},
+            "snapshot":{"revision":0,"values":{"status":"On the way","muted":false}}});
+        crate::parse_request::<LayoutStartInput>("start_layout", request)
+    };
+    let label = || json!({"type":"text","value":"a"});
+    for small in [
+        json!(null),
+        json!({"type":"button","actionId":"stop","child":label()}),
+        json!({"type":"link","url":"app://ride","child":label()}),
+        json!({"type":"toggle","actionId":"mute","bind":"muted","child":label()}),
+        json!({"type":"hstack","children":vec![label(); 12]}),
+        json!({"type":"text","bind":"absent"}),
+    ] {
+        assert_eq!(code(read(small.clone())), "INVALID_INPUT", "{small}");
+    }
+    // A row of eleven is twelve nodes with the row itself: the most the region holds.
+    let twelve = read(json!({"type":"hstack","children":vec![label(); 11]})).unwrap();
+    assert!(twelve.layout.small.is_some());
+}
+
+#[test]
 fn req_i_006_a_scheduled_and_a_transient_start_reach_the_kit() {
     // REQ-I-006
     let text = || json!({"type":"text","bind":"status"});

@@ -257,6 +257,15 @@ list and the state events go on saying what ActivityKit says.
 
 Evidence: `ios::tests::req_i_008_an_end_answers_ended_also_once_the_system_dismissed_the_activity`.
 
+## REQ-I-009 The small region
+
+A layout's `small` reaches ActivityKit as written: what the activity shows where the system asks for the small
+family, in the Smart Stack of a paired Apple Watch and in CarPlay. It is a tree of at most 12 nodes without buttons,
+toggles or links; a request that breaks that is `INVALID_INPUT` on every platform. A layout without it asks for none,
+and a template has none.
+
+Evidence: `ios::tests::req_i_009_the_small_region_reaches_the_kit`.
+
 ## REQ-E-002 Started, state and permission events
 
 The sink receives a layout activity that began, a new lifecycle state of any activity, and the permissions after
@@ -493,6 +502,13 @@ A scheduled start with the foreground placement is `UNSUPPORTED_FEATURE`, and no
 notification that is there.
 
 Evidence: `exchange::req_a_020_a_scheduled_start_takes_no_foreground_placement`.
+
+## REQ-A-021 The small region on Android
+
+A notification has no place for the small region: a watch and a car show the notification by themselves. Nothing
+of the region is drawn, it does not choose the notification's style, and the record names `layout.small`.
+
+Evidence: `android::layout::tests::req_a_021_the_small_region_is_named_and_never_drawn`.
 
 ## REQ-N-001 No framework in the crate
 

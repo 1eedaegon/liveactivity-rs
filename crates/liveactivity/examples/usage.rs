@@ -1,6 +1,8 @@
 //! One activity from start to end. `main` names the backend of the testkit, so the example runs anywhere; an
 //! application leaves `.backend(..)` out and gets the backend of its platform.
 
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
 use liveactivity::{EndInput, Event, LiveActivity, Result, StartInput, UpdateInput};
 
 async fn deliver(live: &LiveActivity) -> Result<()> {

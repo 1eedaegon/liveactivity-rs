@@ -7,6 +7,8 @@
 //! cargo run -p liveactivity --example features --features testkit
 //! ```
 
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
 use liveactivity::{
     Accessibility, ActivityState, Alert, AndroidContent, AndroidOptions, AndroidPlacement,
     AndroidPresentation, AndroidVisibility, Bound, EndInput, EndPolicy, Event, FeatureSupport,

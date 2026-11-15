@@ -515,3 +515,12 @@ Evidence: `android::layout::tests::req_a_021_the_small_region_is_named_and_never
 The crate depends on its two engines, serialization and errors only.
 
 Evidence: `contract::req_n_001_the_crate_declares_only_its_engines_and_serde`.
+
+## REQ-N-002 No unwrap outside tests
+
+The crate's own code and its examples never call `unwrap` or `expect`: a value that is not there is an error to
+answer, and no reason to end the host's process. Clippy denies both at the root of the library, everywhere but in
+its tests, and in each example, which is an application's code. A test may use them: a test that panics has failed.
+
+Evidence: `contract::req_n_002_clippy_denies_unwrap_and_expect_outside_tests`, and the clippy step of CI, which
+takes a warning for an error and runs over every target.

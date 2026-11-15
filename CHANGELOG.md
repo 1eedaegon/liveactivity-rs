@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.7.1 - 2026-11-15
+
+- fix: a scheduled start keeps an alarm when exact alarms are taken back, with liveupdate 0.4.1 (#18) (`fc27c36`)
+
 Built on liveupdate 0.4.1: an application takes `liveupdate-android-0.4.1.aar`. The correction is in the AAR,
 and nothing changes in Rust.
 

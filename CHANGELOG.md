@@ -4,6 +4,12 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.7.0 - 2026-11-15
+
+- test: requests as JSON at the limits of the contract (#16) (`0faded1`)
+- test: the typed read of the fixtures, the names of the commands and a timer style (#17) (`a9be684`)
+- feat: build on activitykit 0.6: the small region for a paired Apple Watch and CarPlay (#14) (`c6843dd`)
+
 Built on activitykit 0.6.1, whose vocabulary this crate re-exports. Breaking for a Rust caller: `Layout`, which
 is activitykit's `LayoutRegions`, has the new public member `small`. JSON written for 0.6 reads unchanged.
 

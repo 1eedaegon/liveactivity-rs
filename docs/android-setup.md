@@ -1,7 +1,7 @@
 # Android setup
 
 On Android `liveactivity` runs on the [liveupdate](https://github.com/1eedaegon/liveupdate-rs)
-crate (0.4.0 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
+crate (0.4.1 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
 Live Update. liveupdate keeps the lifecycle, the revisions and the receipts in Rust; a small AAR
 talks to Android's `NotificationManager`.
 
@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.4.0.aar` from liveupdate's
+Put `liveupdate-android-0.4.1.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too:
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.4.0.aar"))
+    implementation(files("libs/liveupdate-android-0.4.1.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
 }
 ```
@@ -345,7 +345,7 @@ How close to its time it begins is Android's to say:
 | The application | Begins |
 | --- | --- |
 | may set exact alarms: `exact_start` is true | at its time, also while the device dozes |
-| may not, as most applications | within about ten minutes while the device is awake, later while it dozes |
+| may not, as most applications | late by up to three quarters of the wait: ten minutes at most while the device is awake, an hour while it dozes |
 
 The manifest is the application's for both of the following; the AAR declares neither.
 
@@ -357,10 +357,12 @@ The manifest is the application's for both of the following; the AAR declares ne
   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
   ```
 
-- **After a restart of the device.** Android drops alarms when the device restarts, when the person
-  force-stops the application, and when they take the permission for exact alarms away. The
-  activity then begins late, at the application's next call. To have the alarm set again after a
-  restart, declare the AAR's receiver for it:
+- **After a restart of the device.** Android drops alarms when the device restarts and when the
+  person force-stops the application. The activity then begins late, at the application's next
+  call. When the person takes the permission for exact alarms back, Android drops the exact alarm
+  and stops the application: the activity then begins by the inexact alarm that the AAR sets beside
+  the exact one, from 0.4.1. To have the alarms set again after a restart, declare the AAR's
+  receiver for it:
 
   ```xml
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -380,8 +382,16 @@ application's to end: compare the time with the clock at launch. Android asks th
 appears only when its activity is imminent, and mostly for activities the person started: schedule
 the start of something they asked for, not a reminder.
 
-Not verified on a device by liveupdate: the timing of an inexact alarm while the device dozes, a
-real restart, and the battery savers of device makers.
+liveupdate followed this on the emulators of Android 16 and 17, with a package that targets API 36
+([its notes](https://github.com/1eedaegon/liveupdate-rs/blob/main/docs/testing.md)). With exact
+alarms a start began within a second of its time, awake and in Doze. Without them, a start 45
+seconds ahead began 32 seconds late, and one 20 minutes ahead 5 minutes late while the device was
+awake and 15 minutes late in Doze. After a restart with the receiver declared, the alarms were set
+again 84 seconds after the device was up. An update of the application kept them, and a force stop
+removed them until the application ran again. An application that nobody had opened, on a device
+that did not charge, had its inexact alarms put off: its start did not begin in the ten minutes it
+was watched, while an exact alarm came on time. Not verified there: a real phone and the battery
+savers of device makers.
 
 ## 5. Permissions
 

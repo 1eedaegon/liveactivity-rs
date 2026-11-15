@@ -13,6 +13,8 @@
 //! cargo run -p liveactivity --example adapter --features testkit
 //! ```
 
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
 use liveactivity::{
     ActivityRecord, BackendContext, BackendFuture, Capabilities, EndInput, Error, Event,
     LayoutActivityRecord, LayoutEndInput, LayoutStartInput, LayoutUpdateInput, LiveActivity,

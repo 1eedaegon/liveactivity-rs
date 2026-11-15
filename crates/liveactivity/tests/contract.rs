@@ -211,6 +211,23 @@ fn req_n_001_the_crate_declares_only_its_engines_and_serde() {
 }
 
 #[test]
+fn req_n_002_clippy_denies_unwrap_and_expect_outside_tests() {
+    // REQ-N-002
+    let denied = "deny(clippy::unwrap_used, clippy::expect_used)";
+    // The library: everywhere but in its tests.
+    let library = include_str!("../src/lib.rs");
+    assert!(library.contains(&format!("#![cfg_attr(not(test), {denied})]")));
+    // An example is an application's code, and has no tests.
+    for (name, example) in [
+        ("usage", include_str!("../examples/usage.rs")),
+        ("adapter", include_str!("../examples/adapter.rs")),
+        ("features", include_str!("../examples/features.rs")),
+    ] {
+        assert!(example.contains(&format!("#![{denied}]")), "{name}");
+    }
+}
+
+#[test]
 fn req_c_006_a_wrong_member_of_another_platform_reaches_no_backend() {
     // REQ-C-006
     // On a host, which is neither platform, a right request is refused by the backend and a wrong one before it.

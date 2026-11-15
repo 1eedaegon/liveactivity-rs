@@ -26,6 +26,9 @@
 
 // The one exception is the main-thread check of `wait`.
 #![deny(unsafe_code)]
+// REQ-N-002: a value that is not there is an error to answer, and no reason to end the host's process. Tests may
+// unwrap: a test that panics has failed.
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod android;
 mod backend;

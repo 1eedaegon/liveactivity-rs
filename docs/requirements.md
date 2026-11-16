@@ -516,6 +516,8 @@ A call of the Android side that panics, as a framework's native call may, ends t
 that made it: the panic reaches the caller, and the Android backend catches none. No later call fails for it:
 each lock of the Android backend is taken again after a thread panicked under it, the layouts' among them. What
 the call had begun is left as by a native call that failed at that point, which the next layout call reconciles.
+One thing differs: the events that a drain had taken before the panic are not handed over by that call, as they
+are when the read of the states fails. They wait in the queue and reach the sink with the next ask.
 
 Evidence: `exchange::req_a_022_a_native_call_that_panics_fails_no_later_call`.
 

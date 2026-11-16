@@ -55,7 +55,9 @@ and that thread hands them over too.
   one step, and the layouts' entries are a file that is replaced whole, which every layout call reconciles with
   liveupdate; a drain reads it and does not. What the call had begun is left as by a native call that failed
   at that point: a start without an answer is adopted or dropped by the next layout call, and an update that
-  was not posted is posted by the same update again.
+  was not posted is posted by the same update again. The events that a drain had taken before the panic stay in
+  the queue: the call unwinds past its hand-over, which a read of the states that fails does not, and they reach
+  the sink with the next ask. Android no longer has them, so they are lost with a process that ends before that.
 
 ## `next_check`
 

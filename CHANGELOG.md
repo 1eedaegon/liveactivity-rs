@@ -4,6 +4,11 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.7.2 - 2026-11-16
+
+- chore: clippy denies unwrap and expect outside tests (#19) (`600209d`)
+- fix: a native call that panics on Android fails no later call (#20) (`9352340`)
+
 - On Android a native call that panics, as a framework's call may, no longer leaves every later layout call
   and every drain of the events as `NATIVE_ERROR`: the backend takes the layouts' lock again after a thread
   panicked under it, as it does its other locks. The panic still reaches the caller, and what the call had

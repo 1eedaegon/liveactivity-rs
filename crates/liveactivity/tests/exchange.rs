@@ -2581,4 +2581,25 @@ fn req_a_022_a_native_call_that_panics_fails_no_later_call() {
         );
         std::fs::remove_dir_all(&files).unwrap();
     }
+
+    // A drain that panics after it took a tap: the read of the states panics, which follows the stored events. The
+    // tap is not lost and not handed over by that call: it waits in the queue for the next ask.
+    let bridge = PanickingBridge::new(MemoryDriver::default());
+    let files = app_files("native-panic-taken");
+    let backend = LiveUpdateBackend::over_bridge(bridge.clone())
+        .with_files(liveactivity::android::AndroidFiles::new("Mochi", &files));
+    let (live, events) = connect(backend);
+    let running = block_on(live.start_layout(ride("ride:7", None))).unwrap();
+    shown(&events, &running.id);
+    bridge.android.tap(&running.id, 0, "pet");
+    bridge.panic_in(Some("read"));
+    let panicked = catch_unwind(AssertUnwindSafe(|| block_on(live.sync_events())));
+    assert!(panicked.is_err());
+    bridge.panic_in(None);
+    assert!(bridge.android.lock().events.events.is_empty());
+    assert!(events.try_recv().is_err());
+    assert_eq!(block_on(live.sync_events()), Ok(()));
+    let tapped = |event: Event| matches!(event, Event::Action(tap) if tap.action_id == "pet");
+    assert!(events.try_iter().any(tapped));
+    std::fs::remove_dir_all(&files).unwrap();
 }

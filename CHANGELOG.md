@@ -4,6 +4,13 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+- On Android a native call that panics, as a framework's call may, no longer leaves every later layout call
+  and every drain of the events as `NATIVE_ERROR`: the backend takes the layouts' lock again after a thread
+  panicked under it, as it does its other locks. The panic still reaches the caller, and what the call had
+  begun is left as by a native call that failed at that point. Catch a panic in `Bridge::invoke` where the
+  framework's call can panic, so that a thread kept for the drain lives on
+  ([Android setup](docs/android-setup.md#over_bridgebridge)).
+
 ## 0.7.1 - 2026-11-15
 
 - fix: a scheduled start keeps an alarm when exact alarms are taken back, with liveupdate 0.4.1 (#18) (`fc27c36`)

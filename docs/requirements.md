@@ -510,6 +510,15 @@ of the region is drawn, it does not choose the notification's style, and the rec
 
 Evidence: `android::layout::tests::req_a_021_the_small_region_is_named_and_never_drawn`.
 
+## REQ-A-022 A native call that panics
+
+A call of the Android side that panics, as a framework's native call may, ends the one call of the application
+that made it: the panic reaches the caller, and the Android backend catches none. No later call fails for it:
+each lock of the Android backend is taken again after a thread panicked under it, the layouts' among them. What
+the call had begun is left as by a native call that failed at that point, which the next layout call reconciles.
+
+Evidence: `exchange::req_a_022_a_native_call_that_panics_fails_no_later_call`.
+
 ## REQ-N-001 No framework in the crate
 
 The crate depends on its two engines, serialization and errors only.

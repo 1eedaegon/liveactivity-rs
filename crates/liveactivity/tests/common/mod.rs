@@ -390,3 +390,34 @@ impl Bridge for StringBridge {
         Ok(envelope.to_string())
     }
 }
+
+/// The same bridge with a native call that panics while the test says so, as a framework's call may: the call of
+/// one command, and every other reaches the Android side.
+#[derive(Clone)]
+pub struct PanickingBridge {
+    pub android: MemoryDriver,
+    panics: Arc<Mutex<Option<&'static str>>>,
+}
+
+impl PanickingBridge {
+    pub fn new(android: MemoryDriver) -> Self {
+        Self {
+            android,
+            panics: Arc::default(),
+        }
+    }
+
+    /// The command whose call panics from now on, or none.
+    pub fn panic_in(&self, command: Option<&'static str>) {
+        *self.panics.lock().unwrap() = command;
+    }
+}
+
+impl Bridge for PanickingBridge {
+    fn invoke(&self, command: &str, payload: &str) -> liveupdate::Result<String> {
+        // Read before the panic, which then unwinds with no lock of the test held.
+        let panics = *self.panics.lock().unwrap() == Some(command);
+        assert!(!panics, "the native call of `{command}` panicked");
+        StringBridge(self.android.clone()).invoke(command, payload)
+    }
+}

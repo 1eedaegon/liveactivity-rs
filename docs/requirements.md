@@ -145,12 +145,16 @@ within it is taken, and the first one past it is `INVALID_INPUT`.
   policy.
 - No member is `null`, and none is one that the contract does not name.
 
+The requests of contract v1 that activitykit ships as fixtures, since its 0.6.3, get the same verdict here: each
+valid one is taken, and each other is `INVALID_INPUT`.
+
 Evidence: `requests::req_c_008_the_fixtures_of_the_templates_get_their_verdict`, with the requests in
 `crates/liveactivity/tests/fixtures/requests.json`,
 `requests::req_c_008_a_template_request_is_taken_at_each_limit_and_refused_past_it`,
 `requests::req_c_008_a_template_request_of_a_wrong_shape_is_refused`,
-`requests::req_c_008_a_snapshot_has_the_one_presentation_of_its_template` and
-`requests::req_c_008_a_timer_ends_after_its_start_and_an_end_says_when_only_with_after`.
+`requests::req_c_008_a_snapshot_has_the_one_presentation_of_its_template`,
+`requests::req_c_008_a_timer_ends_after_its_start_and_an_end_says_when_only_with_after` and
+`engine_fixtures::req_c_008_the_engines_template_fixtures_get_the_same_verdict_here`.
 
 ## REQ-C-009 A number keeps its value
 

@@ -15,7 +15,13 @@ use crate::{
     layout::{Alert, AndroidOptions, AndroidPlacement, AndroidVisibility, Element, Node},
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs, io::Read, path::PathBuf, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    fs,
+    io::Read,
+    path::PathBuf,
+    sync::{Mutex, MutexGuard, PoisonError},
+};
 
 /// liveupdate draws app files of at most this many pixels a side and bytes.
 const MAX_ICON_SIDE: u32 = 1024;
@@ -108,6 +114,12 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         }
     }
 
+    /// The lock, also after a thread panicked under it (REQ-A-022). It holds no value, and what changes under
+    /// it is a file that is replaced whole, which every call but the drain reconciles with liveupdate.
+    fn guard(&self) -> MutexGuard<'_, ()> {
+        self.lock.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     pub(crate) fn start(
         &self,
         updates: &liveupdate::LiveUpdate<D>,
@@ -123,7 +135,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
             android: input.android.map(by_default),
             ..input
         };
-        let _guard = self.lock.lock().map_err(|_| Error::native())?;
+        let _guard = self.guard();
         let (mut entries, records) = self.reconciled(updates)?;
         // The activity that runs or waits under the key, with the request it keeps.
         let under_the_key = records
@@ -218,7 +230,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         updates: &liveupdate::LiveUpdate<D>,
         input: LayoutUpdateInput,
     ) -> Result<LayoutActivityRecord> {
-        let _guard = self.lock.lock().map_err(|_| Error::native())?;
+        let _guard = self.guard();
         let (mut entries, records) = self.reconciled(updates)?;
         let alert = input.alert.as_ref();
         let snapshot = for_android(input.snapshot);
@@ -232,7 +244,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         updates: &liveupdate::LiveUpdate<D>,
         input: LayoutEndInput,
     ) -> Result<LayoutActivityRecord> {
-        let _guard = self.lock.lock().map_err(|_| Error::native())?;
+        let _guard = self.guard();
         let (mut entries, records) = self.reconciled(updates)?;
         let entry = entries.get(&input.id).ok_or_else(not_found)?;
         // An activity that is over takes no content: its end again answers its record, and an end without a time
@@ -279,7 +291,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         &self,
         updates: &liveupdate::LiveUpdate<D>,
     ) -> Result<Vec<LayoutActivityRecord>> {
-        let _guard = self.lock.lock().map_err(|_| Error::native())?;
+        let _guard = self.guard();
         let (entries, records) = self.reconciled(updates)?;
         Ok(records
             .iter()
@@ -297,7 +309,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
     pub(crate) fn events(&self, updates: &liveupdate::LiveUpdate<D>) -> Result<Vec<Event>> {
         // The entries are read before the queue is drained, under the lock, so that a start settles first and a
         // tap on its activity finds the entry; a store that cannot be read loses no event, only the keys.
-        let _guard = self.lock.lock().map_err(|_| Error::native())?;
+        let _guard = self.guard();
         let entries = self.store.load().unwrap_or_default();
         let batch = updates.events().map_err(android_liveupdate::error)?;
         Ok(batch

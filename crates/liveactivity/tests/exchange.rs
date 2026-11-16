@@ -2439,3 +2439,146 @@ fn req_a_020_a_scheduled_start_takes_no_foreground_placement() {
     let tagged = block_on(live.start_layout(scheduled_ride("ride:7", 60_000, placed("tagged"))));
     assert_eq!(tagged.unwrap().state, ActivityState::Pending);
 }
+
+#[test]
+fn req_a_022_a_native_call_that_panics_fails_no_later_call() {
+    // REQ-A-022
+    use common::PanickingBridge;
+    use liveactivity::LayoutEndInput;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    /// A call of the application, with the id of an activity that runs.
+    type Call = fn(&LiveActivity, &str) -> liveactivity::Result<()>;
+    /// An activity as the list shows it: its key, its revision and its state.
+    type Listed = (&'static str, u64, ActivityState);
+
+    let update = |id: &str, revision: u64| {
+        liveactivity::parse_request("update_layout", ride_update(id, revision, None)).unwrap()
+    };
+    let listed = |live: &LiveActivity| -> liveactivity::Result<Vec<(String, u64, ActivityState)>> {
+        let record = |record: liveactivity::LayoutActivityRecord| {
+            (record.activity_key, record.snapshot.revision, record.state)
+        };
+        Ok(block_on(live.list_layout())?
+            .into_iter()
+            .map(record)
+            .collect())
+    };
+    let (active, ended) = (ActivityState::Active, ActivityState::Ended);
+    // The native call that panics and the call of the application that meets it; then what the list holds once
+    // the same call was made again.
+    let met: [(&str, &str, Call, &[Listed]); 5] = [
+        (
+            "read",
+            "list",
+            |live, _| block_on(live.list_layout()).map(drop),
+            &[("ride:7", 0, active)],
+        ),
+        (
+            "post",
+            "start",
+            |live, _| block_on(live.start_layout(ride("ride:8", None))).map(drop),
+            &[("ride:7", 0, active), ("ride:8", 0, active)],
+        ),
+        (
+            "post",
+            "update",
+            |live, id| {
+                let update = ride_update(id, 1, None);
+                let update = liveactivity::parse_request("update_layout", update).unwrap();
+                block_on(live.update_layout(update)).map(drop)
+            },
+            &[("ride:7", 1, active)],
+        ),
+        (
+            "write",
+            "end",
+            |live, id| block_on(live.end_layout(LayoutEndInput::new(id))).map(drop),
+            &[("ride:7", 0, ended)],
+        ),
+        (
+            "events",
+            "drain",
+            |live, _| block_on(live.sync_events()),
+            &[("ride:7", 0, active)],
+        ),
+    ];
+    for (command, name, call, left) in met {
+        let bridge = PanickingBridge::new(MemoryDriver::default());
+        let files = app_files(&format!("native-panic-{name}"));
+        let backend = LiveUpdateBackend::over_bridge(bridge.clone())
+            .with_files(liveactivity::android::AndroidFiles::new("Mochi", &files));
+        let (live, events) = connect(backend);
+        let running = block_on(live.start_layout(ride("ride:7", None))).unwrap();
+        shown(&events, &running.id);
+
+        // The panic reaches the caller: the backend catches none.
+        bridge.panic_in(Some(command));
+        let panicked = catch_unwind(AssertUnwindSafe(|| call(&live, &running.id)));
+        assert!(
+            panicked.is_err(),
+            "{name}: the call panics with its native call"
+        );
+        bridge.panic_in(None);
+
+        // The same call again is answered, and it leaves what it leaves without a panic before it: each activity
+        // once, with the revision and the state the call asked for, and Android shows a notification of that
+        // revision for each that runs.
+        assert_eq!(
+            call(&live, &running.id),
+            Ok(()),
+            "{name}: the same call again"
+        );
+        let running_revisions: Vec<u64> = left
+            .iter()
+            .filter(|(.., state)| *state == active)
+            .map(|(_, revision, _)| *revision)
+            .collect();
+        let left: Vec<_> = left
+            .iter()
+            .map(|(key, revision, state)| ((*key).to_owned(), *revision, *state))
+            .collect();
+        assert_eq!(listed(&live), Ok(left), "{name}: the list");
+        let mut posted: Vec<u64> = {
+            let android = bridge.android.lock();
+            let shown = android.observed.values();
+            shown.map(|shown| shown.snapshot.revision).collect()
+        };
+        posted.sort_unstable();
+        assert_eq!(posted, running_revisions, "{name}: what Android shows");
+
+        // And so is every call of another activity: its start, an update, a tap in a drain, the list and its end.
+        let other = block_on(live.start_layout(ride("ride:9", None)));
+        let other = other.unwrap_or_else(|error| panic!("{name}: a start answers {error:?}"));
+        let updated = block_on(live.update_layout(update(&other.id, 1)));
+        assert_eq!(
+            updated.map(|record| record.snapshot.revision),
+            Ok(1),
+            "{name}"
+        );
+        bridge.android.tap(&other.id, 0, "pet");
+        assert_eq!(block_on(live.sync_events()), Ok(()), "{name}: a drain");
+        let tapped =
+            |event: Event| matches!(event, Event::Action(tap) if tap.activity_id == other.id);
+        assert!(
+            events.try_iter().any(tapped),
+            "{name}: a tap reaches the sink"
+        );
+        let of_other = |listed: Vec<(String, u64, ActivityState)>| {
+            let other = |(key, ..): &(String, u64, ActivityState)| key == "ride:9";
+            listed.into_iter().filter(other).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            listed(&live).map(of_other),
+            Ok(vec![("ride:9".to_owned(), 1, active)]),
+            "{name}"
+        );
+        let ended = block_on(live.end_layout(LayoutEndInput::new(&other.id)));
+        assert_eq!(
+            ended.map(|record| record.state),
+            Ok(ActivityState::Ended),
+            "{name}"
+        );
+        std::fs::remove_dir_all(&files).unwrap();
+    }
+}

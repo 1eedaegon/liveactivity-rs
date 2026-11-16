@@ -111,6 +111,13 @@ impl Bridge for MyBridge {
 let backend = LiveUpdateBackend::over_bridge(MyBridge { /* ... */ });
 ```
 
+Where the native call fails, `invoke` returns an error, which the application reads as
+`NATIVE_ERROR`. A call that panics instead ends the call of the application that made it, and the
+thread that polled it. The backend catches no panic and keeps working: what the call had begun is
+left as by a native call that failed at that point. Where the framework's call can panic, catch it
+in `invoke` (`std::panic::catch_unwind`) and return an error, so that a thread the host keeps for
+the drain lives on.
+
 ### new(driver)
 
 `LiveUpdateBackend::new(driver)` takes any `liveupdate::Driver`. `over_bridge(bridge)` is

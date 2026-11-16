@@ -49,6 +49,13 @@ and that thread hands them over too.
 - A sink that panics ends that hand-over, and the call that was handing over panics with it, whatever it had
   to answer. What was queued behind the event waits for the next ask, which goes on with the rest of the queue;
   `next_check` does not know of it.
+- A call of the Android side that panics ends the call of the application that made it, and no other
+  (REQ-A-022). The backend catches no panic; it takes each of its locks again after a thread panicked under it,
+  the queue's and the layouts'. Neither guards a value that a panic leaves half written: the queue is changed in
+  one step, and the layouts' entries are a file that is replaced whole, which every layout call reconciles with
+  liveupdate; a drain reads it and does not. What the call had begun is left as by a native call that failed
+  at that point: a start without an answer is adopted or dropped by the next layout call, and an update that
+  was not posted is posted by the same update again.
 
 ## `next_check`
 

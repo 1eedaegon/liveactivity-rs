@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.7.3 - 2026-11-16
+
+- docs: what becomes of events a drain took before a native call panicked (#21) (`960f2c0`)
+
 ## 0.7.2 - 2026-11-16
 
 - chore: clippy denies unwrap and expect outside tests (#19) (`600209d`)

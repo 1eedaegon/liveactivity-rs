@@ -1,6 +1,7 @@
 //! The request fixtures of the activitykit crate that this crate builds with, run against this crate's reader.
 //! activitykit keeps them beside its own validator and its Swift decoder; here they show that reading a request in
-//! this crate's types first gives the verdict activitykit gives, and where this crate's contract takes more.
+//! this crate's types first gives the verdict activitykit gives, and where this crate's contract takes more. The
+//! layouts' fixtures and, since activitykit 0.6.3, those of the templates.
 
 use liveactivity::{
     Error, LayoutEndInput, LayoutStartInput, LayoutUpdateInput, Validate, validate_request, weight,
@@ -12,8 +13,13 @@ use std::{fs, path::Path, process::Command};
 /// snapshot. activitykit takes a relevance beside its request, this crate inside it.
 const TAKEN_HERE: [&str; 1] = ["rejects an unknown member in the final content"];
 
-/// The fixtures of the activitykit version in Cargo.lock, from that crate's own folder.
+/// The layout fixtures of the activitykit version in Cargo.lock.
 fn fixtures() -> Value {
+    fixtures_in("layout-requests.json")
+}
+
+/// The file `name` of the fixtures of the activitykit version in Cargo.lock, from that crate's own folder.
+fn fixtures_in(name: &str) -> Value {
     let metadata = Command::new(env!("CARGO"))
         .args(["metadata", "--format-version", "1", "--locked"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -33,7 +39,8 @@ fn fixtures() -> Value {
     let file = Path::new(&manifest)
         .parent()
         .unwrap()
-        .join("tests/fixtures/layout-requests.json");
+        .join("tests/fixtures")
+        .join(name);
     serde_json::from_slice(&fs::read(file).expect("activitykit ships its fixtures")).unwrap()
 }
 
@@ -184,4 +191,21 @@ fn req_c_010_every_refused_fixture_gets_one_of_the_two_errors() {
     assert!(refusals.len() >= 100);
     assert!(refusals.contains(&Error::invalid()));
     assert!(refusals.contains(&Error::payload_too_large()));
+}
+
+#[test]
+fn req_c_008_the_engines_template_fixtures_get_the_same_verdict_here() {
+    // REQ-C-008
+    // The requests of contract v1 that activitykit ships since 0.6.3: every valid one is taken, and every other
+    // is refused as invalid input, an unknown command among them.
+    let fixtures = fixtures_in("v1-requests.json");
+    let (valid, invalid) = (cases(&fixtures, "valid"), cases(&fixtures, "invalid"));
+    assert!(valid.len() >= 10 && invalid.len() >= 30);
+    for (cases, verdict) in [(valid, None), (invalid, Some("INVALID_INPUT"))] {
+        for case in cases {
+            let command = case["command"].as_str().unwrap();
+            let given = code(validate_request(command, case["input"].clone()));
+            assert_eq!(given.as_deref(), verdict, "{}", case["name"]);
+        }
+    }
 }

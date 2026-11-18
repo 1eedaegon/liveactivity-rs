@@ -4,6 +4,17 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on activitykit 0.6.4. The correction is in activitykit's Swift sources, which an application builds with
+this crate, and nothing changes in Rust.
+
+- On iOS a button's tap reaches the sink without `on` again: `Event::Action` with `on: None`. Since 0.5.0 it
+  came with `on: Some(false)`, on a phone and on the simulator, as a toggle's tap that asks to switch off, so
+  an application had to tell the two apart by the action id. The system hands the application a value that an
+  intent never set as `false`, and activitykit's intent carried the state as one optional value; it now says
+  beside the state whether the tap is a toggle's. A toggle's tap is as before, and so is Android.
+- An application that builds `ActivityKitActionIntent` itself changes nothing: its initializer is the same.
+  Its property `isOn` is a `Bool` now, no longer optional, beside the new `isToggle`.
+
 ## 0.7.4 - 2026-11-18
 
 - chore: build on activitykit 0.6.3, whose template fixtures get the same verdict here (#22) (`9804b0b`)

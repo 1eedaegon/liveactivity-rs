@@ -225,8 +225,16 @@ under an action id, and counts with buttons and links toward the four of a regio
 as `Action` with `on`, the state the person asked for; a button's tap has none. A request that breaks a rule of
 the node is `INVALID_INPUT` on every platform.
 
-Evidence: `ios::tests::req_i_004_a_toggle_reaches_the_kit_and_its_tap_says_what_was_asked` and
-`contract::req_i_004_a_wrong_toggle_reaches_no_backend`.
+On iOS a button's tap has none since activitykit 0.6.4, which this crate builds on. The system hands the
+application a value that an intent never set as `false`, and activitykit's intent carried the state as one
+optional value: a button's tap reached the sink with `on: false`, as a toggle's that asks to switch off. The
+intent now says beside the state whether the tap is a toggle's. This crate hands on what activitykit reports
+and cannot tell the two apart itself.
+
+Evidence: `ios::tests::req_i_004_a_toggle_reaches_the_kit_and_its_tap_says_what_was_asked`,
+`contract::req_i_004_a_wrong_toggle_reaches_no_backend` and
+`engine_fixtures::req_i_004_the_engines_intent_says_whether_a_tap_is_a_toggles`. The tap itself is run by
+activitykit's tests on the simulator.
 
 ## REQ-I-005 Nodes that follow staleness
 

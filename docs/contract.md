@@ -915,8 +915,8 @@ The options are no region and no part: `expanded` still needs a region, and `isl
 ### Buttons and actions
 
 A `button` wraps one child and carries an `actionId`. A tap reaches the event sink as
-`Event::Action` with that `actionId`, the activity's `id` and its key. A tap does not change the
-activity: update it from the application if the button should change.
+`Event::Action` with that `actionId`, the activity's `id` and its key, and without `on`. A tap does
+not change the activity: update it from the application if the button should change.
 
 A `toggle` is a switch beside its label. It shows the boolean value it is bound to, and a tap
 reaches the sink as `Event::Action` with `on`, the state the person asked for: the other one than

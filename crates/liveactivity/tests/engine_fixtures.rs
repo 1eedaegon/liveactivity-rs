@@ -1,13 +1,18 @@
 //! The request fixtures of the activitykit crate that this crate builds with, run against this crate's reader.
 //! activitykit keeps them beside its own validator and its Swift decoder; here they show that reading a request in
 //! this crate's types first gives the verdict activitykit gives, and where this crate's contract takes more. The
-//! layouts' fixtures and, since activitykit 0.6.3, those of the templates.
+//! layouts' fixtures and, since activitykit 0.6.3, those of the templates. Beside them, what this crate needs of
+//! that version's Swift sources and cannot run itself.
 
 use liveactivity::{
     Error, LayoutEndInput, LayoutStartInput, LayoutUpdateInput, Validate, validate_request, weight,
 };
 use serde_json::Value;
-use std::{fs, path::Path, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 /// The fixtures whose example of an unknown member is one this crate's contract defines: `relevance`, in a
 /// snapshot. activitykit takes a relevance beside its request, this crate inside it.
@@ -20,6 +25,12 @@ fn fixtures() -> Value {
 
 /// The file `name` of the fixtures of the activitykit version in Cargo.lock, from that crate's own folder.
 fn fixtures_in(name: &str) -> Value {
+    let file = engine().join("tests/fixtures").join(name);
+    serde_json::from_slice(&fs::read(file).expect("activitykit ships its fixtures")).unwrap()
+}
+
+/// The folder of the activitykit version in Cargo.lock.
+fn engine() -> PathBuf {
     let metadata = Command::new(env!("CARGO"))
         .args(["metadata", "--format-version", "1", "--locked"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -36,12 +47,28 @@ fn fixtures_in(name: &str) -> Value {
         .as_str()
         .unwrap()
         .to_owned();
-    let file = Path::new(&manifest)
-        .parent()
-        .unwrap()
-        .join("tests/fixtures")
-        .join(name);
-    serde_json::from_slice(&fs::read(file).expect("activitykit ships its fixtures")).unwrap()
+    Path::new(&manifest).parent().unwrap().to_owned()
+}
+
+#[test]
+fn req_i_004_the_engines_intent_says_whether_a_tap_is_a_toggles() {
+    // REQ-I-004
+    // The system hands the application a value that an intent never set as false. With the state as one optional
+    // value, as before activitykit 0.6.4, a button's tap reached the sink asking to switch off.
+    let intent = engine().join("swift/Sources/ActivityKitIntent/ActionIntent.swift");
+    let intent = fs::read_to_string(intent).expect("activitykit ships its intent");
+    assert!(
+        intent.contains("var isToggle: Bool"),
+        "the intent says whether a tap is a toggle's"
+    );
+    assert!(
+        !intent.contains("var isOn: Bool?"),
+        "and carries no state that may be absent"
+    );
+    assert!(
+        intent.contains("isOn: ActionPost.state(isToggle: isToggle, isOn: isOn)"),
+        "and posts a state only as the two say"
+    );
 }
 
 fn cases<'a>(fixtures: &'a Value, group: &str) -> &'a Vec<Value> {

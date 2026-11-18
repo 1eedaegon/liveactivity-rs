@@ -604,6 +604,8 @@ fn req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection() {
         panic!("the layout's progress is projected");
     };
     assert_eq!((style.progress, style.segments.len()), (700, 1));
+    // REQ-A-023: the projected bar is styled by its progress, so that it is filled up to its value.
+    assert!(style.styled_by_progress);
     let other = block_on(live.start_layout(ride("ride:8", None))).unwrap();
     assert_eq!(driver.posted(&other.id).title, "6 min");
     assert_eq!(other.snapshot.android, None);
@@ -619,6 +621,22 @@ fn req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection() {
     let same_style = liveactivity::parse_request("update_layout", same_style).unwrap();
     block_on(live.update_layout(same_style)).unwrap();
     assert_eq!(driver.posted(&other.id).title, "Driver on the way");
+    // REQ-A-023: a content says for itself how its bar is styled. One that leaves `styledByProgress` out is
+    // posted without it, as given.
+    let mut unstyled = driving(60, "2 min");
+    unstyled["presentation"]["style"]["value"]
+        .as_object_mut()
+        .unwrap()
+        .remove("styledByProgress");
+    let unstyled =
+        liveactivity::parse_request("update_layout", ride_update(&other.id, 2, Some(unstyled)));
+    block_on(live.update_layout(unstyled.unwrap())).unwrap();
+    let liveactivity::PresentationStyle::Progress(style) =
+        driver.posted(&other.id).presentation.unwrap().style
+    else {
+        panic!("the content's style is posted");
+    };
+    assert_eq!((style.progress, style.styled_by_progress), (60, false));
     let other = block_on(live.start_layout(ride("ride:9", None))).unwrap();
 
     // REQ-C-007: what only iOS reads is no part of what Android keeps and compares. The same start with a

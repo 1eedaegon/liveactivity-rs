@@ -525,6 +525,19 @@ are when the read of the states fails. They wait in the queue and reach the sink
 
 Evidence: `exchange::req_a_022_a_native_call_that_panics_fails_no_later_call`.
 
+## REQ-A-023 A layout's bar shows its value
+
+The bar of a projected layout is filled up to the layout's progress and no further. The projection is one segment
+of the whole scale with the progress in it, and it asks Android to draw what is ahead of the progress differently
+from what is behind it (`styledByProgress`). Android 16's progress style gives every segment the filled look when
+that is off, and leaves showing the progress to a tracker icon or to the segments' colors, of which the
+projection has none: the bar was full whatever its value. A content that the application gives says for itself
+how its bar is styled, and the projection changes nothing of it.
+
+Evidence: `android::layout::tests::req_a_023_a_layouts_bar_is_filled_up_to_its_value`, and
+`exchange::req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection`, which reads the flag in
+what the driver was handed, for a projection and for a content that leaves it out.
+
 ## REQ-N-001 No framework in the crate
 
 The crate depends on its two engines, serialization and errors only.

@@ -4,6 +4,12 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+- On Android 16 and later the bar of a layout shows its value. It was drawn full whatever the progress was: the
+  projection is one segment, and Android's progress style fills every segment unless it is asked to style them
+  by the progress, which the projection now does (`styledByProgress`). Nothing changes below Android 16, for
+  the progress template, or for a content that the application gives: such a content says `styledByProgress`
+  for itself, and one that leaves it out is drawn full as before.
+
 ## 0.7.3 - 2026-11-16
 
 - docs: what becomes of events a drain took before a native call panicked (#21) (`960f2c0`)

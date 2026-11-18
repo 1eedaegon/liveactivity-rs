@@ -870,6 +870,34 @@ fn req_a_021_the_small_region_is_named_and_never_drawn() {
 }
 
 #[test]
+fn req_a_023_a_layouts_bar_is_filled_up_to_its_value() {
+    // REQ-A-023
+    let tree = layout(json!({ "type": "vstack", "children": [
+        text("Snack"),
+        { "type": "progress", "bind": "done" },
+    ] }));
+    for (done, progress) in [(0.0, 0), (0.65, 650), (1.0, 1000)] {
+        let projection = projected(&tree, json!({ "done": done }));
+        let liveupdate::PresentationStyle::Progress(bar) = &presentation(&projection).style else {
+            panic!("a layout with a progress is projected to the progress style");
+        };
+        // One segment of the whole scale, without a color, and no tracker icon: nothing but the styling by the
+        // progress tells what is behind the progress from what is ahead of it.
+        assert_eq!(
+            (bar.progress, bar.segments.len(), bar.segments[0].length),
+            (progress, 1, 1000)
+        );
+        assert_eq!((bar.segments[0].color, &bar.tracker_icon), (None, &None));
+        assert!(bar.styled_by_progress);
+        // liveupdate leaves the member out while it is false, and Android then fills the whole bar.
+        assert_eq!(
+            serde_json::to_value(bar).unwrap()["styledByProgress"],
+            json!(true)
+        );
+    }
+}
+
+#[test]
 fn req_a_014_a_layout_is_drawn_as_while_fresh_and_its_staleness_is_named() {
     // REQ-A-014
     let tree = layout(json!({ "type": "vstack", "children": [

@@ -26,6 +26,7 @@
 | `layout.url`, a URL or bound to one | the URL a tap opens | `links`; a URL liveupdate takes |
 | a shown `link` | an action that opens the URL: its title is the first shown text inside, else a label; its id is `link:<n>`, `n` counting the links of the tree from 1 | `links`; a URL liveupdate takes; room among the three actions |
 | a timer in a layout whose style is the progress | the clock in the header | `chronometer` |
+| a shown `progress` | the bar: one segment of the whole scale with the progress in it, and `styledByProgress`, so that Android 16's progress style draws what is ahead of the progress as not filled. Without it that style fills every segment, and a bar of one segment with no tracker icon is full at any value (REQ-A-023) | — |
 | a shown `symbol`, `image` that is not the large icon, `path`, `gauge` or `custom` with a label or a value | a text: the label, the value, or `label, value` | — |
 | a `button` or a `link` without a shown text | titled by the first label inside it, else its own | — |
 | a node with `accessibility.hidden` | nothing, and nothing is named | — |

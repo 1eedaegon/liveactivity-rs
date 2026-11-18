@@ -4,6 +4,11 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.7.4 - 2026-11-18
+
+- chore: build on activitykit 0.6.3, whose template fixtures get the same verdict here (#22) (`9804b0b`)
+- fix: a layout's bar shows its value on Android 16 (#23) (`7170d14`)
+
 - On Android 16 and later the bar of a layout shows its value. It was drawn full whatever the progress was: the
   projection is one segment, and Android's progress style fills every segment unless it is asked to style them
   by the progress, which the projection now does (`styledByProgress`). Nothing changes below Android 16, for

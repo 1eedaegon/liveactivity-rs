@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.7.5 - 2026-11-18
+
+- fix: on iOS a button's tap reaches the sink without `on`, with activitykit 0.6.4 (#24) (`225db98`)
+
 Built on activitykit 0.6.4. The correction is in activitykit's Swift sources, which an application builds with
 this crate, and nothing changes in Rust.
 

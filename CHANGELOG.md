@@ -9,6 +9,11 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
   by the progress, which the projection now does (`styledByProgress`). Nothing changes below Android 16, for
   the progress template, or for a content that the application gives: such a content says `styledByProgress`
   for itself, and one that leaves it out is drawn full as before.
+- One case to know when an application is updated while such an activity runs. An activity of a layout with a
+  progress that an earlier version started and that Android has not shown yet answers `CONFLICT` to a repeat of
+  its start: liveupdate keeps the projection of that start and compares it, and the projection of the same
+  request now has the flag. End the activity and start it again. An activity that Android shows answers the
+  repeat as before, and updates are not affected.
 
 ## 0.7.3 - 2026-11-16
 

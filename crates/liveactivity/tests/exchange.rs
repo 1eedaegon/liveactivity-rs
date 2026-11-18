@@ -660,6 +660,42 @@ fn req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection() {
 }
 
 #[test]
+fn req_a_023_a_start_projected_before_the_flag_is_compared_as_liveupdate_keeps_it() {
+    // REQ-A-023
+    let (live, _events, driver) = android_with_files("bar-before");
+    // An activity that Android has not listed yet, kept as the version before this requirement projected its
+    // start: without the flag.
+    driver.lock().delay_listing = true;
+    let record = block_on(live.start_layout(ride("ride:1", None))).unwrap();
+    assert_eq!(record.state, ActivityState::Unknown);
+    for kept in &mut driver.lock().records {
+        let shown = kept.origin.snapshot.presentation.as_mut().unwrap();
+        let liveactivity::PresentationStyle::Progress(bar) = &mut shown.style else {
+            panic!("the start was projected to the progress style");
+        };
+        bar.styled_by_progress = false;
+    }
+
+    // The same request is projected with the flag now, and liveupdate compares it with the one it keeps.
+    let repeated = block_on(live.start_layout(ride("ride:1", None)));
+    assert_eq!(repeated.unwrap_err().code, "CONFLICT");
+
+    // Once Android shows the activity, the same request is that activity, whatever it would project to now,
+    // and an update replaces the projection that is shown.
+    driver.show_unlisted();
+    let shown = block_on(live.start_layout(ride("ride:1", None))).unwrap();
+    assert_eq!(shown.id, record.id);
+    let update = liveactivity::parse_request("update_layout", ride_update(&record.id, 1, None));
+    block_on(live.update_layout(update.unwrap())).unwrap();
+    let liveactivity::PresentationStyle::Progress(bar) =
+        driver.posted(&record.id).presentation.unwrap().style
+    else {
+        panic!("the layout's progress is projected");
+    };
+    assert_eq!((bar.progress, bar.styled_by_progress), (700, true));
+}
+
+#[test]
 fn req_a_002_taps_of_a_content_and_dismissals_reach_the_sink() {
     // REQ-A-002, REQ-E-002
     let (live, events, driver) = android_with_files("content-taps");

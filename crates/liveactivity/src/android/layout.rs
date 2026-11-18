@@ -522,12 +522,14 @@ fn first_timer(node: &Node, values: &BTreeMap<String, Value>) -> Option<(f64, f6
     found
 }
 
+/// One segment, styled by the progress: Android's progress style fills every segment otherwise, and the bar has
+/// neither a tracker icon nor a color to show its value by.
 fn progress_style(fraction: Option<f64>) -> liveupdate::ProgressStyle {
     let fraction = fraction.unwrap_or(0.0);
     liveupdate::ProgressStyle {
         progress: (fraction * f64::from(PROGRESS_SCALE)).round() as u32,
         indeterminate: false,
-        styled_by_progress: false,
+        styled_by_progress: true,
         segments: vec![liveupdate::ProgressSegment {
             length: PROGRESS_SCALE,
             id: None,

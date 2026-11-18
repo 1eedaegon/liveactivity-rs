@@ -604,6 +604,8 @@ fn req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection() {
         panic!("the layout's progress is projected");
     };
     assert_eq!((style.progress, style.segments.len()), (700, 1));
+    // REQ-A-023: the projected bar is styled by its progress, so that it is filled up to its value.
+    assert!(style.styled_by_progress);
     let other = block_on(live.start_layout(ride("ride:8", None))).unwrap();
     assert_eq!(driver.posted(&other.id).title, "6 min");
     assert_eq!(other.snapshot.android, None);
@@ -619,6 +621,22 @@ fn req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection() {
     let same_style = liveactivity::parse_request("update_layout", same_style).unwrap();
     block_on(live.update_layout(same_style)).unwrap();
     assert_eq!(driver.posted(&other.id).title, "Driver on the way");
+    // REQ-A-023: a content says for itself how its bar is styled. One that leaves `styledByProgress` out is
+    // posted without it, as given.
+    let mut unstyled = driving(60, "2 min");
+    unstyled["presentation"]["style"]["value"]
+        .as_object_mut()
+        .unwrap()
+        .remove("styledByProgress");
+    let unstyled =
+        liveactivity::parse_request("update_layout", ride_update(&other.id, 2, Some(unstyled)));
+    block_on(live.update_layout(unstyled.unwrap())).unwrap();
+    let liveactivity::PresentationStyle::Progress(style) =
+        driver.posted(&other.id).presentation.unwrap().style
+    else {
+        panic!("the content's style is posted");
+    };
+    assert_eq!((style.progress, style.styled_by_progress), (60, false));
     let other = block_on(live.start_layout(ride("ride:9", None))).unwrap();
 
     // REQ-C-007: what only iOS reads is no part of what Android keeps and compares. The same start with a
@@ -639,6 +657,42 @@ fn req_a_001_an_android_content_is_shown_as_given_in_place_of_the_projection() {
             .relevance,
         None
     );
+}
+
+#[test]
+fn req_a_023_a_start_projected_before_the_flag_is_compared_as_liveupdate_keeps_it() {
+    // REQ-A-023
+    let (live, _events, driver) = android_with_files("bar-before");
+    // An activity that Android has not listed yet, kept as the version before this requirement projected its
+    // start: without the flag.
+    driver.lock().delay_listing = true;
+    let record = block_on(live.start_layout(ride("ride:1", None))).unwrap();
+    assert_eq!(record.state, ActivityState::Unknown);
+    for kept in &mut driver.lock().records {
+        let shown = kept.origin.snapshot.presentation.as_mut().unwrap();
+        let liveactivity::PresentationStyle::Progress(bar) = &mut shown.style else {
+            panic!("the start was projected to the progress style");
+        };
+        bar.styled_by_progress = false;
+    }
+
+    // The same request is projected with the flag now, and liveupdate compares it with the one it keeps.
+    let repeated = block_on(live.start_layout(ride("ride:1", None)));
+    assert_eq!(repeated.unwrap_err().code, "CONFLICT");
+
+    // Once Android shows the activity, the same request is that activity, whatever it would project to now,
+    // and an update replaces the projection that is shown.
+    driver.show_unlisted();
+    let shown = block_on(live.start_layout(ride("ride:1", None))).unwrap();
+    assert_eq!(shown.id, record.id);
+    let update = liveactivity::parse_request("update_layout", ride_update(&record.id, 1, None));
+    block_on(live.update_layout(update.unwrap())).unwrap();
+    let liveactivity::PresentationStyle::Progress(bar) =
+        driver.posted(&record.id).presentation.unwrap().style
+    else {
+        panic!("the layout's progress is projected");
+    };
+    assert_eq!((bar.progress, bar.styled_by_progress), (700, true));
 }
 
 #[test]

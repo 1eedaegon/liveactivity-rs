@@ -1,7 +1,7 @@
 # iOS setup
 
 On iOS `liveactivity` runs on the [activitykit](https://github.com/1eedaegon/activitykit-rs) crate
-(0.4). The Rust side needs no code beyond the builder:
+(0.6). The Rust side needs no code beyond the builder:
 
 ```rust
 let live = liveactivity::LiveActivity::builder()

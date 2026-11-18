@@ -81,9 +81,10 @@ fn req_i_010_the_engines_widget_draws_a_color_pair_itself() {
     let rule = sources.join("ActivityKitShared/LayoutCardBackground.swift");
     let rule = fs::read_to_string(rule).expect("activitykit ships the rule of a card's background");
     assert!(
-        rule.contains("func drawnBackground(values:") && rule.contains("case .adaptive = color"),
-        "a pair is what the widget draws"
+        rule.contains("func drawnBackground(values:"),
+        "the rule names what the widget draws"
     );
+    assert!(rule.contains("case .adaptive = color"), "which is a pair");
     let widget = sources.join("ActivityKitWidget/LayoutWidget.swift");
     let widget = fs::read_to_string(widget).expect("activitykit ships its widget");
     assert!(

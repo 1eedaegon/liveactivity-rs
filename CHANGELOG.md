@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.7.6 - 2026-11-18
+
+- fix: on iOS a color pair behind a card is of the appearance of its content, with activitykit 0.6.5 (#25) (`4e80fdd`)
+
 Built on activitykit 0.6.5. The correction is in activitykit's widget, which an application's widget extension
 is built from, and nothing changes in Rust or in the contract's shape.
 

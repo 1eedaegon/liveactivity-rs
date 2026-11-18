@@ -741,7 +741,7 @@ an Android content, or `link:<n>` for the nth `link` of the layout's lock screen
     "minimal": Node,
     "margins": { ... }             // optional; see "Options of the Dynamic Island"
   },
-  "background": Color | Binding,   // optional; tint of the activity background
+  "background": Color | Binding,   // optional; the color behind the activity's content
   "keyline": Color | Binding,      // optional; tint of the Dynamic Island keyline
   "url": Url | Binding,            // optional; what a tap on the activity opens the app with
   "small": Node                    // optional; for a paired Apple Watch and CarPlay
@@ -750,6 +750,11 @@ an Android content, or `link:<n>` for the nth `link` of the layout's lock screen
 
 Without `url` a tap opens the app without a URL. [Links and URLs](#links-and-urls) has the rule of
 a URL.
+
+On iOS a `background` that is a color name or a hex color is the system's tint of the activity. One that is a
+light and dark pair is drawn by the widget extension behind the content, on the Lock Screen and in the small
+family, so that it is of the appearance the content is drawn in; the system's own parts of a card, such as its
+question whether the application may go on showing Live Activities, then have the system's colors.
 
 `small` is what the activity shows where iOS asks for the small family: the Smart Stack of a paired Apple Watch
 (iOS 18) and CarPlay (iOS 26). It is drawn only when the widget extension's Info.plist sets

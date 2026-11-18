@@ -71,6 +71,31 @@ fn req_i_004_the_engines_intent_says_whether_a_tap_is_a_toggles() {
     );
 }
 
+#[test]
+fn req_i_010_the_engines_widget_draws_a_color_pair_itself() {
+    // REQ-I-010
+    // A light and dark pair that was the system's tint of the activity came as its light color behind content of
+    // the dark appearance. Since activitykit 0.6.5 the widget draws a pair behind the content, and the system
+    // tints with every other color.
+    let sources = engine().join("swift/Sources");
+    let rule = sources.join("ActivityKitShared/LayoutCardBackground.swift");
+    let rule = fs::read_to_string(rule).expect("activitykit ships the rule of a card's background");
+    assert!(
+        rule.contains("func drawnBackground(values:") && rule.contains("case .adaptive = color"),
+        "a pair is what the widget draws"
+    );
+    let widget = sources.join("ActivityKitWidget/LayoutWidget.swift");
+    let widget = fs::read_to_string(widget).expect("activitykit ships its widget");
+    assert!(
+        widget.contains("document.drawnBackground(values: values)"),
+        "the widget draws it"
+    );
+    assert!(
+        widget.contains(".activityBackgroundTint(document.backgroundTint(values: values)"),
+        "and the system tints with every other color"
+    );
+}
+
 fn cases<'a>(fixtures: &'a Value, group: &str) -> &'a Vec<Value> {
     fixtures[group].as_array().unwrap()
 }

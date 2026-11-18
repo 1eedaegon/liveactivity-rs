@@ -4,6 +4,20 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on activitykit 0.6.5. The correction is in activitykit's widget, which an application's widget extension
+is built from, and nothing changes in Rust or in the contract's shape.
+
+- On iOS a layout's `background` that is a light and dark pair is of the appearance its content is drawn in. A
+  pair was the system's tint of the activity, and a card came with the pair's light color behind content of the
+  dark appearance, white text on a light card. It was seen on simulators and on no phone or watch: on the Lock
+  Screen of iOS 26.3 at some starts, until the next update, and in the Smart Stack of a paired Apple Watch.
+  activitykit's widget now draws a pair itself, behind the content, on the Lock Screen and in the small family.
+  A color name and a hex color are the system's tint as before.
+- What changes with a pair: the system's own parts of a card, such as its question whether the application may
+  go on showing Live Activities, have the system's colors and no longer the pair's.
+- An application whose own widget draws layouts, in place of `ActivityKitLayoutWidget`, does with
+  `LayoutDocument.drawnBackground(values:)` and `backgroundTint(values:)` what that widget does.
+
 ## 0.7.5 - 2026-11-18
 
 - fix: on iOS a button's tap reaches the sink without `on`, with activitykit 0.6.4 (#24) (`225db98`)

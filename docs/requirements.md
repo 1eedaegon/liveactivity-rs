@@ -225,8 +225,8 @@ under an action id, and counts with buttons and links toward the four of a regio
 as `Action` with `on`, the state the person asked for; a button's tap has none. A request that breaks a rule of
 the node is `INVALID_INPUT` on every platform.
 
-On iOS a button's tap has none since activitykit 0.6.4, which this crate builds on. The system hands the
-application a value that an intent never set as `false`, and activitykit's intent carried the state as one
+On iOS a button's tap has none since activitykit 0.6.4, and this crate builds on no earlier one. The system hands
+the application a value that an intent never set as `false`, and activitykit's intent carried the state as one
 optional value: a button's tap reached the sink with `on: false`, as a toggle's that asks to switch off. The
 intent now says beside the state whether the tap is a toggle's. This crate hands on what activitykit reports
 and cannot tell the two apart itself.
@@ -277,6 +277,20 @@ toggles or links; a request that breaks that is `INVALID_INPUT` on every platfor
 and a template has none.
 
 Evidence: `ios::tests::req_i_009_the_small_region_reaches_the_kit`.
+
+## REQ-I-010 A color pair behind a card
+
+A layout's `background` that is a light and dark pair is of the appearance its content is drawn in, on the Lock
+Screen and where the system asks for the small family. activitykit's widget draws a pair itself, behind the
+content, since 0.6.5, which this crate builds on. Before, a pair was the system's tint of the activity, and a card
+came with the pair's light color behind content of the dark appearance: seen on simulators, on the Lock Screen of
+iOS 26.3 at some starts and in the Smart Stack of a paired Apple Watch, and on no phone or watch. A color name
+and a hex color are the system's tint. With a pair the system's own parts of a card, such as its question whether
+the application may go on showing Live Activities, have the system's colors and not the pair's. This crate hands
+the layout on as written and draws nothing.
+
+Evidence: `engine_fixtures::req_i_010_the_engines_widget_draws_a_color_pair_itself`. The drawing is run by
+activitykit's tests on the simulator.
 
 ## REQ-E-002 Started, state and permission events
 

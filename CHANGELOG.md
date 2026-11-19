@@ -4,6 +4,11 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.8.3 - 2026-11-19
+
+- chore: add funding yaml (`9f64f12`)
+- fix: buttons and toggles from iOS 17.2, and a build with Xcode 27, with activitykit 0.6.6 (#30) (`a56c817`)
+
 Built on activitykit 0.6.6, with its three corrections; nothing of this crate's Rust API changes.
 
 - **Buttons and toggles begin with iOS 17.2**, not 17.0. Below it the widget draws them as their labels and

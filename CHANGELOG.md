@@ -4,6 +4,11 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.8.4 - 2026-11-19
+
+- chore: what activitykit saw and did not run, in the documents of 0.6.6 (#31) (`e07c2ce`)
+- docs: the README shows what 0.8 added, and the setup's stale lines are corrected (#32) (`8963d6c`)
+
 ## 0.8.3 - 2026-11-19
 
 - chore: add funding yaml (`9f64f12`)

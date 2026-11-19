@@ -176,9 +176,8 @@ fn contract_template(value: liveupdate::Template) -> crate::Result<Template> {
     match value {
         liveupdate::Template::Progress => Ok(Template::Progress),
         liveupdate::Template::Timer => Ok(Template::Timer),
-        liveupdate::Template::Standard
-        | liveupdate::Template::BigText
-        | liveupdate::Template::Metric => Err(non_v1_record()),
+        // The templates of a presentation, and one that a later liveupdate adds.
+        _ => Err(non_v1_record()),
     }
 }
 
@@ -214,7 +213,8 @@ pub(crate) fn promotion_state(value: liveupdate::PromotionState) -> PromotionSta
         liveupdate::PromotionState::Promoted => PromotionState::Promoted,
         liveupdate::PromotionState::NotPromoted => PromotionState::NotPromoted,
         liveupdate::PromotionState::NotApplicable => PromotionState::NotApplicable,
-        liveupdate::PromotionState::Unknown => PromotionState::Unknown,
+        // What Android did not say, and a state that a later liveupdate adds.
+        _ => PromotionState::Unknown,
     }
 }
 

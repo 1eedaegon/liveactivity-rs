@@ -42,6 +42,19 @@ pub struct OpenedEvent {
     pub action_id: Option<String>,
 }
 
+/// An event of a kind that this version does not know (Android): liveupdate's library of a later version stored
+/// it, and liveupdate read what it knows of it, which is the activity. The application's crate is older than its
+/// AAR, and what happened is in that version's documents.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnknownEvent {
+    /// The handle of the activity.
+    pub activity_id: String,
+    /// Absent when the backend no longer knows that activity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_key: Option<String>,
+}
+
 /// What a platform reports of the application's activities. More kinds may come: match with a `_` arm.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
@@ -66,6 +79,8 @@ pub enum Event {
     Permissions(Permissions),
     /// The person opened the application from a notification (Android).
     Opened(OpenedEvent),
+    /// Something that this version has no event for (Android).
+    Unknown(UnknownEvent),
 }
 
 /// Where a backend's events go: implemented by a framework plugin, or any closure.

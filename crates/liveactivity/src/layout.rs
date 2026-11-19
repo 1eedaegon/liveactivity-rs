@@ -81,6 +81,12 @@ pub struct AndroidOptions {
     /// placement answers `UNSUPPORTED_FEATURE`.
     #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
     pub placement: Option<AndroidPlacement>,
+    /// Whether the activity carries a watch's Ongoing Activity where the device offers one
+    /// (`wear_ongoing_activity` in the capabilities): its icon on the watch face of a watch below Wear OS 7 whose
+    /// application has `androidx.wear:wear-ongoing`. Carried when absent. `false` goes with every snapshot of
+    /// the activity, the projected ones and an Android content, whatever that says of it.
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
+    pub wear_ongoing_activity: Option<bool>,
 }
 
 impl AndroidOptions {
@@ -90,6 +96,16 @@ impl AndroidOptions {
             visibility,
             public_version: None,
             placement: None,
+            wear_ongoing_activity: None,
+        }
+    }
+
+    /// The options of an activity that carries a watch's Ongoing Activity, or does not.
+    #[must_use]
+    pub fn with_wear_ongoing_activity(self, carried: bool) -> Self {
+        Self {
+            wear_ongoing_activity: Some(carried),
+            ..self
         }
     }
 }
@@ -461,6 +477,20 @@ impl LayoutEndInput {
 }
 
 impl AndroidContent {
+    /// What Android shows: a title, a text and the notification's style with what it shows.
+    #[must_use]
+    pub fn new(
+        title: impl Into<String>,
+        status: impl Into<String>,
+        presentation: AndroidPresentation,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            status: status.into(),
+            presentation,
+        }
+    }
+
     /// The content as liveupdate takes it, at the snapshot's revision and stale date.
     pub(crate) fn snapshot(&self, revision: u64, stale_at: Option<u64>) -> liveupdate::Snapshot {
         liveupdate::Snapshot {
@@ -649,8 +679,12 @@ fn beside_the_presentation(request: &serde_json::Value) -> serde_json::Value {
     request
 }
 
+/// The members of a presentation that are `true` by default. liveupdate leaves them out when they are.
+const TRUE_BY_DEFAULT: [&str; 1] = ["wearOngoingActivity"];
+
 /// Whether `sent` is `encoded` but for members at liveupdate's defaults, which liveupdate leaves out when it
-/// writes a presentation: `false` and an empty array. A `null` is no default, and an array is no object.
+/// writes a presentation: `false`, an empty array, and `true` for a member that is so by default. A `null` is no
+/// default, and an array is no object.
 fn same_but_defaults(encoded: &serde_json::Value, sent: &serde_json::Value) -> bool {
     use serde_json::Value::{Array, Bool, Object};
     match (encoded, sent) {
@@ -664,7 +698,10 @@ fn same_but_defaults(encoded: &serde_json::Value, sent: &serde_json::Value) -> b
         (Object(encoded), Object(sent)) => {
             let written = sent.iter().all(|(key, sent)| match encoded.get(key) {
                 Some(encoded) => same_but_defaults(encoded, sent),
-                None => matches!(sent, Bool(false)) || sent.as_array().is_some_and(Vec::is_empty),
+                None => match sent {
+                    Bool(sent) => *sent == TRUE_BY_DEFAULT.contains(&key.as_str()),
+                    sent => sent.as_array().is_some_and(Vec::is_empty),
+                },
             });
             written && encoded.keys().all(|key| sent.contains_key(key))
         }

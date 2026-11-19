@@ -405,6 +405,8 @@ fn when_to_ask_again<D: Driver + 'static>(backend: &LiveUpdateBackend<D>) -> Res
         NextCheck::At(_time) => {}
         // Nothing until the next call, signal or resume.
         NextCheck::Never => {}
+        // An answer that a later liveupdate adds: shortly, as for `Soon`.
+        _ => {}
     }
     Ok(())
 }

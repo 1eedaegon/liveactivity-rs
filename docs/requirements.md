@@ -193,6 +193,26 @@ Evidence: `requests::req_c_011_the_sound_of_an_alert_is_the_name_of_a_file`,
 `requests::req_c_011_each_member_belongs_to_its_command` and
 `requests::req_c_011_a_typed_start_writes_its_members_as_it_read_them`.
 
+## REQ-C-012 Code written against this version compiles against the next
+
+Every public enum of the crate is `#[non_exhaustive]`: a `match` outside the crate has a `_` arm, and compiles
+when a variant is added. `Template` and `EndPolicy` join the others. Every struct of the contract that a caller
+builds has a constructor that takes what is required and sets nothing else, to build on with the struct update
+syntax where the struct allows it or with the constructor alone where it is `#[non_exhaustive]`: `Timer`,
+`Snapshot`, `StartInput`, `UpdateInput`, `EndInput` and `AndroidContent` get theirs beside those the layout's
+types have. What a constructor builds is written as the JSON that the literal was.
+
+The vocabulary that the crate re-exports follows the same rule in its own crates: liveupdate since 0.7.0, whose
+enums are all `#[non_exhaustive]` and whose structs have constructors (`BigTextStyle::new`, `ProgressStyle::new`,
+`ProgressSegment::new`, `ProgressPoint::new`, `TimerStyle::new`, `Metric::new`, `MetricStyle::new`,
+`PublicVersion::new`, beside `AndroidPresentation::new` and `NotificationAction::new`; `SamsungNowBar::default()`).
+The backend's `next_check` answers liveupdate's `NextCheck`, which may gain an answer: in a `_` arm, ask again
+shortly.
+
+Evidence: `api::req_c_012_every_public_enum_may_gain_a_variant`,
+`api::req_c_012_a_constructor_builds_what_the_literal_was` and
+`api::req_c_012_the_reexported_vocabulary_is_built_on_its_constructors`.
+
 ## REQ-I-001 Relevance
 
 The relevance of a snapshot reaches ActivityKit with a start, an update and an end, and the record reports it.
@@ -340,6 +360,16 @@ while the sink runs, so a sink may call the backend, `sync_events` included. A s
 it was handed and no other: what was queued behind it reaches the sink with the next ask.
 
 Evidence: `exchange::req_e_007_events_reach_the_sink_one_at_a_time_in_the_order_they_were_taken`.
+
+## REQ-E-008 An event of a kind that is not known
+
+An event that liveupdate reads as of a kind it does not know, which a later AAR stored, reaches the sink as
+`Event::Unknown` with the activity's id, and with its key when the backend knows the activity. Nothing else of
+it is known: liveupdate reads its sequence, its activity and its time. A drain removes an event from the
+adapter, so one that is not passed on is gone. A dismissal is no such event: it stays a state event
+(REQ-E-005).
+
+Evidence: `exchange::req_e_008_an_event_of_an_unknown_kind_reaches_the_sink`.
 
 ## REQ-A-001 Android content of a snapshot
 
@@ -569,6 +599,56 @@ Evidence: `android::layout::tests::req_a_023_a_layouts_bar_is_filled_up_to_its_v
 what the driver was handed, for a projection and for a content that leaves it out;
 `exchange::req_a_023_a_start_projected_before_the_flag_is_compared_as_liveupdate_keeps_it` for a start of an
 earlier version.
+
+## REQ-A-024 A watch's Ongoing Activity
+
+On a watch below Wear OS 7 whose application has `androidx.wear:wear-ongoing`, liveupdate's library puts an
+Ongoing Activity into the notification of an activity: its icon on the watch face, and an entry among the recent
+applications. The capabilities say whether the device does: `androidPresentation.wearOngoingActivity`.
+
+One activity can do without it. An Android content says `wearOngoingActivity: false` in its presentation, as
+liveupdate takes it. A layout says it with the Android option `wearOngoingActivity` of its start, which goes
+with every snapshot of the activity: the Ongoing Activity is carried where neither the start nor the content of
+the snapshot turns it off. Absent means carried, and a start that says `true` is the same activity as one that
+says nothing. A template has no such option and carries it where the device offers it. iOS ignores the member.
+Anything but a boolean is `INVALID_INPUT` on every platform.
+
+No test here runs on a watch: the tests read what liveupdate is handed.
+
+Evidence: `exchange::req_a_024_a_start_says_whether_its_activity_carries_a_watchs_ongoing_activity`,
+`exchange::req_a_024_the_capabilities_say_whether_a_watch_shows_an_ongoing_activity` and
+`contract::req_a_024_a_wrong_ongoing_activity_member_reaches_no_backend`.
+
+## REQ-A-025 What an earlier Android shows
+
+By liveupdate's account, which this crate hands on and does not test:
+
+- Below Android 17 a metric style shows its numbers and texts as lines under the status, and its first
+  stopwatch or countdown as the clock in the header. The capability `metricStyle` is false there as before, and
+  an Android content of that style is taken.
+- An action that requires authentication (`authenticationRequired`) asks for the unlock from Android 12. Below
+  it Android has no such setting and would send the tap from a locked device at once: there liveupdate's library
+  drops a tap while the device is locked, and the person taps again after unlocking.
+
+Evidence: `engine_fixtures::req_a_025_the_engine_says_what_an_earlier_android_shows`.
+
+## REQ-A-026 The room of liveupdate's store
+
+liveupdate stores its receipts in at most 1,000,000 bytes at a start and at an update: ended activities go, the
+oldest first, for the room that a new one needs, and a live one never does. A start or an update for which the
+live activities alone leave no room answers `SYSTEM_LIMIT`, and the backend keeps nothing of what was asked: a
+start leaves no activity, and an update leaves the content that was shown.
+
+Evidence: `exchange::req_a_026_a_start_without_room_in_the_store_is_a_system_limit`.
+
+## REQ-A-027 The AAR this crate is built with
+
+The crate is built and tested with liveupdate 0.7.0, whose AAR is `liveupdate-android-0.7.0.aar`. The setup
+document names it, what a watch application adds, and what a crate and an AAR of two versions do together: an
+AAR from 0.7.0 posts a record with a member it does not know without it, and an earlier one refuses such a
+request with `INVALID_INPUT`.
+
+Evidence: `engine_fixtures::req_a_027_the_setup_names_the_aar_of_the_engine_in_the_lock`.
 
 ## REQ-N-001 No framework in the crate
 

@@ -511,3 +511,36 @@ fn a_running_metric_of_a_content_is_written_as_androids_side_reads_it() {
         "INVALID_INPUT"
     );
 }
+
+#[test]
+fn req_a_024_a_wrong_ongoing_activity_member_reaches_no_backend() {
+    // REQ-A-024
+    let option = |value: serde_json::Value| json!({"android":{"visibility":"private","wearOngoingActivity":value}});
+    let content = |value: serde_json::Value| {
+        json!({"snapshot":{"revision":0,"values":{"eta":"4 min","muted":false,"count":3},
+            "android":{"title":"Ride","status":"On the way",
+                "presentation":{"style":{"kind":"standard"},"wearOngoingActivity":value}}}})
+    };
+    for right in [
+        option(json!(false)),
+        option(json!(true)),
+        content(json!(false)),
+        content(json!(true)),
+    ] {
+        assert_eq!(
+            answer_to_a_start(right.clone()),
+            "UNSUPPORTED_PLATFORM",
+            "{right}"
+        );
+    }
+    for wrong in [
+        option(json!("no")),
+        option(json!(0)),
+        option(serde_json::Value::Null),
+        content(json!("no")),
+        content(json!(0)),
+        content(serde_json::Value::Null),
+    ] {
+        assert_eq!(answer_to_a_start(wrong.clone()), "INVALID_INPUT", "{wrong}");
+    }
+}

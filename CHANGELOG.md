@@ -4,6 +4,11 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.8.2 - 2026-11-19
+
+- chore: two limits that liveupdate 0.7.1 names, in the contract and the setup (#28) (`84137b8`)
+- docs: a watch and a car, each on iOS and on Android (#29) (`702f53f`)
+
 ## 0.8.1 - 2026-11-19
 
 - fix: a progress style built on its constructor shows its progress, with liveupdate 0.7.1 (#27) (`d037617`)

@@ -416,7 +416,8 @@ application, and among the recent applications: the Ongoing Activity of Wear OS,
 3. Start and update as on a phone. The icon, the title, the text and a header clock are the
    notification's, and a tap opens what a tap on the notification opens. An update may turn the Ongoing
    Activity off or on; a notification that a foreground service holds keeps its icon until the activity
-   ends.
+   ends. The icon is all the watch shows of an activity: Wear OS does not list an ongoing notification
+   among its notifications, and a revision that alerts does not pop up there.
 
 `capabilities().android_presentation` says `wear_ongoing_activity` where the watch shows it; it is there
 when the backend has [the app's files](#4-give-the-backend-the-apps-files). One activity can stay in the

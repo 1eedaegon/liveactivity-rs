@@ -639,7 +639,8 @@ By liveupdate's account, which this crate hands on and does not test:
   lines alone, with the application's icon and no progress bar; without it a promoted activity is in the Now Bar
   with its progress bar once it is opened. A point at the full length of a progress track is not drawn. The
   status chip shows the first metric, whatever `criticalMetric` names, and of three metrics a value longer than
-  about seven characters is cut.
+  about seven characters is cut, a number too. A right-to-left layout is the system's: nothing of a content
+  gives a direction.
 - An action that requires authentication (`authenticationRequired`) asks for the unlock from Android 12. Below
   it Android has no such setting and would send the tap from a locked device at once: there liveupdate's library
   drops a tap while the device is locked, and the person taps again after unlocking.

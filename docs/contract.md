@@ -296,7 +296,9 @@ activity's icon on the watch face, which opens the application, and an entry amo
 with the notification's title, text and header clock. Nothing in a request asks for it, and the capabilities
 say whether the device does it ([Android setup](android-setup.md#a-watch) has what the application adds):
 `androidPresentation.wearOngoingActivity`, which like the rest of `androidPresentation` is there when the
-backend has the app's files. The last content of an activity that ended with a time to stay carries none.
+backend has the app's files. The last content of an activity that ended with a time to stay carries none. The
+icon is all a watch shows of an activity: Wear OS does not list an ongoing notification among its notifications,
+and a revision that alerts does not pop up there.
 
 One activity can do without it, and stay in the tray: the icon goes from the watch face with the update that
 turns it off, and with the end (liveupdate 0.7.1; before it the icon stayed until the notification was
@@ -474,7 +476,8 @@ Without it every segment is shown in full, and a bar without a tracker icon look
 Rust `ProgressStyle::new` builds it styled by its progress, since liveupdate 0.7.1; the JSON reads a style that
 leaves the member out as not styled. On One UI 9 a point at the track's full length is not drawn, the status chip
 shows the first metric whatever `criticalMetric` names, and of three metrics a value longer than about seven
-characters is cut, as liveupdate saw on a Galaxy S23.
+characters is cut, a number too, as liveupdate saw on a Galaxy S23 with Android 17. A right-to-left layout is
+the system's: nothing of a content gives a direction.
 
 What a device shows of a content follows its Android version, by liveupdate's account:
 

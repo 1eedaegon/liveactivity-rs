@@ -161,9 +161,12 @@ fn req_i_011_the_engines_buttons_and_toggles_begin_with_ios_17_2() {
     );
     let widget = fs::read_to_string(sources.join("ActivityKitWidget/LayoutWidget.swift"))
         .expect("activitykit ships its widget");
-    assert!(
-        widget.contains("guard #available(iOS 17.2, *) else { return nil }"),
-        "the widget draws a control from iOS 17.2"
+    assert_eq!(
+        widget
+            .matches("guard #available(iOS 17.2, *) else { return nil }")
+            .count(),
+        2,
+        "the widget draws a button and a toggle from iOS 17.2"
     );
     assert!(
         !widget.contains("#available(iOS 17.0, *)"),

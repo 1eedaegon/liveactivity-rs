@@ -323,8 +323,9 @@ earlier activitykit a button was drawn on iOS 17.0 and 17.1 and its tap ran noth
 intent, newer than the iOS its module is built for, into the application's App Intents metadata as one that begins
 with iOS 17.2 (seen by activitykit on the iOS 17.0 simulator).
 
-Evidence: `engine_fixtures::req_i_011_the_engines_buttons_and_toggles_begin_with_ios_17_2`. The taps are run by
-activitykit's tests on the simulator.
+Evidence: `engine_fixtures::req_i_011_the_engines_buttons_and_toggles_begin_with_ios_17_2` and
+`ios::tests::capabilities_and_permissions_follow_activitykits_authorization`. The taps are run by activitykit's tests
+on the simulator.
 
 ## REQ-I-012 A layout's place on the Lock Screen
 
@@ -343,8 +344,8 @@ activitykit's tests on the simulator.
 
 The crate builds for iOS with Xcode 27. activitykit's build script names SwiftPM's own build system since 0.6.6
 (`--build-system native`): Swift Build, the default of `swift build` from Xcode 27, does not build for iOS from the
-flags the script passes, and the build of the bridge failed. Reported by activitykit from Xcode 27.2; no test of
-this crate builds for iOS.
+flags the script passes, and the build of the bridge failed. That was reported to activitykit by an application
+built with Xcode 27.2; activitykit runs no Xcode 27, and no test of this crate builds for iOS.
 
 Evidence: `engine_fixtures::req_i_013_the_engines_build_names_swiftpms_own_build_system`.
 

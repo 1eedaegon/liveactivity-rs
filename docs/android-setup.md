@@ -416,10 +416,12 @@ application, and among the recent applications: the Ongoing Activity of Wear OS,
 3. Start and update as on a phone. The icon, the title, the text and a header clock are the
    notification's, and a tap opens what a tap on the notification opens.
 
-`capabilities().android_presentation` says `wear_ongoing_activity` where the watch shows it. One activity
-can stay in the tray: `AndroidOptions::new(visibility).with_wear_ongoing_activity(false)` for a layout,
+`capabilities().android_presentation` says `wear_ongoing_activity` where the watch shows it; it is there
+when the backend has [the app's files](#4-give-the-backend-the-apps-files). One activity can stay in the
+tray: `AndroidOptions::new(visibility).with_wear_ongoing_activity(false)` for a layout,
 and `wear_ongoing_activity: false` in the presentation of an Android content
-([contract](contract.md#a-watchs-ongoing-activity)).
+([contract](contract.md#a-watchs-ongoing-activity)). A template's activity (`start`) has no such choice and
+always carries it.
 
 By liveupdate's account, which ran its library on a Galaxy Watch4 with Wear OS 5: it is for Wear OS 3 to
 6, older watches ignore it, Wear OS 7 shows Live Updates itself, and a phone's activity stays on the phone.

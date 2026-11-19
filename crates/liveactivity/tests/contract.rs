@@ -533,6 +533,10 @@ fn req_a_024_a_wrong_ongoing_activity_member_reaches_no_backend() {
             "{right}"
         );
     }
+    // The member where it does not belong: beside the presentation, in its style and in one of its actions. A
+    // presentation may write it as `true`, its default, and nothing else may.
+    let misplaced = |content: serde_json::Value| json!({"snapshot":{"revision":0,"values":{"eta":"4 min","muted":false,"count":3},"android":content}});
+    let standard = json!({"style":{"kind":"standard"}});
     for wrong in [
         option(json!("no")),
         option(json!(0)),
@@ -540,6 +544,18 @@ fn req_a_024_a_wrong_ongoing_activity_member_reaches_no_backend() {
         content(json!("no")),
         content(json!(0)),
         content(serde_json::Value::Null),
+        misplaced(
+            json!({"title":"Ride","status":"On the way","presentation":standard,
+            "wearOngoingActivity":true}),
+        ),
+        misplaced(json!({"title":"Ride","status":"On the way",
+            "presentation":{"style":{"kind":"standard","wearOngoingActivity":true}}})),
+        misplaced(json!({"title":"Ride","status":"On the way",
+            "presentation":{"style":{"kind":"bigText","value":{"text":"Long","wearOngoingActivity":true}}}})),
+        misplaced(json!({"title":"Ride","status":"On the way",
+            "presentation":{"style":{"kind":"standard"},
+                "actions":[{"id":"call","title":"Call","wearOngoingActivity":true}]}})),
+        json!({"wearOngoingActivity":true}),
     ] {
         assert_eq!(answer_to_a_start(wrong.clone()), "INVALID_INPUT", "{wrong}");
     }

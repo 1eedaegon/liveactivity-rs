@@ -15,7 +15,8 @@ crate's `Template` and `EndPolicy` are `#[non_exhaustive]` too, and `Event` has 
   the application, and among the recent applications. The capabilities say `wearOngoingActivity` where the
   device does it. One activity can do without it: a layout with the Android option `wearOngoingActivity: false`
   of its start (`AndroidOptions::with_wear_ongoing_activity`), for all of its snapshots, and an Android content
-  with the same member in its presentation, for its snapshot. A phone carries none whatever a request says.
+  with the same member in its presentation, for its snapshot. A template has no such choice and always
+  carries it. A phone carries none whatever a request says.
   This crate ran on no watch: liveupdate ran its library on a Galaxy Watch4 with Wear OS 5.
 - **An event of a kind that is not known** reaches the sink as `Event::Unknown` with the activity's id and key.
   liveupdate reads such an event of a later AAR for what it knows since 0.7.0; before, the events taken with
@@ -26,7 +27,9 @@ crate's `Template` and `EndPolicy` are `#[non_exhaustive]` too, and `Event` has 
   `Snapshot::timer`, `StartInput::new`, `UpdateInput::new`, `EndInput::after`, `AndroidContent::new` and
   `ImageInput::new`, and liveupdate brings `BigTextStyle::new`, `ProgressStyle::new`, `ProgressSegment::new`,
   `ProgressPoint::new`, `TimerStyle::new`, `Metric::new`, `MetricStyle::new`, `PublicVersion::new` and
-  `SamsungNowBar::default()`.
+  `SamsungNowBar::default()`, and for a caller of liveupdate itself, through `liveactivity::liveupdate`, its
+  `Snapshot::new`, `StartRequest::new`, `Timer::new`, `Observation::new`, `StartReport::new` and
+  `ActivityEvent::new`.
 - **The room of liveupdate's store.** A start and an update store liveupdate's receipts in at most 1,000,000
   bytes. Ended activities go for the room, the oldest first, where the store used to fill and fail every later
   start with `NATIVE_ERROR`. A start or an update for which the live activities alone leave no room is

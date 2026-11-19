@@ -121,7 +121,10 @@ fn sink(framework: Arc<dyn Framework>) -> impl Fn(Event) + Send + Sync + 'static
                 "live-activity://permissions",
                 serde_json::to_value(permissions),
             ),
-            // A kind of a later version: nothing to forward yet.
+            Event::Opened(opened) => ("live-activity://opened", serde_json::to_value(opened)),
+            // What Android reports and this version has no event for: the activity, and nothing else.
+            Event::Unknown(unknown) => ("live-activity://unknown", serde_json::to_value(unknown)),
+            // A kind of a later version of this crate: nothing to forward yet.
             _ => return,
         };
         if let Ok(payload) = payload {

@@ -23,7 +23,7 @@ liveupdate's changelog, its specification and the differences of its public API 
 | 0.7.0 | `EventKind::Unknown`: an event of a kind that the crate does not know, from a later AAR | `Event::Unknown` (REQ-E-008) |
 | 0.7.0 | The crate reads what it knows of a later AAR's reply; the AAR posts a record with members it does not know, without them; which crate works with which AAR | `docs/android-setup.md` names the AAR of 0.7.0 and has the table of versions (REQ-A-027) |
 | 0.7.0 | Below Android 17 a metric style shows its metrics: numbers and texts as lines, the first stopwatch or countdown as the header clock | Nothing to say in a request; the contract says what each Android shows (REQ-A-025) |
-| 0.7.0 | For a driver: `Observation::new`, `StartReport::new`, `ActivityEvent::new` | Through `liveactivity::liveupdate`, which the crate re-exports whole |
+| 0.7.0 | For a caller of liveupdate itself: `Snapshot::new`, `StartRequest::new`, `Timer::new`, and for a driver `Observation::new`, `StartReport::new`, `ActivityEvent::new` | Through `liveactivity::liveupdate`, which the crate re-exports whole. This crate builds liveupdate's requests itself, from its own types |
 
 ## Goal
 
@@ -65,6 +65,13 @@ Each requirement is a row of `docs/requirements.md` with the test that is its ev
   the application strictly. So does this crate: a member that is not known in a request is `INVALID_INPUT`.
 
 ## Not in this change
+
+- **A template without the Ongoing Activity.** liveupdate has the choice in a presentation, and its schema
+  version 1, which a template of this crate is on Android, has none: such an activity carries the Ongoing
+  Activity where the device offers it. An activity that must stay in the tray is a layout.
+- **The capability without the app's files.** `androidPresentation` is there when the backend has the app's
+  files, as before, and `wearOngoingActivity` is one of its members: a backend without them runs templates
+  only and does not say what a watch shows.
 
 - **A member that says "this action requires authentication" for a layout's button.** A layout's tree is
   activitykit's, which has no such member; an Android content's action has it.

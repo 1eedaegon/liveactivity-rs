@@ -294,13 +294,16 @@ On a watch below Wear OS 7 the notification of an activity is a line in the tray
 has `androidx.wear:wear-ongoing`, liveupdate's library puts an Ongoing Activity into that notification: the
 activity's icon on the watch face, which opens the application, and an entry among the recent applications,
 with the notification's title, text and header clock. Nothing in a request asks for it, and the capabilities
-say whether the device does it ([Android setup](android-setup.md#a-watch) has what the application adds).
+say whether the device does it ([Android setup](android-setup.md#a-watch) has what the application adds):
+`androidPresentation.wearOngoingActivity`, which like the rest of `androidPresentation` is there when the
+backend has the app's files. The last content of an activity that ended with a time to stay carries none.
 
 One activity can do without it, and stay in the tray. A layout says so in the options of its start, above, for
 all of its snapshots. An [Android content](#an-android-content) says so for its snapshot, in its presentation.
-The Ongoing Activity is carried where neither turns it off. A template has no such option. A phone, a watch
-with Wear OS 7, which shows Live Updates itself, and an application without the library carry none, whatever a
-request says.
+The Ongoing Activity is carried where neither turns it off. A template has no such option, and its activity
+always carries one where the device offers it: liveupdate has the choice in a presentation, which a template's
+snapshot does not have. An activity that must stay in the tray is a layout. A phone, a watch with Wear OS 7,
+which shows Live Updates itself, and an application without the library carry none, whatever a request says.
 
 #### Options of a start on iOS
 
@@ -462,7 +465,7 @@ shows the content as it is.
 
 | Member | Value |
 | --- | --- |
-| `wearOngoingActivity` | `false`: this snapshot's notification carries no [Ongoing Activity of a watch](#a-watchs-ongoing-activity). `true`, as when it is absent: it carries one where the device offers it and the start did not turn it off. An AAR of liveupdate before 0.6.0 refuses a content that has the member |
+| `wearOngoingActivity` | `false`: this snapshot's notification carries no [Ongoing Activity of a watch](#a-watchs-ongoing-activity). `true`, as when it is absent: it carries one where the device offers it and the start did not turn it off. An AAR of liveupdate before 0.6.0 refuses a content that says `false`; `true` is never sent to it |
 
 What a device shows of a content follows its Android version, by liveupdate's account:
 
@@ -473,7 +476,7 @@ What a device shows of a content follows its Android version, by liveupdate's ac
 | The status chip's `shortCriticalText` | Android 16 | Not shown |
 | A `metric` style | Android 17 | The numbers and the texts as lines under the status, and the first stopwatch or countdown as the clock in the header. The capability `metricStyle` is false there |
 | Semantic colors of a segment, a point and a metric | Android 17 | Not shown |
-| The unlock before the tap of an action with `authenticationRequired` | Android 12 | Android has no such setting below it and would send the tap from a locked device at once: liveupdate's library drops a tap while the device is locked, and the person taps again after unlocking |
+| The unlock before the tap of an action with `authenticationRequired` | Android 12 | Android has no such setting below it and would send the tap from a locked device at once: liveupdate's library drops a tap while the device is locked, and the person taps again after unlocking. An action that opens a URL starts the application, for which Android asks on every version |
 
 A URL here is liveupdate's: 1 to 2048 printable ASCII characters with a lowercase scheme, and none
 of the schemes `intent`, `content`, `file`, `javascript`, `data` and `android-app`. The application

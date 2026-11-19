@@ -101,6 +101,18 @@ fn req_c_012_a_constructor_builds_what_the_literal_was() {
         StartInput::new("nap:1", timer.clone()).template,
         Template::Timer
     );
+    // A snapshot that is of neither template is built, and refused where every request is checked.
+    let neither = Snapshot {
+        progress: None,
+        ..Snapshot::progress(0, "Ride", "On the way", 0.5)
+    };
+    assert_eq!(
+        StartInput::new("ride:7", neither)
+            .validate()
+            .unwrap_err()
+            .code,
+        "INVALID_INPUT"
+    );
     assert_eq!(
         serde_json::to_value(UpdateInput::new("id", timer)).unwrap(),
         json!({ "id": "id", "snapshot": { "revision": 0, "title": "Nap", "status": "Asleep",

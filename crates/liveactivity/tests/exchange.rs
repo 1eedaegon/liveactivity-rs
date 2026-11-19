@@ -2705,6 +2705,13 @@ fn req_a_024_a_start_says_whether_its_activity_carries_a_watchs_ongoing_activity
     let update = layout_update(ride_update(&quiet.id, 2, Some(driving(70, "2 min"))));
     block_on(live.update_layout(update)).unwrap();
     assert!(!carried(&quiet.id));
+    let mut on = driving(80, "1 min");
+    on["presentation"]["wearOngoingActivity"] = serde_json::json!(true);
+    block_on(live.update_layout(layout_update(ride_update(&quiet.id, 3, Some(on))))).unwrap();
+    assert!(!carried(&quiet.id));
+    // The same start again is the same activity.
+    let again = block_on(live.start_layout(with_option("ride:2", Some(false), None))).unwrap();
+    assert_eq!(again.id, quiet.id);
     // The other start of the same key, which carries it, is another activity than the one that does not.
     let other = block_on(live.start_layout(with_option("ride:2", None, None)));
     assert_eq!(other.unwrap_err().code, "CONFLICT");

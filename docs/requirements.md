@@ -612,7 +612,8 @@ One activity can do without it. An Android content says `wearOngoingActivity: fa
 liveupdate takes it. A layout says it with the Android option `wearOngoingActivity` of its start, which goes
 with every snapshot of the activity: the Ongoing Activity is carried where neither the start nor the content of
 the snapshot turns it off. Absent means carried, and a start that says `true` is the same activity as one that
-says nothing. A template has no such option and carries it where the device offers it. iOS ignores the member.
+says nothing. A template has no such option and always carries it where the device offers it: liveupdate has
+the choice in a presentation, which a template's snapshot does not have. iOS ignores the member.
 Anything but a boolean is `INVALID_INPUT` on every platform.
 
 No test here runs on a watch: the tests read what liveupdate is handed.

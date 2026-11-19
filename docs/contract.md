@@ -516,7 +516,8 @@ declares an activity that opens it ([Android setup](android-setup.md)).
   and the activity keeps what it shows.
 - A tap on one of `actions` reaches the sink as `Event::Action`, like a tap on a button node.
 - Android refuses a content it cannot post, with `INVALID_INPUT` and nothing shown: a URL that no
-  activity of the application opens, or a small icon that is no resource of it. Only the device
+  activity of the application opens, a small icon that is no resource of it, or, from Android 15, a
+  clock more than 14 days old. Only the device
   knows, so iOS takes the same request. A start that is refused this way leaves no activity, and
   its key is free. An update that is refused leaves the activity as it is shown, in its record
   too, and the corrected content goes out under the same revision.

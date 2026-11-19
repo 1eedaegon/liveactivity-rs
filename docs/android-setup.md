@@ -427,8 +427,9 @@ and `wear_ongoing_activity: false` in the presentation of an Android content
 always carries it.
 
 By liveupdate's account, which ran its library on a Galaxy Watch4 with Wear OS 5: it is for Wear OS 3 to
-6, older watches ignore it, Wear OS 7 shows Live Updates itself, and a phone's activity stays on the phone.
-This crate ran on no watch.
+6, older watches ignore it, Wear OS 7 shows Live Updates itself, and on that watch a phone's activity stayed
+on the phone. By Android's documentation an ongoing notification is not bridged to a paired watch, and a Live
+Update is bridged to some watches, by the Wear OS version and the maker. This crate ran on no watch.
 
 ## 5. Permissions
 
@@ -649,8 +650,12 @@ crate over the data of a later one.
 - **Staleness.** Nothing redraws a notification when a time passes. A layout whose nodes say
   `ifStale` is drawn as it is while fresh, and the record names `layout.ifStale`. The sink is told
   `stale` ([States](#states)): update the content then if the notification should say so.
-- **The small region.** A watch and a car show the notification by themselves. Nothing of a
-  layout's `small` is drawn, and the record names `layout.small`.
+- **The small region.** It is iOS's, for a paired Apple Watch and CarPlay, and a notification has
+  no place for it: nothing of a layout's `small` is drawn, and the record names `layout.small`. On
+  Android a phone's ongoing notification is not bridged to a paired watch, and a Live Update only to
+  some; Android Auto shows the notifications of messaging applications built for it, and Android's
+  documents name no place there for a Live Update. An application on a watch shows its own activity
+  on the watch face: [A watch](#a-watch).
 - **A scheduled start.** The AAR posts the notification at the time, through an alarm and a
   receiver of its own: see [A scheduled start](#a-scheduled-start). With an AAR older than 0.4 it
   is `UNSUPPORTED_FEATURE`.

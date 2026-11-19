@@ -26,8 +26,10 @@ Each requirement is a row of `docs/requirements.md` with the test that is its ev
 
 - **The region is the layout's, as activitykit has it.** This crate's `Layout` is activitykit's type, so the
   member, its rules and its limits are the engine's, and the crate adds none.
-- **Android names it and draws nothing.** A watch and a car show an Android notification by themselves, in their
-  own form. The projection names every part of a layout that a notification does not draw (`layout.island`,
+- **Android names it and draws nothing.** A notification has no place for the region. (This said first that an
+  Android watch and car show the notification by themselves. They do not, by Android's documentation: a phone's
+  ongoing notification is not bridged to a paired watch, a Live Update only to some, and Android Auto shows the
+  notifications of messaging applications built for it.) The projection names every part of a layout that a notification does not draw (`layout.island`,
   `layout.styles`), and the region is one of them.
 - **Whether iOS draws the region is the widget extension's choice**, with a key of its Info.plist. activitykit
   reports `layout.small` among the degraded features when the extension does not draw it, and the record carries

@@ -309,6 +309,13 @@ always carries one where the device offers it: liveupdate has the choice in a pr
 snapshot does not have. An activity that must stay in the tray is a layout. A phone, a watch with Wear OS 7,
 which shows Live Updates itself, and an application without the library carry none, whatever a request says.
 
+A phone's activity is another matter, and Android's: by its documentation an ongoing notification is not bridged
+to a paired watch, and a Live Update is bridged to some watches, by the Wear OS version and the maker. On
+liveupdate's Galaxy Watch4 with Wear OS 5 the phone's activity stayed on the phone. A car has no place for an
+activity: Android Auto shows the notifications of messaging applications built for it, and Android's documents
+name none there for a Live Update. On iOS a paired Apple Watch and CarPlay show a layout's `small` region
+([Layout](#layout)).
+
 #### Options of a start on iOS
 
 ```json
@@ -824,7 +831,8 @@ question whether the application may go on showing Live Activities, then have th
 `ActivityKitSmallFamily` to true ([iOS setup](ios-setup.md)); the extension then also draws the compact parts of
 a layout without the region in a row. Without the key iOS shows the compact parts itself, and the record of a
 layout with `small` names `layout.small`. A notification has no place for the region: Android draws nothing of it
-and names `layout.small`.
+and names `layout.small`. What an Android watch and an Android car show of an activity is in
+[A watch's Ongoing Activity](#a-watchs-ongoing-activity).
 
 On iOS an island part that the layout leaves out is drawn with a default: `expanded` is the lock
 screen tree in the bottom region; `compactLeading` and `minimal` are the first `symbol` node of the

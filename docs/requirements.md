@@ -198,9 +198,11 @@ Evidence: `requests::req_c_011_the_sound_of_an_alert_is_the_name_of_a_file`,
 Every public enum of the crate is `#[non_exhaustive]`: a `match` outside the crate has a `_` arm, and compiles
 when a variant is added. `Template` and `EndPolicy` join the others. Every struct of the contract that a caller
 builds has a constructor that takes what is required and sets nothing else, to build on with the struct update
-syntax where the struct allows it or with the constructor alone where it is `#[non_exhaustive]`: `Timer`,
-`Snapshot`, `StartInput`, `UpdateInput`, `EndInput` and `AndroidContent` get theirs beside those the layout's
-types have. What a constructor builds is written as the JSON that the literal was.
+syntax where the struct allows it or with the constructor alone where it is `#[non_exhaustive]`. New beside
+those the layout's types have: `Timer::new`, `Snapshot::progress` and `Snapshot::timer`, `StartInput::new`,
+which takes its template from its snapshot, `UpdateInput::new`, `EndInput::after`, `AndroidContent::new`,
+`ImageInput::new`, and `AndroidOptions::with_wear_ongoing_activity` for the member that struct gained. What a
+constructor builds is written as the JSON that the literal was.
 
 The vocabulary that the crate re-exports follows the same rule in its own crates: liveupdate since 0.7.0, whose
 enums are all `#[non_exhaustive]` and whose structs have constructors (`BigTextStyle::new`, `ProgressStyle::new`,

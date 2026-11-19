@@ -4,6 +4,51 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.7.0, from 0.4.1, with its AAR `liveupdate-android-0.7.0.aar`. Breaking for a Rust caller:
+the vocabulary of a notification that this crate re-exports is liveupdate's, whose enums are all
+`#[non_exhaustive]` now and whose `AndroidPresentation` and `PresentationCapabilities` have a new member; this
+crate's `Template` and `EndPolicy` are `#[non_exhaustive]` too, and `Event` has a new variant. JSON written for
+0.7 reads unchanged.
+
+- **A watch's Ongoing Activity.** In a watch application whose Gradle file has `androidx.wear:wear-ongoing`,
+  liveupdate's library puts the activity on the watch face of a watch below Wear OS 7, as an icon that opens
+  the application, and among the recent applications. The capabilities say `wearOngoingActivity` where the
+  device does it. One activity can do without it: a layout with the Android option `wearOngoingActivity: false`
+  of its start (`AndroidOptions::with_wear_ongoing_activity`), for all of its snapshots, and an Android content
+  with the same member in its presentation, for its snapshot. A phone carries none whatever a request says.
+  This crate ran on no watch: liveupdate ran its library on a Galaxy Watch4 with Wear OS 5.
+- **An event of a kind that is not known** reaches the sink as `Event::Unknown` with the activity's id and key.
+  liveupdate reads such an event of a later AAR for what it knows since 0.7.0; before, the events taken with
+  it were lost, and this crate dropped a kind it had no event for.
+- **Code that compiles against the next version.** Every public enum is `#[non_exhaustive]`: match with a `_`
+  arm, also liveupdate's `NextCheck`, which the backend's `next_check` answers. Every struct that a caller
+  builds has a constructor that takes what is required: new are `Timer::new`, `Snapshot::progress` and
+  `Snapshot::timer`, `StartInput::new`, `UpdateInput::new`, `EndInput::after`, `AndroidContent::new` and
+  `ImageInput::new`, and liveupdate brings `BigTextStyle::new`, `ProgressStyle::new`, `ProgressSegment::new`,
+  `ProgressPoint::new`, `TimerStyle::new`, `Metric::new`, `MetricStyle::new`, `PublicVersion::new` and
+  `SamsungNowBar::default()`.
+- **The room of liveupdate's store.** A start and an update store liveupdate's receipts in at most 1,000,000
+  bytes. Ended activities go for the room, the oldest first, where the store used to fill and fail every later
+  start with `NATIVE_ERROR`. A start or an update for which the live activities alone leave no room is
+  `SYSTEM_LIMIT`: some thirty live activities with the longest texts an Android content has.
+- **What an earlier Android shows**, by liveupdate's account, in the contract: below Android 17 a metric style
+  shows its numbers and texts as lines and its first stopwatch or countdown as the header clock, where it
+  showed the title and the status alone; and below Android 12, which has no unlock before a tap, the tap of an
+  action with `authenticationRequired` is dropped while the device is locked, where it was taken at once.
+- An Android content may write `wearOngoingActivity: true`, the default, as it may write any other member at
+  its default.
+- The setup document has the AAR of 0.7.0, what a watch application adds, what a crate and an AAR of two
+  versions do together, and that Android 12 needs `SCHEDULE_EXACT_ALARM` up to API 32 beside `USE_EXACT_ALARM`.
+
+When updating:
+
+- Take `liveupdate-android-0.7.0.aar`. An AAR up to 0.6.0 refuses a request with a member it does not know,
+  and one before 0.6.0 refuses `wearOngoingActivity`.
+- A `match` on `Template`, `EndPolicy` or one of liveupdate's enums needs a `_` arm, and so does one on
+  `NextCheck`.
+- A struct literal of `AndroidOptions` cannot be written outside the crate, as before: build on
+  `AndroidOptions::new`.
+
 ## 0.7.6 - 2026-11-18
 
 - fix: on iOS a color pair behind a card is of the appearance of its content, with activitykit 0.6.5 (#25) (`4e80fdd`)

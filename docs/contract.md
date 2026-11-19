@@ -273,7 +273,8 @@ The layout and the styles are fixed at start. An update sends values only.
 "android": {
   "visibility": "private",
   "publicVersion": { "title": "Delivery", "status": "On the way" },
-  "placement": "foreground"
+  "placement": "foreground",
+  "wearOngoingActivity": false
 }
 ```
 
@@ -282,8 +283,24 @@ The layout and the styles are fixed at start. An update sends values only.
 | `visibility` | Required in `android`. `public`, `private` or `secret`: what a locked screen shows of the notification. A start without `android` is `private` |
 | `publicVersion` | Optional. `{ "title", "status" }`, 1 to 120 and 1 to 240 code points: what a secure lock screen shows in place of the content. Only with `visibility` `private`; otherwise `INVALID_INPUT`, on every platform. It goes with every snapshot that has no public version of its own. On a device that does not offer `publicVersion` the snapshot is shown without it and the record names `publicVersion` |
 | `placement` | Optional. `tagged`, which it is when absent, or `foreground`: the notification is the one that a foreground service of the application holds, so that the service shows no second one. One running activity has it at a time; a second is `SYSTEM_LIMIT`. On a device that does not offer `foregroundPlacement` the start is `UNSUPPORTED_FEATURE`. The placement is part of the request: another one under a running key is `CONFLICT`. The service is the application's ([Android setup](android-setup.md#a-foreground-service)) |
+| `wearOngoingActivity` | Optional. `false`: the activity does not carry [a watch's Ongoing Activity](#a-watchs-ongoing-activity), in any of its snapshots. Absent or `true`, it carries one where the device offers it (`wearOngoingActivity` in the capabilities). Anything but a boolean is `INVALID_INPUT`, on every platform |
 
-In Rust: `AndroidOptions::new(visibility)`, then set `public_version` or `placement`.
+In Rust: `AndroidOptions::new(visibility)`, then set `public_version` or `placement`, or call
+`with_wear_ongoing_activity(false)`.
+
+#### A watch's Ongoing Activity
+
+On a watch below Wear OS 7 the notification of an activity is a line in the tray. Where the watch application
+has `androidx.wear:wear-ongoing`, liveupdate's library puts an Ongoing Activity into that notification: the
+activity's icon on the watch face, which opens the application, and an entry among the recent applications,
+with the notification's title, text and header clock. Nothing in a request asks for it, and the capabilities
+say whether the device does it ([Android setup](android-setup.md#a-watch) has what the application adds).
+
+One activity can do without it, and stay in the tray. A layout says so in the options of its start, above, for
+all of its snapshots. An [Android content](#an-android-content) says so for its snapshot, in its presentation.
+The Ongoing Activity is carried where neither turns it off. A template has no such option. A phone, a watch
+with Wear OS 7, which shows Live Updates itself, and an application without the library carry none, whatever a
+request says.
 
 #### Options of a start on iOS
 
@@ -440,6 +457,24 @@ names `alert`.
 | `accentColor` | An unsigned ARGB number: the color of the icon and the header | `branding` |
 | `subText` | The third text of the header, at most 64 code points | `branding` |
 
+And what liveupdate 0.6 added, which no capability has to offer: a device that carries no Ongoing Activity
+shows the content as it is.
+
+| Member | Value |
+| --- | --- |
+| `wearOngoingActivity` | `false`: this snapshot's notification carries no [Ongoing Activity of a watch](#a-watchs-ongoing-activity). `true`, as when it is absent: it carries one where the device offers it and the start did not turn it off. An AAR of liveupdate before 0.6.0 refuses a content that has the member |
+
+What a device shows of a content follows its Android version, by liveupdate's account:
+
+| Shown as | From | Before it |
+| --- | --- | --- |
+| A promoted Live Update | Android 16 | An ongoing notification, with the fallback `notification` |
+| A `progress` style's segments, points and icons | Android 16 | A plain progress bar |
+| The status chip's `shortCriticalText` | Android 16 | Not shown |
+| A `metric` style | Android 17 | The numbers and the texts as lines under the status, and the first stopwatch or countdown as the clock in the header. The capability `metricStyle` is false there |
+| Semantic colors of a segment, a point and a metric | Android 17 | Not shown |
+| The unlock before the tap of an action with `authenticationRequired` | Android 12 | Android has no such setting below it and would send the tap from a locked device at once: liveupdate's library drops a tap while the device is locked, and the person taps again after unlocking |
+
 A URL here is liveupdate's: 1 to 2048 printable ASCII characters with a lowercase scheme, and none
 of the schemes `intent`, `content`, `file`, `javascript`, `data` and `android-app`. The application
 declares an activity that opens it ([Android setup](android-setup.md)).
@@ -537,7 +572,7 @@ and for the rules that follow a device:
   "actions": true, "images": true, "events": true, "samsungNowBar": false,
   "chronometer": true, "links": true, "styleChange": true, "delayedEnd": true,
   "foregroundPlacement": true, "alert": true, "publicVersion": true, "branding": true,
-  "scheduledStart": true, "exactStart": false
+  "scheduledStart": true, "exactStart": false, "wearOngoingActivity": false
 }
 ```
 
@@ -545,7 +580,8 @@ and for the rules that follow a device:
 another style than the activity shows, `delayedEnd` is the `after` policy, `alert` an update that
 alerts, and `foregroundPlacement` the `placement` of a start. `scheduledStart` is
 [a scheduled start](#a-scheduled-start), and `exactStart` says whether it begins at its time or
-when Android chooses. `links` and `chronometer` also decide what
+when Android chooses. `wearOngoingActivity` says whether a notification carries
+[a watch's Ongoing Activity](#a-watchs-ongoing-activity). `links` and `chronometer` also decide what
 [a layout shows](#what-android-shows). A member that the Android side does not report is false.
 Elsewhere `androidPresentation` is absent.
 
@@ -615,7 +651,7 @@ code is one of the 12 in `ERROR_CODES`. The message is for a developer.
 | `NOT_FOUND` | No activity of that version has this `id`, or it has ended and the request is an update |
 | `STALE_REVISION` | The revision is below the accepted one |
 | `CONFLICT` | The accepted revision with other content, or a start under a running key with another request |
-| `SYSTEM_LIMIT` | The system's limit of activities is reached. On iOS the message says whether it is the app's or the device's |
+| `SYSTEM_LIMIT` | The system's limit of activities is reached. On iOS the message says whether it is the app's or the device's. On Android also: a second activity with the foreground placement, and a start or an update for which the live activities leave no room in liveupdate's store of 1,000,000 bytes, which takes some thirty activities with the longest texts. Ended activities make room by themselves; ending one of the live ones makes room for the request |
 | `NATIVE_ERROR` | The platform or its bridge failed, or a code of the engine that the contract does not know |
 
 ## Events
@@ -633,6 +669,7 @@ match with a `_` arm.
 | `Event::State` | `StateEvent` | A new lifecycle state of an activity. iOS: every change, while the application runs. Android: each state once, `active`, `stale`, `ended` and `dismissed`, when the backend is asked (see below) |
 | `Event::Permissions` | `Permissions` | iOS: what the person allows, after a change in Settings |
 | `Event::Opened` | `OpenedEvent` | Android: the person opened the application from a notification, as the host reported it |
+| `Event::Unknown` | `UnknownEvent` | Android: an event of a kind that this version does not know, which the AAR of a later liveupdate stored. It names the activity and nothing else: the application's crate is older than its AAR |
 
 ```json
 { "actionId": "track", "activityId": "9B1D4C70-...", "activityKey": "delivery:7" }
@@ -724,6 +761,16 @@ Android. On iOS that is all. On Android the host can hand the opening intent to 
 
 `actionId` is absent when the person tapped the notification itself. It is the id of an action of
 an Android content, or `link:<n>` for the nth `link` of the layout's lock screen tree.
+
+An event of a kind that this version does not know, `Event::Unknown`, has the activity and nothing else:
+
+```json
+{ "activityId": "9B1D4C70-...", "activityKey": "delivery:7" }
+```
+
+liveupdate's library of a later version stored it, and liveupdate read what it knows of it. Taking an event
+removes it from the device, so the backend passes this one on, where an older version of this crate dropped
+it. `activityKey` is absent when the backend no longer knows the activity.
 
 ## The layout DSL
 

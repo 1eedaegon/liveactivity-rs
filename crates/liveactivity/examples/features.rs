@@ -250,28 +250,25 @@ async fn android_content(live: &LiveActivity, id: &str) -> Result<()> {
     let segmented = styles.is_some_and(|styles| styles.progress_style);
     let values = values! { "title" => "Delivery 7", "done" => 0.6 }.into_inner();
     let mut snapshot = LayoutSnapshot::new(3, values);
-    snapshot.android = Some(AndroidContent {
-        title: "Delivery 7".into(),
-        status: "2 stops away".into(),
-        presentation: AndroidPresentation {
+    let segments = if segmented {
+        vec![segment(60, Some(0xFF00_7F00)), segment(40, None)]
+    } else {
+        vec![segment(100, None)]
+    };
+    // Each value is built on its constructor, which takes what is required: a member that a later version adds
+    // is then left at its default.
+    snapshot.android = Some(AndroidContent::new(
+        "Delivery 7",
+        "2 stops away",
+        AndroidPresentation {
             // The text of the status chip, at most 7 characters.
             short_critical_text: Some("8 min".into()),
             ..AndroidPresentation::new(PresentationStyle::Progress(ProgressStyle {
-                progress: 60,
-                indeterminate: false,
                 styled_by_progress: true,
-                segments: if segmented {
-                    vec![segment(60, Some(0xFF00_7F00)), segment(40, None)]
-                } else {
-                    vec![segment(100, None)]
-                },
-                points: Vec::new(),
-                start_icon: None,
-                end_icon: None,
-                tracker_icon: None,
+                ..ProgressStyle::new(60, segments)
             }))
         },
-    });
+    ));
     live.update_layout(LayoutUpdateInput::new(id, snapshot))
         .await?;
     Ok(())
@@ -284,10 +281,10 @@ async fn android_links_and_extras(live: &LiveActivity, id: &str, ends_at: u64) -
     let offered = capabilities.android_presentation.unwrap_or_default();
     let values = values! { "title" => "Delivery 7", "done" => 0.8 }.into_inner();
     let mut snapshot = LayoutSnapshot::new(4, values);
-    snapshot.android = Some(AndroidContent {
-        title: "Delivery 7".into(),
-        status: "At the door in 4 minutes".into(),
-        presentation: AndroidPresentation {
+    snapshot.android = Some(AndroidContent::new(
+        "Delivery 7",
+        "At the door in 4 minutes",
+        AndroidPresentation {
             // A tap on the notification opens this URL in the application.
             open_url: offered.links.then(|| "myapp://delivery/7".into()),
             // An action that opens a URL sends no tap.
@@ -300,22 +297,19 @@ async fn android_links_and_extras(live: &LiveActivity, id: &str, ends_at: u64) -
                 Vec::new()
             },
             // A countdown in the header, beside the style.
-            chronometer: offered.chronometer.then(|| TimerStyle {
-                timer: Timer {
-                    started_at: ends_at - 240_000,
-                    ends_at,
-                },
-                counts_down: true,
-            }),
+            chronometer: offered
+                .chronometer
+                .then(|| TimerStyle::new(Timer::new(ends_at - 240_000, ends_at), true)),
             // What a secure lock screen shows of an activity that started as private.
-            public_version: offered.public_version.then(|| PublicVersion {
-                title: "Delivery".into(),
-                status: "On the way".into(),
-            }),
+            public_version: offered
+                .public_version
+                .then(|| PublicVersion::new("Delivery", "On the way")),
             sub_text: offered.branding.then(|| "Mochi Express".into()),
+            // In a watch application: this snapshot stays in the tray, off the watch face.
+            wear_ongoing_activity: false,
             ..AndroidPresentation::new(PresentationStyle::Standard)
         },
-    });
+    ));
     live.update_layout(LayoutUpdateInput::new(id, snapshot))
         .await?;
     Ok(())
@@ -328,12 +322,14 @@ async fn android_options(live: &LiveActivity, mut start: LayoutStartInput) -> Re
     let capabilities = live.capabilities().await?;
     let offered = capabilities.android_presentation.unwrap_or_default();
     let mut options = AndroidOptions::new(AndroidVisibility::Private);
-    options.public_version = Some(PublicVersion {
-        title: "Delivery".into(),
-        status: "On the way".into(),
-    });
+    options.public_version = Some(PublicVersion::new("Delivery", "On the way"));
     if offered.foreground_placement {
         options.placement = Some(AndroidPlacement::Foreground);
+    }
+    // In a watch application the activity is on the watch face too, as its Ongoing Activity, where the device
+    // says so. This one stays in the tray, in all of its snapshots.
+    if offered.wear_ongoing_activity {
+        options = options.with_wear_ongoing_activity(false);
     }
     start.android = Some(options);
     let record = live.start_layout(start).await?;
@@ -349,10 +345,8 @@ async fn android_options(live: &LiveActivity, mut start: LayoutStartInput) -> Re
 
 fn segment(length: u32, color: Option<u32>) -> ProgressSegment {
     ProgressSegment {
-        length,
-        id: None,
         color,
-        semantic_style: None,
+        ..ProgressSegment::new(length)
     }
 }
 

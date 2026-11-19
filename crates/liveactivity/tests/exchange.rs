@@ -2775,3 +2775,70 @@ fn req_e_008_an_event_of_an_unknown_kind_reaches_the_sink() {
             .all(|event| !matches!(event, Event::Unknown(_)))
     );
 }
+
+#[test]
+fn req_a_026_a_start_without_room_in_the_store_is_a_system_limit() {
+    // REQ-A-026
+    let (live, _events, driver) = android_with_files("store-room");
+    // The longest text an Android content takes, in characters of four bytes: liveupdate keeps it twice a receipt.
+    let long = |text: &str| {
+        serde_json::json!({ "title": "Ride", "status": "On the way",
+            "presentation": { "style": { "kind": "bigText", "value": { "text": text } } } })
+    };
+    let text = "\u{1F431}".repeat(4000);
+    let mut live_ones = Vec::new();
+    let refused = loop {
+        let key = format!("ride:{}", live_ones.len());
+        match block_on(live.start_layout(ride(&key, Some(long(&text))))) {
+            Ok(record) => live_ones.push(record),
+            Err(error) => break error,
+        }
+        assert!(live_ones.len() < 32, "no start was refused for the room");
+    };
+    assert_eq!(refused.code, "SYSTEM_LIMIT");
+    assert!(
+        refused.message.contains("too large to store"),
+        "{refused:?}"
+    );
+
+    // Nothing of the refused start is kept or posted: the same start is refused again, and no activity is new.
+    let key = format!("ride:{}", live_ones.len());
+    let posts = driver.lock().posts;
+    let again = block_on(live.start_layout(ride(&key, Some(long(&text)))));
+    assert_eq!(again.unwrap_err().code, "SYSTEM_LIMIT");
+    assert_eq!(driver.lock().posts, posts);
+    let listed = block_on(live.list_layout()).unwrap();
+    assert_eq!(listed.len(), live_ones.len());
+    assert!(listed.iter().all(|record| record.activity_key != key));
+
+    // A small activity still has room, and so may its update to the long text, which a receipt then holds once.
+    // The first such update that has none is refused, and leaves what was shown.
+    let grow = |id: &str| layout_update(ride_update(id, 1, Some(long(&text))));
+    let mut small = None;
+    for place in 0..2 {
+        let key = format!("ride:small:{place}");
+        let record = block_on(live.start_layout(ride(&key, Some(long("Short"))))).unwrap();
+        if let Err(error) = block_on(live.update_layout(grow(&record.id))) {
+            assert_eq!(error.code, "SYSTEM_LIMIT");
+            small = Some(record);
+            break;
+        }
+    }
+    let small = small.expect("an update was refused for the room");
+    let shown = |id: &str| {
+        let listed = block_on(live.list_layout()).unwrap();
+        let record = listed.into_iter().find(|record| record.id == id);
+        record.unwrap().snapshot.revision
+    };
+    let text_of = |id: &str| match driver.posted(id).presentation.unwrap().style {
+        liveactivity::PresentationStyle::BigText(style) => style.text.chars().count(),
+        _ => 0,
+    };
+    assert_eq!((shown(&small.id), text_of(&small.id)), (0, 5));
+
+    // An end makes room: the ended activity's receipt goes for it, and the update is taken.
+    let ended = liveactivity::LayoutEndInput::immediate(live_ones[0].id.clone());
+    block_on(live.end_layout(ended)).unwrap();
+    block_on(live.update_layout(grow(&small.id))).unwrap();
+    assert_eq!((shown(&small.id), text_of(&small.id)), (1, 4000));
+}

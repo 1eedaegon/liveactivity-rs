@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.8.1 - 2026-11-19
+
+- fix: a progress style built on its constructor shows its progress, with liveupdate 0.7.1 (#27) (`d037617`)
+
 Built on liveupdate 0.7.1, with its AAR `liveupdate-android-0.7.1.aar`. Three corrections of liveupdate's, two
 of them in the AAR; nothing changes in this crate's own Rust or in the contract's JSON.
 

@@ -43,7 +43,7 @@ content.
 
 | | iOS | Android |
 | --- | --- | --- |
-| `toggle` | a switch (iOS 17; its label alone before). The tap is `Action` with `on`, the state asked for. | an action titled by the toggle's label, `✓` before it while the value is on. The tap is `Action` with `on`, the other state than the value of the latest snapshot. Named `layout.toggle` when it has no title or no place among the actions. |
+| `toggle` | a switch (iOS 17.2 since activitykit 0.6.6; its label alone before). The tap is `Action` with `on`, the state asked for. | an action titled by the toggle's label, `✓` before it while the value is on. The tap is `Action` with `on`, the other state than the value of the latest snapshot. Named `layout.toggle` when it has no title or no place among the actions. |
 | `ifStale` | the system draws the node while the content is stale, or while it is not, without the application running | drawn as while fresh: a node for stale content is left out. The record names `layout.ifStale`. The sink is told `stale`. |
 | `scheduled` | the activity is `pending` until its time (iOS 26); an update before that is `CONFLICT`; `UNSUPPORTED_FEATURE` before iOS 26 | `UNSUPPORTED_FEATURE`, and nothing is kept |
 | `ios.transient` | a transient activity (iOS 18); `UNSUPPORTED_FEATURE` before | no part of the request: two starts that differ only in it are the same activity |

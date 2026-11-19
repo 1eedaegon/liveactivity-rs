@@ -74,8 +74,8 @@ cargo run -p liveactivity --example features --features testkit
 | [Connect](#connect) | `LiveActivity::builder()` | ✓ | ✓ |
 | [Progress and timer](#progress-and-timer-activities) | `start`, `update`, `end`, `list` | ✓ | ✓ |
 | [Layouts](#layout-activities) | `start_layout`, `update_layout`, `end_layout`, `list_layout` | ✓ | ✓ projected onto a notification |
-| [Buttons and taps](#buttons-and-taps) | a `button` node, `Event::Action` | ✓ | ✓ up to three |
-| [Toggles](#toggles-and-staleness) | a `toggle` node, `ActionEvent.on` | ✓ a switch, from iOS 17 | ✓ an action, with a check mark while on |
+| [Buttons and taps](#buttons-and-taps) | a `button` node, `Event::Action` | ✓ from iOS 17.2; the label alone before | ✓ up to three |
+| [Toggles](#toggles-and-staleness) | a `toggle` node, `ActionEvent.on` | ✓ a switch, from iOS 17.2 | ✓ an action, with a check mark while on |
 | [Staleness](#toggles-and-staleness) | `when_stale()` and `unless_stale()` on a node | ✓ drawn by the system when the time has passed | drawn as while fresh, reported as `layout.ifStale`; the sink is told `stale` |
 | [A watch](docs/contract.md#a-watchs-ongoing-activity) | `Layout.small`; `AndroidOptions::with_wear_ongoing_activity`, `AndroidPresentation.wear_ongoing_activity` | ✓ a paired Apple Watch, in its Smart Stack from iOS 18: `small` where the widget extension sets `ActivityKitSmallFamily`, else the compact parts, reported as `layout.small`. The Ongoing Activity is ignored | ✓ an application on the watch, Wear OS 3 to 6, with `androidx.wear:wear-ongoing`: the activity's icon on the watch face, its Ongoing Activity, which one activity can do without. A phone's ongoing notification is not bridged to a paired watch, and a Live Update only to some. `small` is not drawn, reported as `layout.small` |
 | [A car](docs/contract.md#layout) | `Layout.small` | ✓ CarPlay, from iOS 26: `small` as on a watch, else the compact parts | none: Android Auto shows the notifications of messaging applications built for it, and Android's documents name no place there for a Live Update. `small` is reported as `layout.small` |
@@ -155,6 +155,7 @@ let layout = Layout {
     background: None,
     keyline: None,
     url: None,
+    small: None,
 };
 let values = values! { "title" => "Delivery 7", "done" => 0.4 }.into_inner();
 let start = LayoutStartInput::new("delivery:7", layout, LayoutSnapshot::new(0, values));
@@ -195,6 +196,7 @@ let layout = Layout {
     background: None,
     keyline: None,
     url: None,
+    small: None,
 };
 let values = values! { "eta" => "6 min", "muted" => false }.into_inner();
 let mut snapshot = LayoutSnapshot::new(0, values);
@@ -213,7 +215,7 @@ match event {
 }
 ```
 
-- **iOS** draws a switch (iOS 17; the label alone before). Once the stale date
+- **iOS** draws a switch (iOS 17.2; the label alone before). Once the stale date
   has passed, the system draws the stale nodes by itself, without an update
   and without the application running.
 - **Android** shows the toggle as one of the notification's three actions,
@@ -254,6 +256,7 @@ let layout = Layout {
     keyline: None,
     // A tap anywhere else on the activity.
     url: Some("myapp://delivery/9".into()),
+    small: None,
 };
 let record = live.start_layout(start).await?;
 // On Android the links open too, and the record names layout.transition.

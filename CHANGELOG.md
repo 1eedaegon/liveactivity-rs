@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.8.0 - 2026-11-19
+
+- feat: build on liveupdate 0.7: a watch's Ongoing Activity, an unknown event, enums and structs that may grow (#26) (`47d5667`)
+
 Built on liveupdate 0.7.0, from 0.4.1, with its AAR `liveupdate-android-0.7.0.aar`. Breaking for a Rust caller:
 the vocabulary of a notification that this crate re-exports is liveupdate's, whose enums are all
 `#[non_exhaustive]` now and whose `AndroidPresentation` and `PresentationCapabilities` have a new member; this

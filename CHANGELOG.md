@@ -4,6 +4,18 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on activitykit 0.6.6, with its three corrections; nothing of this crate's Rust API changes.
+
+- **Buttons and toggles begin with iOS 17.2**, not 17.0. Below it the widget draws them as their labels and
+  `capabilities().actions` is `unsupported`. On iOS 17.0 and 17.1 a button was drawn and its tap ran nothing:
+  Xcode writes activitykit's intent into the application's App Intents metadata as one that begins with iOS 17.2.
+- **A button or a toggle of a narrow layout is tapped on iOS 17.** On the Lock Screen the widget gives the layout
+  the card's whole width, and a narrower layout stands in its middle as before. iOS 17.2 and 17.4 did not find a
+  control of a narrower layout under a tap, and opened the application instead. The contract says how a layout is
+  placed in the card.
+- **The crate builds for iOS with Xcode 27.** activitykit's build script names SwiftPM's own build system: Xcode
+  27's `swift build` defaults to Swift Build, which did not build the bridge for iOS from its flags.
+
 ## 0.8.2 - 2026-11-19
 
 - chore: two limits that liveupdate 0.7.1 names, in the contract and the setup (#28) (`84137b8`)

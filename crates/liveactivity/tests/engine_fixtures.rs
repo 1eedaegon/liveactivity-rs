@@ -122,20 +122,83 @@ fn req_i_010_the_engines_widget_draws_a_color_pair_itself() {
     let sources = engine().join("swift/Sources");
     let rule = sources.join("ActivityKitShared/LayoutCardBackground.swift");
     let rule = fs::read_to_string(rule).expect("activitykit ships the rule of a card's background");
+    // Since activitykit 0.6.6 the rule reads the background once, as what the widget draws and as the system's tint.
     assert!(
-        rule.contains("func drawnBackground(values:"),
-        "the rule names what the widget draws"
+        rule.contains("func cardColors(values:"),
+        "the rule names what the widget draws and what the system tints"
     );
-    assert!(rule.contains("case .adaptive = color"), "which is a pair");
+    assert!(
+        rule.contains("if case .adaptive = color { return (color, nil) }"),
+        "a pair is drawn"
+    );
     let widget = sources.join("ActivityKitWidget/LayoutWidget.swift");
     let widget = fs::read_to_string(widget).expect("activitykit ships its widget");
     assert!(
-        widget.contains("document.drawnBackground(values: values)"),
+        widget.contains("let drawn = colors.drawn"),
         "the widget draws it"
     );
     assert!(
-        widget.contains(".activityBackgroundTint(document.backgroundTint(values: values)"),
+        widget.contains(".activityBackgroundTint(colors.tint.map"),
         "and the system tints with every other color"
+    );
+}
+
+#[test]
+fn req_i_011_the_engines_buttons_and_toggles_begin_with_ios_17_2() {
+    // REQ-I-011
+    // Xcode writes the intent as one that begins with iOS 17.2: below it a tap ran nothing. Since activitykit 0.6.6
+    // the intent, the widget's controls and the authorization's `buttons` begin there.
+    let sources = engine().join("swift/Sources");
+    let intent = fs::read_to_string(sources.join("ActivityKitIntent/ActionIntent.swift"))
+        .expect("activitykit ships its intent");
+    assert!(
+        intent.contains("@available(iOS 17.2, *)"),
+        "the intent begins with iOS 17.2"
+    );
+    assert!(
+        !intent.contains("@available(iOS 17.0, *)"),
+        "and not with iOS 17.0"
+    );
+    let widget = fs::read_to_string(sources.join("ActivityKitWidget/LayoutWidget.swift"))
+        .expect("activitykit ships its widget");
+    assert!(
+        widget.contains("guard #available(iOS 17.2, *) else { return nil }"),
+        "the widget draws a control from iOS 17.2"
+    );
+    assert!(
+        !widget.contains("#available(iOS 17.0, *)"),
+        "and below it a label"
+    );
+    let system = fs::read_to_string(sources.join("ActivityKitBridge/ActivityKitSystem.swift"))
+        .expect("activitykit ships its authorization");
+    assert!(
+        system.contains("if #available(iOS 17.2, *) { buttons = true }"),
+        "and says buttons from iOS 17.2, which the capability `actions` follows"
+    );
+}
+
+#[test]
+fn req_i_012_the_engines_widget_gives_a_layout_the_cards_width() {
+    // REQ-I-012
+    // iOS 17 did not find a control of content narrower than the card under a tap. Since activitykit 0.6.6 the
+    // widget takes the card's whole width on the Lock Screen, and a narrower layout stands in its middle.
+    let widget = engine().join("swift/Sources/ActivityKitWidget/LayoutWidget.swift");
+    let widget = fs::read_to_string(widget).expect("activitykit ships its widget");
+    assert!(
+        widget.contains(".frame(maxWidth: drawn != nil || !isSmallFamily ? .infinity : nil"),
+        "the content takes the card's width outside the small family"
+    );
+}
+
+#[test]
+fn req_i_013_the_engines_build_names_swiftpms_own_build_system() {
+    // REQ-I-013
+    // From Xcode 27 `swift build` defaults to Swift Build, which does not build the bridge for iOS from these flags.
+    let script =
+        fs::read_to_string(engine().join("build.rs")).expect("activitykit ships its build script");
+    assert!(
+        script.contains(r#".args(["--build-system", "native"])"#),
+        "the build names SwiftPM's own build system"
     );
 }
 

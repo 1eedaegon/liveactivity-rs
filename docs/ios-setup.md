@@ -24,11 +24,15 @@ A tap -> ActivityKitActionIntent in the app (product ActivityKitIntent) -> activ
 ## Requirements
 
 - Xcode. activitykit's build script runs SwiftPM for an iOS target and links the Swift bridge into
-  the Rust library.
+  the Rust library. It names SwiftPM's own build system, so that Xcode 27, whose `swift build`
+  defaults to Swift Build, builds it too (activitykit 0.6.6).
 - iOS 16.2 on an iPhone, iPadOS 17 on an iPad. Below that every command answers
   `UNSUPPORTED_PLATFORM` and `capabilities()` reports every feature as `unsupported`.
-- iOS 17 for buttons and toggles. Below it the widget shows the label of a button or a toggle
-  without the control, and `capabilities().actions` is `unsupported`.
+- iOS 17.2 for buttons and toggles. Below it the widget shows the label of a button or a toggle
+  without the control, and `capabilities().actions` is `unsupported`. activitykit's intent is of
+  iOS 17.0, but Xcode writes it into the application's App Intents metadata as one that begins with
+  iOS 17.2: with an activitykit before 0.6.6 a button was drawn on iOS 17.0 and 17.1 and its tap
+  ran nothing.
 - iOS 17.2 for push-to-start, iOS 18 for broadcast channels and for a transient activity
   (`ios.transient`), iOS 26 for a scheduled start (`scheduled`). Below them such a start answers
   `UNSUPPORTED_FEATURE`. An application built before the iOS 26 SDK gets `CONFIGURATION_REQUIRED`
@@ -372,8 +376,13 @@ records keep `visibility: unknown`. Check that the extension links `ActivityKitW
 bundle is `ActivityKitLayoutWidget()`, and that its deployment target is iOS 16.2 or later.
 
 **A button or a toggle does nothing.** The app target does not link `ActivityKitIntent`, or it
-compiles no Swift file, so Xcode extracted no App Intents metadata. Below iOS 17 buttons and
-toggles are not drawn as controls.
+compiles no Swift file, so Xcode extracted no App Intents metadata. Below iOS 17.2 buttons and
+toggles are not drawn as controls. What Xcode wrote is in the built application:
+`YourApp.app/Metadata.appintents/extract.actionsdata`, under `actions.ActivityKitActionIntent`.
+
+**A button of a narrow layout opens the application.** On iOS 17 a control of content narrower
+than the card was not found under a tap. activitykit's widget gives the layout the card's width
+since 0.6.6, which this crate builds on.
 
 **A toggle does not move.** A tap asks for the other state and changes nothing: the application
 sends an update with the value that the event's `on` names.

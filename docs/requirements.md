@@ -314,6 +314,40 @@ the layout on as written and draws nothing.
 Evidence: `engine_fixtures::req_i_010_the_engines_widget_draws_a_color_pair_itself`. The drawing is run by
 activitykit's tests on the simulator.
 
+## REQ-I-011 Buttons and toggles from iOS 17.2
+
+A `button` and a `toggle` run their tap from iOS 17.2, as activitykit has them since 0.6.6, which this crate builds
+on. Below it activitykit's widget draws them as their labels, and `capabilities().actions` is `unsupported`, since
+it follows activitykit's `buttons`. A request with buttons and toggles is taken on every iOS as before. With an
+earlier activitykit a button was drawn on iOS 17.0 and 17.1 and its tap ran nothing: Xcode writes activitykit's
+intent, newer than the iOS its module is built for, into the application's App Intents metadata as one that begins
+with iOS 17.2 (seen by activitykit on the iOS 17.0 simulator).
+
+Evidence: `engine_fixtures::req_i_011_the_engines_buttons_and_toggles_begin_with_ios_17_2`. The taps are run by
+activitykit's tests on the simulator.
+
+## REQ-I-012 A layout's place on the Lock Screen
+
+On the Lock Screen activitykit's widget gives a layout the card's whole width since 0.6.6, and a layout that is
+narrower stands in its middle as before. With an earlier activitykit iOS 17.2 and 17.4 did not find a button or a
+toggle of a layout narrower than the card under a tap, and opened the application as for a tap on the activity
+(activitykit's simulators). The contract says how a layout is placed in the card, by activitykit's measurements on
+simulators of iOS 16.2 to 26.3: the card has no margin, a layout is as wide as its widest node and stands in the
+middle, a style is applied in one order, and the card is as high as the layout, at most 160 points. This crate hands
+the layout on as written.
+
+Evidence: `engine_fixtures::req_i_012_the_engines_widget_gives_a_layout_the_cards_width`. The taps are run by
+activitykit's tests on the simulator.
+
+## REQ-I-013 A build with Xcode 27
+
+The crate builds for iOS with Xcode 27. activitykit's build script names SwiftPM's own build system since 0.6.6
+(`--build-system native`): Swift Build, the default of `swift build` from Xcode 27, does not build for iOS from the
+flags the script passes, and the build of the bridge failed. Reported by activitykit from Xcode 27.2; no test of
+this crate builds for iOS.
+
+Evidence: `engine_fixtures::req_i_013_the_engines_build_names_swiftpms_own_build_system`.
+
 ## REQ-E-002 Started, state and permission events
 
 The sink receives a layout activity that began, a new lifecycle state of any activity, and the permissions after

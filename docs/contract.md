@@ -838,6 +838,25 @@ On iOS an island part that the layout leaves out is drawn with a default: `expan
 screen tree in the bottom region; `compactLeading` and `minimal` are the first `symbol` node of the
 lock screen tree, or the SF Symbol `circle.fill`; `compactTrailing` is empty.
 
+#### Placement on the Lock Screen
+
+The system gives the card its place and its width, and makes it as high as the layout. The layout decides the rest:
+activitykit measured on simulators of iOS 16.2 to 26.3, and saw the same on each.
+
+- **There is no margin.** A node at the edge of the layout touches the edge of the card, and the card's rounded
+  corners cut what stands in them. Give the root a padding.
+- **A layout is as wide as its widest node, and stands in the middle of the card.** A stack's `alignment` moves its
+  children inside the stack, not the stack in the card. To put something at an edge, let a node fill the width
+  with a frame whose `maxWidth` is infinite and whose `alignment` says where its content goes, or push with a
+  `spacer`. A style's own `alignment` aligns the lines of a text that wraps, and moves nothing.
+- **A style is applied in one order**: padding, the frame, the background, the corner radius, the opacity. A
+  background covers the padding of its node.
+- **The card is as high as the layout**, at most 160 points: of a higher layout the system shows the middle. An
+  infinite `maxHeight` on the root does not ask for the 160 points; a `height` or a `minHeight` does.
+
+activitykit's widget gives the layout the card's whole width since 0.6.6: iOS 17.2 and 17.4 did not find a button
+or a toggle of a narrower layout under a tap, and opened the application instead.
+
 ### Values
 
 `values` is an object with 0 to 32 entries.
@@ -994,6 +1013,10 @@ A `button` wraps one child and carries an `actionId`. A tap reaches the event si
 `Event::Action` with that `actionId`, the activity's `id` and its key, and without `on`. A tap does
 not change the activity: update it from the application if the button should change.
 
+On iOS buttons and toggles run their tap from iOS 17.2, and below it the widget draws their labels
+alone: `capabilities().actions` is `unsupported` there (activitykit 0.6.6; before it a button was
+drawn on iOS 17.0 and 17.1 and its tap ran nothing).
+
 A `toggle` is a switch beside its label. It shows the boolean value it is bound to, and a tap
 reaches the sink as `Event::Action` with `on`, the state the person asked for: the other one than
 the value shown. The tap does not move the switch. The application sends an update with the new
@@ -1009,7 +1032,7 @@ Event::Action(tap) if tap.action_id == "mute" => {
 }
 ```
 
-iOS draws the switch from iOS 17; before it shows the label alone. Android shows it as an action
+iOS draws the switch from iOS 17.2; before it shows the label alone. Android shows it as an action
 of the notification: see [What Android shows](#what-android-shows).
 
 ### Staleness

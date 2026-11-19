@@ -36,7 +36,7 @@ other call answers `UNSUPPORTED_PLATFORM`.
 | [docs/android-setup.md](docs/android-setup.md) | the AAR, the permissions and the files of an Android app |
 | [docs/framework-integration.md](docs/framework-integration.md) | writing a framework plugin: commands, events, lifecycle, threads |
 | [docs/design/engine-compatibility](docs/design/engine-compatibility/PRD.md) | a watch's Ongoing Activity, an event of an unknown kind, constructors and enums that may grow, on liveupdate 0.7 |
-| [docs/design/engine-small-family](docs/design/engine-small-family/PRD.md) | the small region for a paired Apple Watch and CarPlay, on activitykit 0.6 |
+| [docs/design/engine-small-family](docs/design/engine-small-family/PRD.md) | the small region of a layout, for a paired Apple Watch and CarPlay on iOS, on activitykit 0.6 |
 | [docs/design/engine-interaction](docs/design/engine-interaction/PRD.md) | toggles, staleness, scheduled and transient starts and alert sounds, on activitykit 0.5 |
 | [docs/design/engine-extensions](docs/design/engine-extensions/PRD.md) | what the engines opened in activitykit 0.4 and liveupdate 0.2, what this crate does with it, and what is still planned |
 
@@ -77,7 +77,8 @@ cargo run -p liveactivity --example features --features testkit
 | [Buttons and taps](#buttons-and-taps) | a `button` node, `Event::Action` | ✓ | ✓ up to three |
 | [Toggles](#toggles-and-staleness) | a `toggle` node, `ActionEvent.on` | ✓ a switch, from iOS 17 | ✓ an action, with a check mark while on |
 | [Staleness](#toggles-and-staleness) | `when_stale()` and `unless_stale()` on a node | ✓ drawn by the system when the time has passed | drawn as while fresh, reported as `layout.ifStale`; the sink is told `stale` |
-| [Apple Watch and CarPlay](docs/contract.md#layout) | `Layout.small` | ✓ where the widget extension sets `ActivityKitSmallFamily`; else the compact parts, reported as `layout.small` | the watch and the car show the notification; reported as `layout.small` |
+| [A watch](docs/contract.md#a-watchs-ongoing-activity) | `Layout.small`; `AndroidOptions::with_wear_ongoing_activity`, `AndroidPresentation.wear_ongoing_activity` | ✓ a paired Apple Watch, in its Smart Stack from iOS 18: `small` where the widget extension sets `ActivityKitSmallFamily`, else the compact parts, reported as `layout.small`. The Ongoing Activity is ignored | ✓ an application on the watch, Wear OS 3 to 6, with `androidx.wear:wear-ongoing`: the activity's icon on the watch face, its Ongoing Activity, which one activity can do without. A phone's ongoing notification is not bridged to a paired watch, and a Live Update only to some. `small` is not drawn, reported as `layout.small` |
+| [A car](docs/contract.md#layout) | `Layout.small` | ✓ CarPlay, from iOS 26: `small` as on a watch, else the compact parts | none: Android Auto shows the notifications of messaging applications built for it, and Android's documents name no place there for a Live Update. `small` is reported as `layout.small` |
 | [Links](#links-accessibility-and-motion) | a `link` node, `Layout.url` | ✓ | ✓ the notification and its actions open them, where the device opens URLs |
 | [Accessibility, motion, privacy](#links-accessibility-and-motion) | members of a node and of a style | ✓ | a label is the text of what a notification cannot draw; motion and privacy are named as left out |
 | [Alerts](#alerts-and-relevance) | `LayoutUpdateInput.alert` | ✓ | ✓ where the device alerts again; else silent, reported as `alert` |
@@ -87,7 +88,6 @@ cargo run -p liveactivity --example features --features testkit
 | [Android content](#android-content) | `LayoutSnapshot.android` | ignored | ✓ |
 | [A last content that stays](#ending) | `EndPolicy::After` | ✓ up to four hours | ✓ where the device offers it |
 | [A lock screen version, a foreground service](#android-options) | `LayoutStartInput.android` | ignored | ✓ where the device offers them |
-| [A watch's Ongoing Activity](#android-options) | `AndroidOptions::with_wear_ongoing_activity`, `AndroidPresentation.wear_ongoing_activity` | ignored | ✓ on a watch below Wear OS 7 whose application has `androidx.wear:wear-ongoing`; one activity can do without it |
 | [Images](#images) | `write_image`, an `image` node | ✓ needs an App Group | ✓ as the large icon |
 | [Pushes](#pushes) | `LayoutStartInput.push`, `push_tokens` | ✓ | none |
 | [Events](#events) | the event sink, `sync_events` | ✓ as they come | ✓ on `sync_events` |

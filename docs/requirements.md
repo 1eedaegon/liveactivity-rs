@@ -563,8 +563,11 @@ Evidence: `exchange::req_a_020_a_scheduled_start_takes_no_foreground_placement`.
 
 ## REQ-A-021 The small region on Android
 
-A notification has no place for the small region: a watch and a car show the notification by themselves. Nothing
-of the region is drawn, it does not choose the notification's style, and the record names `layout.small`.
+A notification has no place for the small region, which is iOS's, for a paired Apple Watch and CarPlay. Nothing
+of the region is drawn, it does not choose the notification's style, and the record names `layout.small`. What an
+Android watch and car show is not the region's: an application on a watch shows its activity as its Ongoing
+Activity (REQ-A-024); a phone's ongoing notification is not bridged to a paired watch, and a Live Update only to
+some, by Android's documentation; Android Auto shows the notifications of messaging applications built for it.
 
 Evidence: `android::layout::tests::req_a_021_the_small_region_is_named_and_never_drawn`.
 

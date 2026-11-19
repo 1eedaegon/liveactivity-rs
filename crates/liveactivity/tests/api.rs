@@ -198,3 +198,29 @@ fn req_c_012_the_reexported_vocabulary_is_built_on_its_constructors() {
         .collect();
     assert_eq!(kinds, ["standard", "bigText", "another"]);
 }
+
+#[test]
+fn req_a_028_a_progress_style_from_its_constructor_is_styled_by_its_progress() {
+    // REQ-A-028
+    let built = ProgressStyle::new(40, vec![ProgressSegment::new(100)]);
+    assert!(built.styled_by_progress);
+    assert_eq!(
+        serde_json::to_value(&built).unwrap(),
+        json!({ "progress": 40, "styledByProgress": true, "segments": [{ "length": 100 }] })
+    );
+    // The member is read as it was: a style that leaves it out is not styled by its progress.
+    let read: ProgressStyle =
+        serde_json::from_value(json!({ "progress": 40, "segments": [{ "length": 100 }] })).unwrap();
+    assert!(!read.styled_by_progress);
+    // And what the constructor built can still be turned off.
+    let plain = ProgressStyle {
+        styled_by_progress: false,
+        ..built
+    };
+    assert!(
+        serde_json::to_value(&plain)
+            .unwrap()
+            .get("styledByProgress")
+            .is_none()
+    );
+}

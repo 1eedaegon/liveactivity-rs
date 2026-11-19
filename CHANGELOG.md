@@ -4,6 +4,25 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.7.1, with its AAR `liveupdate-android-0.7.1.aar`. Three corrections of liveupdate's, two
+of them in the AAR; nothing changes in this crate's own Rust or in the contract's JSON.
+
+- `ProgressStyle::new`, which this crate re-exports, builds a style that is styled by its progress: what is
+  ahead of the progress is shown fainter, as Android's own default is. With 0.7.0 it built one that Android 16
+  shows with every segment in full, the same at 0 and at 100 unless it has a tracker icon. A style read from
+  JSON is as it was: not styled when the member is left out.
+- On a watch the icon of an Ongoing Activity goes with the update that turns it off, and with the end. A watch
+  shows it until the notification is cancelled, so the AAR now cancels before it posts a snapshot that carries
+  none. A notification that a foreground service holds keeps its icon until the activity ends.
+- Below Android 17 a metric's decimal has at most two fraction digits, as Android 17's own style writes it; the
+  AAR of 0.7.0 wrote every digit.
+- The contract says what liveupdate saw of One UI 9 on a Galaxy S23: with `samsungNowBar` the Now Bar and its
+  card show the two lines alone, a point at the full length of a track is not drawn, the status chip shows the
+  first metric, and a long metric value is cut.
+
+When updating: take `liveupdate-android-0.7.1.aar`. Code that built a progress style on `ProgressStyle::new`
+and wants every segment in full says `styled_by_progress: false`.
+
 ## 0.8.0 - 2026-11-19
 
 - feat: build on liveupdate 0.7: a watch's Ongoing Activity, an unknown event, enums and structs that may grow (#26) (`47d5667`)

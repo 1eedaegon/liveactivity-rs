@@ -35,6 +35,7 @@ other call answers `UNSUPPORTED_PLATFORM`.
 | [docs/ios-setup.md](docs/ios-setup.md) | the widget extension, the App Group and pushes of an iOS app |
 | [docs/android-setup.md](docs/android-setup.md) | the AAR, the permissions and the files of an Android app |
 | [docs/framework-integration.md](docs/framework-integration.md) | writing a framework plugin: commands, events, lifecycle, threads |
+| [docs/design/engine-compatibility](docs/design/engine-compatibility/PRD.md) | a watch's Ongoing Activity, an event of an unknown kind, constructors and enums that may grow, on liveupdate 0.7 |
 | [docs/design/engine-small-family](docs/design/engine-small-family/PRD.md) | the small region for a paired Apple Watch and CarPlay, on activitykit 0.6 |
 | [docs/design/engine-interaction](docs/design/engine-interaction/PRD.md) | toggles, staleness, scheduled and transient starts and alert sounds, on activitykit 0.5 |
 | [docs/design/engine-extensions](docs/design/engine-extensions/PRD.md) | what the engines opened in activitykit 0.4 and liveupdate 0.2, what this crate does with it, and what is still planned |
@@ -86,6 +87,7 @@ cargo run -p liveactivity --example features --features testkit
 | [Android content](#android-content) | `LayoutSnapshot.android` | ignored | ✓ |
 | [A last content that stays](#ending) | `EndPolicy::After` | ✓ up to four hours | ✓ where the device offers it |
 | [A lock screen version, a foreground service](#android-options) | `LayoutStartInput.android` | ignored | ✓ where the device offers them |
+| [A watch's Ongoing Activity](#android-options) | `AndroidOptions::with_wear_ongoing_activity`, `AndroidPresentation.wear_ongoing_activity` | ignored | ✓ on a watch below Wear OS 7 whose application has `androidx.wear:wear-ongoing`; one activity can do without it |
 | [Images](#images) | `write_image`, an `image` node | ✓ needs an App Group | ✓ as the large icon |
 | [Pushes](#pushes) | `LayoutStartInput.push`, `push_tokens` | ✓ | none |
 | [Events](#events) | the event sink, `sync_events` | ✓ as they come | ✓ on `sync_events` |
@@ -331,38 +333,35 @@ live.start_layout(transient).await?;
 
 What the notification shows, in Android's own terms, instead of the projection
 of the layout: a progress with segments and points, metrics, the text of the
-status chip, icons of actions. The types are liveupdate's, re-exported.
+status chip, icons of actions. The types are liveupdate's, re-exported. Each is
+built on its constructor, which takes what is required: a member that a later
+version adds is then left at its default, and the code still compiles.
 
 ```rust
-let segment = |length, color| ProgressSegment { length, id: None, color, semantic_style: None };
+let segment = |length, color| ProgressSegment { color, ..ProgressSegment::new(length) };
 
 // Which notification styles the device draws.
 let styles = live.capabilities().await?.android_presentation;
 let segmented = styles.is_some_and(|styles| styles.progress_style);
 
 let mut snapshot = LayoutSnapshot::new(3, values);
-snapshot.android = Some(AndroidContent {
-    title: "Delivery 7".into(),
-    status: "2 stops away".into(),
-    presentation: AndroidPresentation {
+let segments = if segmented {
+    vec![segment(60, Some(0xFF00_7F00)), segment(40, None)]
+} else {
+    vec![segment(100, None)]
+};
+snapshot.android = Some(AndroidContent::new(
+    "Delivery 7",
+    "2 stops away",
+    AndroidPresentation {
         // The text of the status chip, at most 7 characters.
         short_critical_text: Some("8 min".into()),
         ..AndroidPresentation::new(PresentationStyle::Progress(ProgressStyle {
-            progress: 60,
-            indeterminate: false,
             styled_by_progress: true,
-            segments: if segmented {
-                vec![segment(60, Some(0xFF00_7F00)), segment(40, None)]
-            } else {
-                vec![segment(100, None)]
-            },
-            points: Vec::new(),
-            start_icon: None,
-            end_icon: None,
-            tracker_icon: None,
+            ..ProgressStyle::new(60, segments)
         }))
     },
-});
+));
 live.update_layout(LayoutUpdateInput::new(id, snapshot)).await?;
 ```
 
@@ -375,10 +374,10 @@ that uses one it does not offer is `UNSUPPORTED_FEATURE`:
 let capabilities = live.capabilities().await?;
 let offered = capabilities.android_presentation.unwrap_or_default();
 
-snapshot.android = Some(AndroidContent {
-    title: "Delivery 7".into(),
-    status: "At the door in 4 minutes".into(),
-    presentation: AndroidPresentation {
+snapshot.android = Some(AndroidContent::new(
+    "Delivery 7",
+    "At the door in 4 minutes",
+    AndroidPresentation {
         // A tap on the notification opens this URL in the application.
         open_url: offered.links.then(|| "myapp://delivery/7".into()),
         // An action that opens a URL sends no tap.
@@ -391,19 +390,19 @@ snapshot.android = Some(AndroidContent {
             Vec::new()
         },
         // A countdown in the header, beside the style.
-        chronometer: offered.chronometer.then(|| TimerStyle {
-            timer: Timer { started_at: ends_at - 240_000, ends_at },
-            counts_down: true,
-        }),
+        chronometer: offered
+            .chronometer
+            .then(|| TimerStyle::new(Timer::new(ends_at - 240_000, ends_at), true)),
         // What a secure lock screen shows of an activity that started as private.
-        public_version: offered.public_version.then(|| PublicVersion {
-            title: "Delivery".into(),
-            status: "On the way".into(),
-        }),
+        public_version: offered
+            .public_version
+            .then(|| PublicVersion::new("Delivery", "On the way")),
         sub_text: offered.branding.then(|| "Mochi Express".into()),
+        // In a watch application: this snapshot stays in the tray, off the watch face.
+        wear_ongoing_activity: false,
         ..AndroidPresentation::new(PresentationStyle::Standard)
     },
-});
+));
 ```
 
 A snapshot without a content is projected from the layout, in the layout's
@@ -419,10 +418,7 @@ What only Android reads of a start. iOS ignores it.
 ```rust
 let mut options = AndroidOptions::new(AndroidVisibility::Private);
 // What a secure lock screen shows in place of the content of a private activity.
-options.public_version = Some(PublicVersion {
-    title: "Delivery".into(),
-    status: "On the way".into(),
-});
+options.public_version = Some(PublicVersion::new("Delivery", "On the way"));
 // The notification is the one a foreground service of the application holds.
 if offered.foreground_placement {
     options.placement = Some(AndroidPlacement::Foreground);
@@ -438,6 +434,17 @@ The public version goes with every snapshot that has none of its own. One
 running activity has the foreground placement at a time, and a device that
 does not offer it answers `UNSUPPORTED_FEATURE`. The service is the
 application's: [docs/android-setup.md](docs/android-setup.md#a-foreground-service).
+
+In a watch application an activity is on the watch face too, as its Ongoing
+Activity, where the device says `wear_ongoing_activity`
+([docs/android-setup.md](docs/android-setup.md#a-watch)). One activity can
+stay in the tray, in all of its snapshots:
+
+```rust
+start.android = Some(
+    AndroidOptions::new(AndroidVisibility::Private).with_wear_ongoing_activity(false),
+);
+```
 
 ### Ending
 
@@ -501,6 +508,7 @@ started as `Event::Started`. The steps are in
 | `Event::PushToStartToken` | the app got its push-to-start token | ✓ | |
 | `Event::Permissions` | the person changed what the app may do | ✓ | |
 | `Event::Opened` | the person opened the application from a notification | the application gets the URL itself | ✓ when the host reports the opening intent |
+| `Event::Unknown` | something this version has no event for | | ✓ when the AAR is of a later liveupdate than the crate |
 
 The enum may grow: match with a `_` arm. An activity is over when a `State`
 event says `ended` or `dismissed`, on either platform:
@@ -548,6 +556,8 @@ match backend.next_check()? {
     NextCheck::At(_time) => {}
     // Nothing until the next call, signal or resume.
     NextCheck::Never => {}
+    // An answer that a later liveupdate adds: shortly, as for `Soon`.
+    _ => {}
 }
 ```
 

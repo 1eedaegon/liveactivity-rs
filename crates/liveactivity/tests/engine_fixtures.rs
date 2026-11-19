@@ -31,6 +31,11 @@ fn fixtures_in(name: &str) -> Value {
 
 /// The folder of the activitykit version in Cargo.lock.
 fn engine() -> PathBuf {
+    package("activitykit").0
+}
+
+/// The folder and the version of the crate `name` in Cargo.lock.
+fn package(name: &str) -> (PathBuf, String) {
     let metadata = Command::new(env!("CARGO"))
         .args(["metadata", "--format-version", "1", "--locked"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -38,16 +43,53 @@ fn engine() -> PathBuf {
         .expect("cargo answers its metadata");
     assert!(metadata.status.success(), "cargo metadata failed");
     let metadata: Value = serde_json::from_slice(&metadata.stdout).unwrap();
-    let manifest = metadata["packages"]
+    let package = metadata["packages"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|package| package["name"] == "activitykit")
-        .expect("activitykit is a dependency")["manifest_path"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    Path::new(&manifest).parent().unwrap().to_owned()
+        .find(|package| package["name"] == name)
+        .unwrap_or_else(|| panic!("{name} is a dependency"))
+        .clone();
+    let manifest = package["manifest_path"].as_str().unwrap();
+    (
+        Path::new(manifest).parent().unwrap().to_owned(),
+        package["version"].as_str().unwrap().to_owned(),
+    )
+}
+
+#[test]
+fn req_a_025_the_engine_says_what_an_earlier_android_shows() {
+    // REQ-A-025
+    // The contract says it by liveupdate's account: the rows of its specification that this crate hands on.
+    let spec = fs::read_to_string(package("liveupdate").0.join("docs/spec.md"))
+        .expect("liveupdate ships its specification");
+    let row = |id: &str| {
+        let start = format!("| {id} |");
+        spec.lines()
+            .find(|line| line.starts_with(&start))
+            .unwrap_or_else(|| panic!("liveupdate's specification has {id}"))
+            .to_owned()
+    };
+    let metrics = row("LU-V2-METRIC-4");
+    assert!(metrics.contains("Below API 37") && metrics.contains("header clock"));
+    let action = row("LU-V2-ACTION-3");
+    assert!(action.contains("from API 31") && action.contains("drops the tap"));
+}
+
+#[test]
+fn req_a_027_the_setup_names_the_aar_of_the_engine_in_the_lock() {
+    // REQ-A-027
+    let version = package("liveupdate").1;
+    let setup = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/android-setup.md");
+    let setup = fs::read_to_string(setup).expect("the setup document is in the repository");
+    let aar = format!("liveupdate-android-{version}.aar");
+    assert!(setup.contains(&aar), "the setup names {aar}");
+    // And no AAR of another version.
+    let named: Vec<&str> = setup
+        .match_indices("liveupdate-android-")
+        .map(|(at, _)| &setup[at..setup[at..].find(".aar").map_or(at, |end| at + end + 4)])
+        .collect();
+    assert!(named.iter().all(|name| *name == aar), "{named:?}");
 }
 
 #[test]

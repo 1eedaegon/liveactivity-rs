@@ -49,7 +49,8 @@ pub struct Snapshot {
     pub stale_at: Option<u64>,
 }
 
-/// The two templates.
+/// The two templates. More may come: match with a `_` arm.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Template {
@@ -96,7 +97,8 @@ pub struct UpdateInput {
     pub snapshot: Snapshot,
 }
 
-/// When an ended activity leaves the screen.
+/// When an ended activity leaves the screen. More may come: match with a `_` arm.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum EndPolicy {
@@ -316,6 +318,17 @@ pub struct ActivityRecord {
     pub promotion_state: PromotionState,
 }
 
+impl Timer {
+    /// The countdown from `started_at` to `ends_at`, both in epoch milliseconds.
+    #[must_use]
+    pub fn new(started_at: u64, ends_at: u64) -> Self {
+        Self {
+            started_at,
+            ends_at,
+        }
+    }
+}
+
 impl Snapshot {
     /// The same snapshot, shown as out of date from `at`, in epoch milliseconds.
     #[must_use]
@@ -326,7 +339,9 @@ impl Snapshot {
         }
     }
 
-    fn progress(revision: u64, title: &str, status: &str, progress: f64) -> Self {
+    /// The content of a progress activity at `revision`, with `progress` from 0 to 1 and no stale time.
+    #[must_use]
+    pub fn progress(revision: u64, title: &str, status: &str, progress: f64) -> Self {
         Self {
             revision,
             title: title.into(),
@@ -337,16 +352,16 @@ impl Snapshot {
         }
     }
 
-    fn timer(revision: u64, title: &str, status: &str, started_at: u64, ends_at: u64) -> Self {
+    /// The content of a timer activity at `revision`, which counts down from `started_at` to `ends_at`, in epoch
+    /// milliseconds, and has no stale time.
+    #[must_use]
+    pub fn timer(revision: u64, title: &str, status: &str, started_at: u64, ends_at: u64) -> Self {
         Self {
             revision,
             title: title.into(),
             status: status.into(),
             progress: None,
-            timer: Some(Timer {
-                started_at,
-                ends_at,
-            }),
+            timer: Some(Timer::new(started_at, ends_at)),
             stale_at: None,
         }
     }
@@ -370,6 +385,19 @@ impl StartInput {
             fallback: Fallback::Notification,
             snapshot,
         }
+    }
+
+    /// A start that shows `snapshot` under the application's own `activity_key`, with the template that the
+    /// snapshot is of: the timer's when it has a timer, the progress's otherwise. As the two constructors below
+    /// it falls back to an ordinary notification.
+    #[must_use]
+    pub fn new(activity_key: impl Into<String>, snapshot: Snapshot) -> Self {
+        let template = if snapshot.timer.is_some() {
+            Template::Timer
+        } else {
+            Template::Progress
+        };
+        Self::of(&activity_key.into(), template, snapshot)
     }
 
     /// A progress activity under the application's own `activity_key`, with `progress` from 0 to 1.
@@ -408,6 +436,15 @@ impl StartInput {
 }
 
 impl UpdateInput {
+    /// The content `snapshot` for the activity `id`.
+    #[must_use]
+    pub fn new(id: impl Into<String>, snapshot: Snapshot) -> Self {
+        Self {
+            id: id.into(),
+            snapshot,
+        }
+    }
+
     /// New content of the progress activity `id` under `revision`, which is higher than the last.
     pub fn progress(id: &str, revision: u64, title: &str, status: &str, progress: f64) -> Self {
         Self {
@@ -446,6 +483,15 @@ impl EndInput {
         Self {
             id: id.into(),
             policy: EndPolicy::Immediate {},
+        }
+    }
+
+    /// Ends the activity `id` and removes it from the screen at `at`, in epoch milliseconds.
+    #[must_use]
+    pub fn after(id: &str, at: u64) -> Self {
+        Self {
+            id: id.into(),
+            policy: EndPolicy::After { at },
         }
     }
 }

@@ -220,6 +220,19 @@ impl MemoryDriver {
         self.lock().events.events.push(event);
     }
 
+    /// Queues an event of the kind `kind`, which this liveupdate does not know, as a later AAR stores one.
+    pub fn later(&self, id: &str, sequence: u64, kind: &str) {
+        let event: ActivityEvent = serde_json::from_value(json!({
+            "sequence": sequence,
+            "activityId": id,
+            "occurredAt": 1_800_000_000_000_u64,
+            "kind": {"kind": kind, "until": 1_800_000_060_000_u64},
+        }))
+        .unwrap();
+        assert_eq!(event.kind, liveupdate::EventKind::Unknown);
+        self.lock().events.events.push(event);
+    }
+
     /// The alarm of the Android side, which fires while the application does not run: the scheduled receipts
     /// whose time has come are posted.
     pub fn fire_alarms(&self) {

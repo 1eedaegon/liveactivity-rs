@@ -11,7 +11,8 @@ use super::{
 };
 use crate::{
     ActionEvent, Backend, EndPolicy, Error, Event, LayoutActivityRecord, LayoutEndInput,
-    LayoutSnapshot, LayoutStartInput, LayoutUpdateInput, OpenedEvent, Result, Visibility,
+    LayoutSnapshot, LayoutStartInput, LayoutUpdateInput, OpenedEvent, Result, UnknownEvent,
+    Visibility,
     layout::{Alert, AndroidOptions, AndroidPlacement, AndroidVisibility, Element, Node},
 };
 use serde::{Deserialize, Serialize};
@@ -341,8 +342,13 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                         }))
                     }
                     // A dismissal is reported with the other states, by the backend: its stored event is the
-                    // prompt to ask. And a kind that a later liveupdate adds, which the contract has no event for.
-                    _ => None,
+                    // prompt to ask.
+                    liveupdate::EventKind::Dismissed => None,
+                    // A kind that liveupdate does not know, or one that it has and this crate does not.
+                    _ => Some(Event::Unknown(UnknownEvent {
+                        activity_id: event.activity_id,
+                        activity_key,
+                    })),
                 }
             })
             .collect())
@@ -493,8 +499,14 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
             _ => None,
         };
         let unshown = of_the_start.is_some() && public_version.is_none();
+        // The start's word on a watch's Ongoing Activity, for every snapshot of the activity.
+        let carried = input
+            .android
+            .as_ref()
+            .and_then(|android| android.wear_ongoing_activity)
+            .unwrap_or(true);
         Ok(android_layout::Projection {
-            snapshot: marked(shown.snapshot, alerts, public_version),
+            snapshot: marked(shown.snapshot, alerts, public_version, carried),
             degraded: shown
                 .degraded
                 .into_iter()
@@ -652,6 +664,7 @@ fn marked(
     snapshot: liveupdate::Snapshot,
     alerts: bool,
     public_version: Option<liveupdate::PublicVersion>,
+    carried: bool,
 ) -> liveupdate::Snapshot {
     liveupdate::Snapshot {
         presentation: snapshot
@@ -659,6 +672,8 @@ fn marked(
             .map(|presentation| liveupdate::AndroidPresentation {
                 alert: alerts,
                 public_version: presentation.public_version.or(public_version),
+                // Carried where neither the start nor the content of the snapshot turns it off.
+                wear_ongoing_activity: carried && presentation.wear_ongoing_activity,
                 ..presentation
             }),
         ..snapshot
@@ -685,12 +700,13 @@ fn refuses_links(error: &liveupdate::Error) -> bool {
     )
 }
 
-/// The options as they are kept and compared: a placement that names the default is the default.
+/// The options as they are kept and compared: a member that names the default is the default.
 fn by_default(options: AndroidOptions) -> AndroidOptions {
     AndroidOptions {
         placement: options
             .placement
             .filter(|placement| *placement != AndroidPlacement::Tagged),
+        wear_ongoing_activity: options.wear_ongoing_activity.filter(|carried| !carried),
         ..options
     }
 }

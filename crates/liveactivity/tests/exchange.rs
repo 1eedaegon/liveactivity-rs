@@ -2657,3 +2657,195 @@ fn req_a_022_a_native_call_that_panics_fails_no_later_call() {
     assert!(events.try_iter().any(tapped));
     std::fs::remove_dir_all(&files).unwrap();
 }
+
+#[test]
+fn req_a_024_a_start_says_whether_its_activity_carries_a_watchs_ongoing_activity() {
+    // REQ-A-024
+    let (live, _events, driver) = android_with_files("wear-ongoing");
+    let with_option = |key: &str, carried: Option<bool>, android: Option<serde_json::Value>| {
+        let mut request = serde_json::to_value(ride(key, android)).unwrap();
+        request["android"] = serde_json::json!({ "visibility": "private" });
+        if let Some(carried) = carried {
+            request["android"]["wearOngoingActivity"] = serde_json::json!(carried);
+        }
+        liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", request)
+            .unwrap()
+    };
+    let carried = |id: &str| {
+        driver
+            .posted(id)
+            .presentation
+            .unwrap()
+            .wear_ongoing_activity
+    };
+
+    // A start that says nothing carries it, in what the backend projects and in a content that says nothing.
+    let plain = block_on(live.start_layout(with_option("ride:1", None, None))).unwrap();
+    assert!(carried(&plain.id));
+    let update = layout_update(ride_update(&plain.id, 1, Some(driving(70, "2 min"))));
+    block_on(live.update_layout(update)).unwrap();
+    assert!(carried(&plain.id));
+    // A content turns it off for its snapshot, and the next snapshot carries it again.
+    let mut off = driving(80, "1 min");
+    off["presentation"]["wearOngoingActivity"] = serde_json::json!(false);
+    block_on(live.update_layout(layout_update(ride_update(&plain.id, 2, Some(off))))).unwrap();
+    assert!(!carried(&plain.id));
+    block_on(live.update_layout(layout_update(ride_update(&plain.id, 3, None)))).unwrap();
+    assert!(carried(&plain.id));
+    // A start that says `true` is the same activity as one that says nothing.
+    let again = block_on(live.start_layout(with_option("ride:1", Some(true), None))).unwrap();
+    assert_eq!(again.id, plain.id);
+
+    // A start that turns it off does so for every snapshot of the activity: the projected ones, and a content,
+    // whatever it says of it.
+    let quiet = block_on(live.start_layout(with_option("ride:2", Some(false), None))).unwrap();
+    assert!(!carried(&quiet.id));
+    block_on(live.update_layout(layout_update(ride_update(&quiet.id, 1, None)))).unwrap();
+    assert!(!carried(&quiet.id));
+    let update = layout_update(ride_update(&quiet.id, 2, Some(driving(70, "2 min"))));
+    block_on(live.update_layout(update)).unwrap();
+    assert!(!carried(&quiet.id));
+    let mut on = driving(80, "1 min");
+    on["presentation"]["wearOngoingActivity"] = serde_json::json!(true);
+    block_on(live.update_layout(layout_update(ride_update(&quiet.id, 3, Some(on))))).unwrap();
+    assert!(!carried(&quiet.id));
+    // The same start again is the same activity.
+    let again = block_on(live.start_layout(with_option("ride:2", Some(false), None))).unwrap();
+    assert_eq!(again.id, quiet.id);
+    // The other start of the same key, which carries it, is another activity than the one that does not.
+    let other = block_on(live.start_layout(with_option("ride:2", None, None)));
+    assert_eq!(other.unwrap_err().code, "CONFLICT");
+}
+
+#[test]
+fn req_a_024_the_capabilities_say_whether_a_watch_shows_an_ongoing_activity() {
+    // REQ-A-024
+    let watch = MemoryDriver::offering(|offered| offered.wear_ongoing_activity = true);
+    let (live, _events, _driver) = android_on(watch, "wear-capability");
+    let offered = block_on(live.capabilities()).unwrap();
+    assert!(offered.android_presentation.unwrap().wear_ongoing_activity);
+    assert_eq!(
+        serde_json::to_value(block_on(live.capabilities()).unwrap()).unwrap()["androidPresentation"]
+            ["wearOngoingActivity"],
+        true
+    );
+    let (phone, _events, _driver) = android_with_files("wear-capability-phone");
+    let offered = block_on(phone.capabilities()).unwrap();
+    assert!(!offered.android_presentation.unwrap().wear_ongoing_activity);
+}
+
+#[test]
+fn req_e_008_an_event_of_an_unknown_kind_reaches_the_sink() {
+    // REQ-E-008
+    use liveactivity::UnknownEvent;
+    let (live, events, driver) = android_with_files("unknown-event");
+    let record = block_on(live.start_layout(ride("ride:7", None))).unwrap();
+    shown(&events, &record.id);
+    // A later AAR stored an event of a kind that this liveupdate does not know, between two it knows.
+    driver.tap(&record.id, 0, "pet");
+    driver.later(&record.id, 1, "snoozed");
+    driver.open(&record.id, 2, None);
+    block_on(live.sync_events()).unwrap();
+    assert!(matches!(events.try_recv().unwrap(), Event::Action(tap) if tap.action_id == "pet"));
+    assert_eq!(
+        events.try_recv().unwrap(),
+        Event::Unknown(UnknownEvent {
+            activity_id: record.id.clone(),
+            activity_key: Some("ride:7".into()),
+        })
+    );
+    assert!(matches!(events.try_recv().unwrap(), Event::Opened(_)));
+    assert!(events.try_recv().is_err());
+    let wire = serde_json::to_value(UnknownEvent {
+        activity_id: "id".into(),
+        activity_key: None,
+    });
+    assert_eq!(wire.unwrap(), serde_json::json!({ "activityId": "id" }));
+
+    // Without the app's files the backend knows no key, and passes the event on all the same. A dismissal is
+    // no such event: it is a state.
+    let driver = MemoryDriver::default();
+    let (templates, events) = connect(LiveUpdateBackend::new(driver.clone()));
+    driver.later("gone", 0, "snoozed");
+    driver.dismiss("gone", 1);
+    block_on(templates.sync_events()).unwrap();
+    assert_eq!(
+        events.try_recv().unwrap(),
+        Event::Unknown(UnknownEvent {
+            activity_id: "gone".into(),
+            activity_key: None,
+        })
+    );
+    assert!(
+        events
+            .try_iter()
+            .all(|event| !matches!(event, Event::Unknown(_)))
+    );
+}
+
+#[test]
+fn req_a_026_a_start_without_room_in_the_store_is_a_system_limit() {
+    // REQ-A-026
+    let (live, _events, driver) = android_with_files("store-room");
+    // The longest text an Android content takes, in characters of four bytes: liveupdate keeps it twice a receipt.
+    let long = |text: &str| {
+        serde_json::json!({ "title": "Ride", "status": "On the way",
+            "presentation": { "style": { "kind": "bigText", "value": { "text": text } } } })
+    };
+    let text = "\u{1F431}".repeat(4000);
+    let mut live_ones = Vec::new();
+    let refused = loop {
+        let key = format!("ride:{}", live_ones.len());
+        match block_on(live.start_layout(ride(&key, Some(long(&text))))) {
+            Ok(record) => live_ones.push(record),
+            Err(error) => break error,
+        }
+        assert!(live_ones.len() < 32, "no start was refused for the room");
+    };
+    assert_eq!(refused.code, "SYSTEM_LIMIT");
+    assert!(
+        refused.message.contains("too large to store"),
+        "{refused:?}"
+    );
+
+    // Nothing of the refused start is kept or posted: the same start is refused again, and no activity is new.
+    let key = format!("ride:{}", live_ones.len());
+    let posts = driver.lock().posts;
+    let again = block_on(live.start_layout(ride(&key, Some(long(&text)))));
+    assert_eq!(again.unwrap_err().code, "SYSTEM_LIMIT");
+    assert_eq!(driver.lock().posts, posts);
+    let listed = block_on(live.list_layout()).unwrap();
+    assert_eq!(listed.len(), live_ones.len());
+    assert!(listed.iter().all(|record| record.activity_key != key));
+
+    // A small activity still has room, and so may its update to the long text, which a receipt then holds once.
+    // The first such update that has none is refused, and leaves what was shown.
+    let grow = |id: &str| layout_update(ride_update(id, 1, Some(long(&text))));
+    let mut small = None;
+    for place in 0..2 {
+        let key = format!("ride:small:{place}");
+        let record = block_on(live.start_layout(ride(&key, Some(long("Short"))))).unwrap();
+        if let Err(error) = block_on(live.update_layout(grow(&record.id))) {
+            assert_eq!(error.code, "SYSTEM_LIMIT");
+            small = Some(record);
+            break;
+        }
+    }
+    let small = small.expect("an update was refused for the room");
+    let shown = |id: &str| {
+        let listed = block_on(live.list_layout()).unwrap();
+        let record = listed.into_iter().find(|record| record.id == id);
+        record.unwrap().snapshot.revision
+    };
+    let text_of = |id: &str| match driver.posted(id).presentation.unwrap().style {
+        liveactivity::PresentationStyle::BigText(style) => style.text.chars().count(),
+        _ => 0,
+    };
+    assert_eq!((shown(&small.id), text_of(&small.id)), (0, 5));
+
+    // An end makes room: the ended activity's receipt goes for it, and the update is taken.
+    let ended = liveactivity::LayoutEndInput::immediate(live_ones[0].id.clone());
+    block_on(live.end_layout(ended)).unwrap();
+    block_on(live.update_layout(grow(&small.id))).unwrap();
+    assert_eq!((shown(&small.id), text_of(&small.id)), (1, 4000));
+}

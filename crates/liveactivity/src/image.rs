@@ -35,6 +35,17 @@ pub struct ImageInput {
     pub png: Vec<u8>,
 }
 
+impl ImageInput {
+    /// The PNG file `png` under `name`.
+    #[must_use]
+    pub fn new(name: impl Into<String>, png: Vec<u8>) -> Self {
+        Self {
+            name: name.into(),
+            png,
+        }
+    }
+}
+
 impl Validate for ImageInput {
     fn validate(&self) -> Result<()> {
         check_image(&self.name, &self.png)

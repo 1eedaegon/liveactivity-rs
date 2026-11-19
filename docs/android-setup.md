@@ -1,7 +1,7 @@
 # Android setup
 
 On Android `liveactivity` runs on the [liveupdate](https://github.com/1eedaegon/liveupdate-rs)
-crate (0.4.1 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
+crate (0.7.0 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
 Live Update. liveupdate keeps the lifecycle, the revisions and the receipts in Rust; a small AAR
 talks to Android's `NotificationManager`.
 
@@ -19,20 +19,21 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.4.1.aar` from liveupdate's
+Put `liveupdate-android-0.7.0.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
-library too:
+library too, and in a watch application the library of [its Ongoing Activity](#a-watch):
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.4.1.aar"))
+    implementation(files("libs/liveupdate-android-0.7.0.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
+    implementation("androidx.wear:wear-ongoing:1.1.0") // a watch application only
 }
 ```
 
-Use the AAR of the liveupdate version this crate depends on. `liveactivity::liveupdate` re-exports
-that crate. The AAR of 0.2 does not fit: it had another package name, which liveupdate 0.3 took
+Use the AAR of the liveupdate version this crate depends on; [the two versions](#9-a-crate-and-an-aar-of-two-versions)
+has what happens when they differ. `liveactivity::liveupdate` re-exports that crate. The AAR of 0.2 does not fit: it had another package name, which liveupdate 0.3 took
 back, and the JNI transport looks for the name of the version it was built with.
 
 ## 2. The manifest
@@ -359,7 +360,9 @@ The manifest is the application's for both of the following; the AAR declares ne
 
 - **On the minute.** Declare `SCHEDULE_EXACT_ALARM` and send the person to the "Alarms &
   reminders" setting: from Android 14 it is off until they allow it. `USE_EXACT_ALARM` is for alarm
-  and calendar applications only, by Google Play's policy.
+  and calendar applications only, by Google Play's policy, and needs no setting. Android 12 does not
+  know `USE_EXACT_ALARM`: an application that uses it also declares `SCHEDULE_EXACT_ALARM` with
+  `android:maxSdkVersion="32"`, which Android 12 allows without asking.
 
   ```xml
   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
@@ -400,6 +403,29 @@ removed them until the application ran again. An application that nobody had ope
 that did not charge, had its inexact alarms put off: its start did not begin in the ten minutes it
 was watched, while an exact alarm came on time. Not verified there: a real phone and the battery
 savers of device makers.
+
+### A watch
+
+In a watch application the same calls put the activity on the watch face, as an icon that opens the
+application, and among the recent applications: the Ongoing Activity of Wear OS, below Wear OS 7.
+
+1. Add `androidx.wear:wear-ongoing` to the watch application, as in [Add the AAR](#1-add-the-aar). The
+   AAR uses it when it is there and does not bring it: a phone application adds nothing.
+2. Build the Rust library for `armeabi-v7a` too (`armv7-linux-androideabi`): a watch such as the Galaxy
+   Watch4 runs 32-bit code only.
+3. Start and update as on a phone. The icon, the title, the text and a header clock are the
+   notification's, and a tap opens what a tap on the notification opens.
+
+`capabilities().android_presentation` says `wear_ongoing_activity` where the watch shows it; it is there
+when the backend has [the app's files](#4-give-the-backend-the-apps-files). One activity can stay in the
+tray: `AndroidOptions::new(visibility).with_wear_ongoing_activity(false)` for a layout,
+and `wear_ongoing_activity: false` in the presentation of an Android content
+([contract](contract.md#a-watchs-ongoing-activity)). A template's activity (`start`) has no such choice and
+always carries it.
+
+By liveupdate's account, which ran its library on a Galaxy Watch4 with Wear OS 5: it is for Wear OS 3 to
+6, older watches ignore it, Wear OS 7 shows Live Updates itself, and a phone's activity stays on the phone.
+This crate ran on no watch.
 
 ## 5. Permissions
 
@@ -520,6 +546,8 @@ match backend.next_check()? {
     NextCheck::At(time) => wait_until(time),
     // Nothing until the next call of the application, signal or resume.
     NextCheck::Never => wait_for_the_signal(),
+    // An answer that a later liveupdate adds: shortly, as for `Soon`.
+    _ => wait_a_moment(),
 }
 ```
 
@@ -581,6 +609,23 @@ fn main() {
 }
 ```
 
+## 9. A crate and an AAR of two versions
+
+An application takes this crate, and liveupdate with it, from Cargo and the AAR as a file, so the two
+are not always of one version. They are tested as a pair of one version. Apart, by liveupdate's account:
+
+| liveupdate in the crate | AAR | Together |
+| --- | --- | --- |
+| Later | 0.7.0 or later | The activity is posted. A member that the AAR does not know is not shown, and its capability reads `false` |
+| Later | Up to 0.6.0 | A request with a member that the AAR does not know is `INVALID_INPUT`: `wearOngoingActivity`, with an AAR before 0.6.0. One without it works |
+| Earlier | Later | It works: liveupdate reads what it knows of a reply. An event of a kind it does not know reaches the sink as `Event::Unknown`; before liveupdate 0.7.0 the events taken with it were lost |
+
+A member that an activity depends on, a start time or the foreground placement, is never left out
+silently: where the AAR does not report its capability the request is `UNSUPPORTED_FEATURE`. A crate
+that is earlier than the one that stored the receipts does not read a receipt with a member of the later
+one, and answers `NATIVE_ERROR` until the application's data is cleared: do not go back to an earlier
+crate over the data of a later one.
+
 ## Behavior to know
 
 - **Threads.** A call runs synchronously on the thread that polls it: a storage write and a
@@ -611,7 +656,11 @@ fn main() {
   it. A start with the foreground placement lets such a service hold the notification
   ([A foreground service](#a-foreground-service)).
 - **Limits.** liveupdate keeps at most 32 active records and 128 ended ones, templates and layouts
-  together. One more active activity answers `SYSTEM_LIMIT`.
+  together. One more active activity answers `SYSTEM_LIMIT`. It stores them in at most 1,000,000 bytes
+  at a start and at an update: ended ones go, the oldest first, sooner than the 128th when the contents
+  are large, and a start or an update for which the live ones alone leave no room answers `SYSTEM_LIMIT`
+  too. That takes some thirty live activities with the longest texts an Android content has; ending one
+  makes room.
 - **A time long past, on Android 16.** Android 16 shows nothing of a notification whose time is
   more than two weeks old, and tells the application nothing: the post is answered as shown. For a
   timer that is a start or an end that far before the post (measured on an Android 16 emulator:

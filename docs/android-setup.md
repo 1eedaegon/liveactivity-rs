@@ -1,7 +1,7 @@
 # Android setup
 
 On Android `liveactivity` runs on the [liveupdate](https://github.com/1eedaegon/liveupdate-rs)
-crate (0.7.0 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
+crate (0.7.1 or later). An activity is an ongoing notification, which Android 16 and later can promote to a
 Live Update. liveupdate keeps the lifecycle, the revisions and the receipts in Rust; a small AAR
 talks to Android's `NotificationManager`.
 
@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.7.0.aar` from liveupdate's
+Put `liveupdate-android-0.7.1.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too, and in a watch application the library of [its Ongoing Activity](#a-watch):
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.7.0.aar"))
+    implementation(files("libs/liveupdate-android-0.7.1.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
     implementation("androidx.wear:wear-ongoing:1.1.0") // a watch application only
 }
@@ -414,7 +414,9 @@ application, and among the recent applications: the Ongoing Activity of Wear OS,
 2. Build the Rust library for `armeabi-v7a` too (`armv7-linux-androideabi`): a watch such as the Galaxy
    Watch4 runs 32-bit code only.
 3. Start and update as on a phone. The icon, the title, the text and a header clock are the
-   notification's, and a tap opens what a tap on the notification opens.
+   notification's, and a tap opens what a tap on the notification opens. An update may turn the Ongoing
+   Activity off or on; a notification that a foreground service holds keeps its icon until the activity
+   ends.
 
 `capabilities().android_presentation` says `wear_ongoing_activity` where the watch shows it; it is there
 when the backend has [the app's files](#4-give-the-backend-the-apps-files). One activity can stay in the

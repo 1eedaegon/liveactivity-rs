@@ -298,8 +298,10 @@ say whether the device does it ([Android setup](android-setup.md#a-watch) has wh
 `androidPresentation.wearOngoingActivity`, which like the rest of `androidPresentation` is there when the
 backend has the app's files. The last content of an activity that ended with a time to stay carries none.
 
-One activity can do without it, and stay in the tray. A layout says so in the options of its start, above, for
-all of its snapshots. An [Android content](#an-android-content) says so for its snapshot, in its presentation.
+One activity can do without it, and stay in the tray: the icon goes from the watch face with the update that
+turns it off, and with the end (liveupdate 0.7.1; before it the icon stayed until the notification was
+cancelled). A notification that a foreground service holds keeps its icon until the activity ends. A layout says
+so in the options of its start, above, for all of its snapshots. An [Android content](#an-android-content) says so for its snapshot, in its presentation.
 The Ongoing Activity is carried where neither turns it off. A template has no such option, and its activity
 always carries one where the device offers it: liveupdate has the choice in a presentation, which a template's
 snapshot does not have. An activity that must stay in the tray is a layout. A phone, a watch with Wear OS 7,
@@ -467,6 +469,13 @@ shows the content as it is.
 | --- | --- |
 | `wearOngoingActivity` | `false`: this snapshot's notification carries no [Ongoing Activity of a watch](#a-watchs-ongoing-activity). `true`, as when it is absent: it carries one where the device offers it and the start did not turn it off. An AAR of liveupdate before 0.6.0 refuses a content that says `false`; `true` is never sent to it |
 
+A `progress` style says with `styledByProgress` whether Android shows what is ahead of the progress fainter.
+Without it every segment is shown in full, and a bar without a tracker icon looks the same at 0 and at 100. In
+Rust `ProgressStyle::new` builds it styled by its progress, since liveupdate 0.7.1; the JSON reads a style that
+leaves the member out as not styled. On One UI 9 a point at the track's full length is not drawn, the status chip
+shows the first metric whatever `criticalMetric` names, and of three metrics a value longer than about seven
+characters is cut, as liveupdate saw on a Galaxy S23.
+
 What a device shows of a content follows its Android version, by liveupdate's account:
 
 | Shown as | From | Before it |
@@ -474,8 +483,9 @@ What a device shows of a content follows its Android version, by liveupdate's ac
 | A promoted Live Update | Android 16 | An ongoing notification, with the fallback `notification` |
 | A `progress` style's segments, points and icons | Android 16 | A plain progress bar |
 | The status chip's `shortCriticalText` | Android 16 | Not shown |
-| A `metric` style | Android 17 | The numbers and the texts as lines under the status, and the first stopwatch or countdown as the clock in the header. The capability `metricStyle` is false there |
+| A `metric` style | Android 17 | The numbers and the texts as lines under the status, a decimal with at most two fraction digits as Android 17 writes it, and the first stopwatch or countdown as the clock in the header. The capability `metricStyle` is false there |
 | Semantic colors of a segment, a point and a metric | Android 17 | Not shown |
+| The two lines of `samsungNowBar`: the Now Bar of One UI and its card show them alone, with the application's icon and no progress bar. Without the member a promoted activity is in the Now Bar too, with its progress bar once it is opened | Android 17, One UI | Not shown |
 | The unlock before the tap of an action with `authenticationRequired` | Android 12 | Android has no such setting below it and would send the tap from a locked device at once: liveupdate's library drops a tap while the device is locked, and the person taps again after unlocking. An action that opens a URL starts the application, for which Android asks on every version |
 
 A URL here is liveupdate's: 1 to 2048 printable ASCII characters with a lowercase scheme, and none

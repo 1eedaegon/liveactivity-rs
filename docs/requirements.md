@@ -616,6 +616,11 @@ says nothing. A template has no such option and always carries it where the devi
 the choice in a presentation, which a template's snapshot does not have. iOS ignores the member.
 Anything but a boolean is `INVALID_INPUT` on every platform.
 
+A watch shows the icon of an Ongoing Activity until its notification is cancelled. So from liveupdate 0.7.1 its
+library takes the notification away before it posts a snapshot that carries none, where one that carried it is
+shown: after an update that turns it off, and with the last content of an end. Before, the icon stayed. A
+notification that a foreground service holds cannot be cancelled and keeps its icon until the activity ends.
+
 No test here runs on a watch: the tests read what liveupdate is handed.
 
 Evidence: `exchange::req_a_024_a_start_says_whether_its_activity_carries_a_watchs_ongoing_activity`,
@@ -627,8 +632,14 @@ Evidence: `exchange::req_a_024_a_start_says_whether_its_activity_carries_a_watch
 By liveupdate's account, which this crate hands on and does not test:
 
 - Below Android 17 a metric style shows its numbers and texts as lines under the status, and its first
-  stopwatch or countdown as the clock in the header. The capability `metricStyle` is false there as before, and
-  an Android content of that style is taken.
+  stopwatch or countdown as the clock in the header. A decimal has at most two fraction digits there, as Android
+  17's own style writes it (liveupdate 0.7.1; 0.7.0 wrote every digit). The capability `metricStyle` is false
+  there as before, and an Android content of that style is taken.
+- On One UI 9, as liveupdate saw it on a Galaxy S23: with `samsungNowBar` the Now Bar and its card show the two
+  lines alone, with the application's icon and no progress bar; without it a promoted activity is in the Now Bar
+  with its progress bar once it is opened. A point at the full length of a progress track is not drawn. The
+  status chip shows the first metric, whatever `criticalMetric` names, and of three metrics a value longer than
+  about seven characters is cut.
 - An action that requires authentication (`authenticationRequired`) asks for the unlock from Android 12. Below
   it Android has no such setting and would send the tap from a locked device at once: there liveupdate's library
   drops a tap while the device is locked, and the person taps again after unlocking.
@@ -646,12 +657,23 @@ Evidence: `exchange::req_a_026_a_start_without_room_in_the_store_is_a_system_lim
 
 ## REQ-A-027 The AAR this crate is built with
 
-The crate is built and tested with liveupdate 0.7.0, whose AAR is `liveupdate-android-0.7.0.aar`. The setup
+The crate is built and tested with liveupdate 0.7.1, whose AAR is `liveupdate-android-0.7.1.aar`. The setup
 document names it, what a watch application adds, and what a crate and an AAR of two versions do together: an
 AAR from 0.7.0 posts a record with a member it does not know without it, and an earlier one refuses such a
 request with `INVALID_INPUT`.
 
 Evidence: `engine_fixtures::req_a_027_the_setup_names_the_aar_of_the_engine_in_the_lock`.
+
+## REQ-A-028 A progress style built on its constructor shows its progress
+
+`ProgressStyle::new`, liveupdate's, which this crate re-exports, builds a style that is styled by its progress,
+as Android's own default is: what is ahead of the progress is shown fainter. Since liveupdate 0.7.1; 0.7.0 built
+it with `styled_by_progress` false, and Android 16 then shows every segment in full, so that a bar without a
+tracker icon looks the same at 0 and at 100. The JSON is what it was: `styledByProgress` is written when true and
+reads as false when it is left out, so a request written for an earlier version reads as before. The projection
+of a layout asks for it by itself (REQ-A-023).
+
+Evidence: `api::req_a_028_a_progress_style_from_its_constructor_is_styled_by_its_progress`.
 
 ## REQ-N-001 No framework in the crate
 

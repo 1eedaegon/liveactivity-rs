@@ -263,10 +263,10 @@ async fn android_content(live: &LiveActivity, id: &str) -> Result<()> {
         AndroidPresentation {
             // The text of the status chip, at most 7 characters.
             short_critical_text: Some("8 min".into()),
-            ..AndroidPresentation::new(PresentationStyle::Progress(ProgressStyle {
-                styled_by_progress: true,
-                ..ProgressStyle::new(60, segments)
-            }))
+            // Built on its constructor, a track shows what is ahead of the progress fainter.
+            ..AndroidPresentation::new(PresentationStyle::Progress(ProgressStyle::new(
+                60, segments,
+            )))
         },
     ));
     live.update_layout(LayoutUpdateInput::new(id, snapshot))

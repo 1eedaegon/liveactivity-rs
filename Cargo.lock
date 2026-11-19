@@ -271,9 +271,9 @@ dependencies = [
 
 [[package]]
 name = "liveupdate"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6d756ede125d2902287269e8cf08f3a379e3cc78274ec87b1990ee86dc59b77"
+checksum = "132e9eac7b323dc9eaa2f197181426c4e849fe6920222419d202709921de776c"
 dependencies = [
  "jni",
  "ndk-context",

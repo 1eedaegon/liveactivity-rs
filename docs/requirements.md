@@ -319,7 +319,7 @@ activitykit's tests on the simulator.
 A `button` and a `toggle` run their tap from iOS 17.2, as activitykit has them since 0.6.6, which this crate builds
 on. Below it activitykit's widget draws them as their labels, and `capabilities().actions` is `unsupported`, since
 it follows activitykit's `buttons`. A request with buttons and toggles is taken on every iOS as before. With an
-earlier activitykit a button was drawn on iOS 17.0 and 17.1 and its tap ran nothing: Xcode writes activitykit's
+earlier activitykit a button was drawn on iOS 17.0 and its tap ran nothing (17.1 was not run): Xcode writes activitykit's
 intent, newer than the iOS its module is built for, into the application's App Intents metadata as one that begins
 with iOS 17.2 (seen by activitykit on the iOS 17.0 simulator).
 

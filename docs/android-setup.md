@@ -669,10 +669,12 @@ crate over the data of a later one.
   are large, and a start or an update for which the live ones alone leave no room answers `SYSTEM_LIMIT`
   too. That takes some thirty live activities with the longest texts an Android content has; ending one
   makes room.
-- **A time long past, on Android 16.** Android 16 shows nothing of a notification whose time is
-  more than two weeks old, and tells the application nothing: the post is answered as shown. For a
-  timer that is a start or an end that far before the post (measured on an Android 16 emulator:
-  13 days shows, 15 days does not).
+- **A clock long past, from Android 15.** A clock in the header, of a timer template, a `Timer`
+  style or a `chronometer`, cannot be more than 14 days old: Android drops such a post without an
+  error, so liveupdate's AAR refuses it with `INVALID_INPUT`. The age is counted from the end of a
+  countdown and from the start of a clock that counts up (measured on an Android 16 emulator before
+  liveupdate refused it: 13 days showed, 15 days did not). An activity that runs longer leaves the
+  clock out, or from Android 17 shows the time as a stopwatch metric, which has no such limit.
 - **An update of the application.** Android removes an application's notifications when the
   application is updated, so an activity that ran across the update is `dismissed`. liveupdate 0.3
   reads what 0.1 stored and not what 0.2 stored: after an update from a release on liveupdate 0.2
@@ -729,7 +731,8 @@ templates were not touched, nor were Android 15 and earlier or Android 17.
 
 **A start or an update with a content answers `INVALID_INPUT` on Android only.** The content names
 a URL that no activity of the application opens, a small icon that is no resource of it, or a
-public version for an activity that did not start as private.
+public version for an activity that did not start as private; or, from Android 15, its clock is
+more than 14 days old.
 
 **The notification is not promoted.** `promotionState` is `notPromoted`. Promotion needs
 Android 16 or later, enabled notifications, the person's promotion setting and the device's system
@@ -751,6 +754,8 @@ one to become an action.
 the application declares the URL's scheme, or liveupdate does not take the URL (a scheme with a
 capital letter, or one of `intent`, `content`, `file`, `javascript`, `data`, `android-app`).
 
-**A start answers `SYSTEM_LIMIT`.** 32 activities are active. End the ones that are done.
+**A start or an update answers `SYSTEM_LIMIT`.** 32 activities are active, the live ones leave no
+room in liveupdate's store of 1,000,000 bytes, or a second activity asks for the foreground
+placement. End the ones that are done.
 
 **Android warns about page size.** See step 8.

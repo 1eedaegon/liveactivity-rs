@@ -132,7 +132,11 @@ let tea = live
 live.end(EndInput::immediate(&tea.id)).await?;
 ```
 
-`live.list()` answers the activities the backend knows.
+`live.list()` answers the activities the backend knows. Every request has a
+constructor that takes what is required (`StartInput::new(key, Snapshot::progress(..))`,
+`UpdateInput::new`, `EndInput::after(id, at)`, `ImageInput::new`, `AndroidContent::new`),
+and the enums may grow: build on the constructors and match with a `_` arm, and
+the code compiles against the next version.
 
 ### Layout activities
 
@@ -171,6 +175,11 @@ live.end_layout(LayoutEndInput::new(&record.id)).await?;
 
 A request that comes as JSON is read with
 `parse_request("start_layout", json)?`, which checks it against the contract.
+
+On the Lock Screen the card has no margin and shows a narrower layout in its
+middle: give the root a padding, and a node that should reach an edge a frame
+of infinite width
+([placement](docs/contract.md#placement-on-the-lock-screen)).
 
 ### Buttons and taps
 
@@ -437,7 +446,7 @@ does not offer it answers `UNSUPPORTED_FEATURE`. The service is the
 application's: [docs/android-setup.md](docs/android-setup.md#a-foreground-service).
 
 In a watch application an activity is on the watch face too, as its Ongoing
-Activity, where the device says `wear_ongoing_activity`
+Activity, where the device says `android_presentation.wear_ongoing_activity`
 ([docs/android-setup.md](docs/android-setup.md#a-watch)). One activity can
 stay in the tray, in all of its snapshots:
 
@@ -605,7 +614,8 @@ hanging. On Android a call runs on the thread that polls it.
   other content is `CONFLICT`; with the same content it changes nothing.
 - **End.** Ending twice is fine. An ended activity takes no update (`NOT_FOUND`).
 - **Errors.** Every failure is an `Error` with a `code` out of `ERROR_CODES`
-  and a message.
+  and a message. `SYSTEM_LIMIT` is the platform's limit: 32 live activities on
+  Android, or no room left in liveupdate's store, and ActivityKit's on iOS.
 - **Validation.** Requests are checked against the contract before a backend
   sees them, so an invalid one is `INVALID_INPUT` on every platform.
 - **What a platform leaves out** is named in the record's `degraded_features`.

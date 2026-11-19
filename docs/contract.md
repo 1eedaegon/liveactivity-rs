@@ -841,7 +841,10 @@ lock screen tree, or the SF Symbol `circle.fill`; `compactTrailing` is empty.
 #### Placement on the Lock Screen
 
 The system gives the card its place and its width, and makes it as high as the layout. The layout decides the rest:
-activitykit measured on simulators of iOS 16.2 to 26.3, and saw the same on each.
+activitykit measured on simulators of iOS 16.2 to 26.3 and saw the same on each, and no phone has been measured.
+What differed was outside the layout: the card stood 14 points from the screen's sides on the Pro phones from
+iOS 17.0 and 10 points on iOS 16.2 and on an iPhone SE; and a hex color as the system's tint read as itself up to
+iOS 18.0, and as (251, 251, 24) for `#FFFF00` on iOS 26.3.
 
 - **There is no margin.** A node at the edge of the layout touches the edge of the card, and the card's rounded
   corners cut what stands in them. Give the root a padding.
@@ -852,7 +855,8 @@ activitykit measured on simulators of iOS 16.2 to 26.3, and saw the same on each
 - **A style is applied in one order**: padding, the frame, the background, the corner radius, the opacity. A
   background covers the padding of its node.
 - **The card is as high as the layout**, at most 160 points: of a higher layout the system shows the middle. An
-  infinite `maxHeight` on the root does not ask for the 160 points; a `height` or a `minHeight` does.
+  infinite `maxHeight` on the root does not ask for the 160 points (such a card was 64 points high); a `height`
+  or a `minHeight` does.
 
 activitykit's widget gives the layout the card's whole width since 0.6.6: iOS 17.2 and 17.4 did not find a button
 or a toggle of a narrower layout under a tap, and opened the application instead.
@@ -1015,7 +1019,8 @@ not change the activity: update it from the application if the button should cha
 
 On iOS buttons and toggles run their tap from iOS 17.2, and below it the widget draws their labels
 alone: `capabilities().actions` is `unsupported` there (activitykit 0.6.6; before it a button was
-drawn on iOS 17.0 and 17.1 and its tap ran nothing).
+drawn on iOS 17.0 and its tap ran nothing, seen by activitykit on the simulator, and 17.1 was not
+run).
 
 A `toggle` is a switch beside its label. It shows the boolean value it is bound to, and a tap
 reaches the sink as `Event::Action` with `on`, the state the person asked for: the other one than

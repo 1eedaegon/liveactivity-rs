@@ -24,15 +24,16 @@ A tap -> ActivityKitActionIntent in the app (product ActivityKitIntent) -> activ
 ## Requirements
 
 - Xcode. activitykit's build script runs SwiftPM for an iOS target and links the Swift bridge into
-  the Rust library. It names SwiftPM's own build system, so that Xcode 27, whose `swift build`
-  defaults to Swift Build, builds it too (activitykit 0.6.6).
+  the Rust library. It names SwiftPM's own build system (activitykit 0.6.6), for Xcode 27, whose
+  `swift build` defaults to Swift Build: an application built with Xcode 27.2 reported that the
+  bridge did not build for iOS without it. Neither activitykit nor this crate has run Xcode 27.
 - iOS 16.2 on an iPhone, iPadOS 17 on an iPad. Below that every command answers
   `UNSUPPORTED_PLATFORM` and `capabilities()` reports every feature as `unsupported`.
 - iOS 17.2 for buttons and toggles. Below it the widget shows the label of a button or a toggle
-  without the control, and `capabilities().actions` is `unsupported`. activitykit's intent is of
-  iOS 17.0, but Xcode writes it into the application's App Intents metadata as one that begins with
-  iOS 17.2: with an activitykit before 0.6.6 a button was drawn on iOS 17.0 and 17.1 and its tap
-  ran nothing.
+  without the control, and `capabilities().actions` is `unsupported`. The `LiveActivityIntent`
+  protocol is of iOS 17.0, but Xcode writes activitykit's intent into the application's App Intents
+  metadata as one that begins with iOS 17.2: with an activitykit before 0.6.6 a button was drawn on
+  iOS 17.0 and its tap ran nothing (seen by activitykit on the simulator; 17.1 was not run).
 - iOS 17.2 for push-to-start, iOS 18 for broadcast channels and for a transient activity
   (`ios.transient`), iOS 26 for a scheduled start (`scheduled`). Below them such a start answers
   `UNSUPPORTED_FEATURE`. An application built before the iOS 26 SDK gets `CONFIGURATION_REQUIRED`
@@ -379,6 +380,9 @@ bundle is `ActivityKitLayoutWidget()`, and that its deployment target is iOS 16.
 compiles no Swift file, so Xcode extracted no App Intents metadata. Below iOS 17.2 buttons and
 toggles are not drawn as controls. What Xcode wrote is in the built application:
 `YourApp.app/Metadata.appintents/extract.actionsdata`, under `actions.ActivityKitActionIntent`.
+Right after an installation the system may not have read the application's intents yet: on the
+iOS 18.0 simulator activitykit's taps ran nothing until the seventh, twenty seconds apart, and
+every tap after it.
 
 **A button of a narrow layout opens the application.** On iOS 17 a control of content narrower
 than the card was not found under a tap. activitykit's widget gives the layout the card's width

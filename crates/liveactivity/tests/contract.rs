@@ -329,6 +329,33 @@ fn answer_to_a_start(members: serde_json::Value) -> String {
 }
 
 #[test]
+fn req_i_017_a_request_that_this_version_cannot_read_in_full_is_refused() {
+    // REQ-I-017
+    // activitykit's widget draws a later activity without what it does not know; a request of the application
+    // stays strict.
+    let layout = |lock_screen: serde_json::Value| json!({"layout":{"lockScreen":lock_screen}});
+    let text = json!({"type":"text","bind":"eta"});
+    assert_eq!(
+        answer_to_a_start(layout(text.clone())),
+        "UNSUPPORTED_PLATFORM"
+    );
+    for later in [
+        // A node of a type that a later version adds.
+        layout(json!({"type":"chart","bind":"eta"})),
+        layout(json!({"type":"vstack","children":[text.clone(),{"type":"chart"}]})),
+        // A member of a node, of the layout, of a style and of the snapshot that a later version adds.
+        layout(json!({"type":"text","bind":"eta","later":1})),
+        json!({"layout":{"lockScreen":text.clone(),"later":1}}),
+        json!({"styles":{"card":{"later":1}}}),
+        json!({"snapshot":{"revision":0,"values":{"eta":"4 min"},"later":1}}),
+        // A value of a kind that a later version adds.
+        json!({"snapshot":{"revision":0,"values":{"eta":{"kind":"later"}}}}),
+    ] {
+        assert_eq!(answer_to_a_start(later.clone()), "INVALID_INPUT", "{later}");
+    }
+}
+
+#[test]
 fn req_i_004_a_wrong_toggle_reaches_no_backend() {
     // REQ-I-004
     let toggle = |members: serde_json::Value| {

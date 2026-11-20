@@ -256,9 +256,9 @@ The answer is a `LayoutActivityRecord`. It has no `template` and does not repeat
 | `layout` | Required. One tree per region, two optional tints and an optional URL: see [Layout](#layout) |
 | `styles` | Optional. 1 to 24 styles by token: see [Styles](#styles) |
 | `snapshot.values` | 0 to 32 values by key: see [Values](#values) |
-| `snapshot.staleAt` | Optional time. Each snapshot has its own; one without it clears the date |
+| `snapshot.staleAt` | Optional time. Each snapshot has its own; one without it clears the date. iOS 16.1 has no stale date: the record keeps it, and the system ignores it |
 | `snapshot.timestamp` | Optional time: when the content was made. Without it iOS takes the time the content is sent. ActivityKit (iOS 17.2) drops content older than what it shows, while the request still succeeds |
-| `snapshot.relevance` | Optional finite number. Which of the application's activities the Dynamic Island shows first: the highest wins. Without it the activity keeps its score, 0 at first. Android ignores it, and an Android record does not repeat it |
+| `snapshot.relevance` | Optional finite number. Which of the application's activities the Dynamic Island shows first: the highest wins. Without it the activity keeps its score, 0 at first. Android and iOS 16.1 ignore it, and their records do not repeat it |
 | `snapshot.android` | Optional. What Android shows for this snapshot instead of the projection of the layout: see [An Android content](#an-android-content). iOS ignores it, and an iOS record does not repeat it |
 | `android` | Optional. What only Android reads of a start: see [Options of a start on Android](#options-of-a-start-on-android). iOS ignores it |
 | `ios` | Optional. What only iOS reads of a start: see [Options of a start on iOS](#options-of-a-start-on-ios). Android ignores it |
@@ -646,7 +646,7 @@ A state is `granted`, `denied`, `prompt`, `settingsRequired`, `notApplicable` or
 | `notifications` | `notApplicable` | `granted` or `denied` |
 | `liveActivities` | `granted`, `denied`; `notApplicable` without Live Activities | `notApplicable` |
 | `promotion` | `notApplicable` | `granted` or `denied`; `notApplicable` where Live Updates are not supported |
-| `frequentPushes` | `granted` or `denied`; `notApplicable` without Live Activities | `notApplicable` |
+| `frequentPushes` | `granted` or `denied`; `denied` on iOS 16.1, which has no such setting; `notApplicable` without Live Activities | `notApplicable` |
 
 The Android backend cannot tell a refusal from a prompt that was never shown, so a disabled
 permission is `denied`.
@@ -682,7 +682,7 @@ code is one of the 12 in `ERROR_CODES`. The message is for a developer.
 
 | Code | When |
 | --- | --- |
-| `UNSUPPORTED_PLATFORM` | The platform has no Live Activities: not iOS or Android, or an iOS version below the minimum |
+| `UNSUPPORTED_PLATFORM` | The platform has no Live Activities: not iOS or Android, an iPhone below iOS 16.1 or an iPad below iPadOS 17 |
 | `UNSUPPORTED_FEATURE` | The backend does not provide what the request asks for: a method it does not implement, `fallback: none` where the native presentation is not available, the `after` policy or another notification style on an Android device that does not offer it, layouts or images on an Android backend without the app's files, a permission kind the platform cannot ask for, or an iOS feature that needs a later iOS (the message names the feature and the version) |
 | `PERMISSION_DENIED` | The person or the system does not allow it: Live Activities are off in Settings on iOS, notifications are not allowed on Android |
 | `NOT_FOREGROUND` | ActivityKit refused a start because the app was not in the foreground |
@@ -839,6 +839,15 @@ it. `activityKey` is absent when the backend no longer knows the activity.
 
 Without `url` a tap opens the app without a URL. [Links and URLs](#links-and-urls) has the rule of
 a URL.
+
+In Rust a layout is built on its constructor, `Layout::new(lock_screen)`, and the builders `.island(..)`,
+`.background(..)`, `.keyline(..)`, `.url(..)` and `.small(..)`: activitykit's types are `#[non_exhaustive]`, and a
+literal of them does not compile.
+
+A request with a member, a node type or a value that this version does not know is `INVALID_INPUT`. activitykit's
+widget reads what it did not get from the application's requests leniently: a content state or a layout written
+by a later crate, or pushed by a later server, is drawn without the members it does not know, and a node of a type
+it does not know is drawn as nothing.
 
 On iOS a `background` that is a color name or a hex color is the system's tint of the activity. One that is a
 light and dark pair is drawn by the widget extension behind the content, on the Lock Screen and in the small
@@ -1099,7 +1108,8 @@ A snapshot may say when it is out of date (`staleAt`). A layout says what it sho
 ```
 
 On iOS the system draws the stale nodes once the time has passed, without an update and without
-the application running, and the next snapshot whose time has not passed is fresh again.
+the application running, and the next snapshot whose time has not passed is fresh again. iOS 16.1
+has no stale date: it draws the content as fresh and reports no `stale` state.
 
 Android draws a notification when it is posted, and nothing redraws it when a time passes. The
 Android backend draws the layout as it is while fresh, names `layout.ifStale`, and tells the sink

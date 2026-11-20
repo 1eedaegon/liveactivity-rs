@@ -263,6 +263,7 @@ fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
             start,
             end,
             counts_down,
+            ..
         } if shown.timer.is_none() => {
             shown.timer = Some((
                 number(values.get(start)),
@@ -271,10 +272,12 @@ fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
             ));
         }
         Element::Image {
-            source: ImageSource::File { file },
+            source: ImageSource::File { file, .. },
             ..
         } => shown.files.push(file.clone()),
-        Element::Button { action_id, child } => {
+        Element::Button {
+            action_id, child, ..
+        } => {
             let (title, inside) = action_title(node, child, values, shown.public);
             let action =
                 title.map(|title| liveupdate::NotificationAction::new(action_id.clone(), title));
@@ -285,6 +288,7 @@ fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
             action_id,
             bind,
             child,
+            ..
         } => {
             let (label, inside) = action_title(node, child, values, shown.public);
             let on = truthy(values.get(bind));
@@ -297,7 +301,7 @@ fn walk(node: &Node, values: &BTreeMap<String, Value>, shown: &mut Shown) {
                 shown.toggles.push((action_id.clone(), on));
             }
         }
-        Element::Link { url, child } => {
+        Element::Link { url, child, .. } => {
             shown.links_seen += 1;
             let id = format!("link:{}", shown.links_seen);
             let (title, inside) = action_title(node, child, values, shown.public);
@@ -457,6 +461,8 @@ fn resolved(member: &Bindable<String>, values: &BTreeMap<String, Value>) -> Opti
     match member {
         Bindable::Literal(text) => Some(text.clone()),
         Bindable::Bound(bound) => values.get(&bound.bind).map(display),
+        // A kind of member that a later activitykit adds: nothing that a notification can say.
+        _ => None,
     }
 }
 
@@ -509,6 +515,7 @@ fn first_timer(node: &Node, values: &BTreeMap<String, Value>) -> Option<(f64, f6
                 start,
                 end,
                 counts_down,
+                ..
             },
         ) = (&found, &node.element)
         {
@@ -602,7 +609,8 @@ fn truthy(value: Option<&Value>) -> bool {
         Some(Value::Bool(value)) => *value,
         Some(Value::Number(value)) => *value != 0.0 && !value.is_nan(),
         Some(Value::Text(value)) => !value.is_empty(),
-        None => false,
+        // A value of a kind that a later activitykit adds is no flag that is on.
+        Some(_) | None => false,
     }
 }
 
@@ -631,6 +639,8 @@ pub(crate) fn display(value: &Value) -> String {
         Value::Text(text) => text.clone(),
         Value::Bool(value) => value.to_string(),
         Value::Number(value) => js_number(*value),
+        // A value of a kind that a later activitykit adds says nothing in a text.
+        _ => String::new(),
     }
 }
 
@@ -703,6 +713,8 @@ fn kind(element: &Element) -> &'static str {
         Element::Link { .. } => "link",
         Element::Toggle { .. } => "toggle",
         Element::Custom { .. } => "custom",
+        // A node of a type that a later activitykit adds, which the projection draws as nothing.
+        _ => "unknown",
     }
 }
 

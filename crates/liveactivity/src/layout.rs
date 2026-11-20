@@ -477,32 +477,32 @@ fn is_false(value: &bool) -> bool {
 
 impl LayoutSnapshot {
     fn wire(&self) -> wire::LayoutSnapshot {
-        wire::LayoutSnapshot {
-            revision: self.revision,
-            values: self.values.clone().into(),
-            stale_at: self.stale_at,
-            timestamp: self.timestamp,
-        }
+        let mut snapshot = wire::LayoutSnapshot::new(self.revision, self.values.clone().into());
+        snapshot.stale_at = self.stale_at;
+        snapshot.timestamp = self.timestamp;
+        snapshot
     }
 }
 
 impl LayoutStartInput {
     /// The same request in activitykit's types.
     pub(crate) fn wire(&self) -> wire::LayoutStartInput {
-        wire::LayoutStartInput {
-            activity_key: self.activity_key.clone(),
-            schema_version: self.schema_version,
-            fallback: match self.fallback {
-                Fallback::None => wire::Fallback::None,
-                Fallback::Notification => wire::Fallback::Notification,
-            },
-            layout: self.layout.clone(),
-            styles: self.styles.clone(),
-            snapshot: self.snapshot.wire(),
-            // What only Android reads is this crate's: activitykit is not asked about it.
-            android: None,
-            push: self.push.clone(),
-        }
+        let fallback = match self.fallback {
+            Fallback::None => wire::Fallback::None,
+            Fallback::Notification => wire::Fallback::Notification,
+        };
+        let mut start = wire::LayoutStartInput::new(
+            self.activity_key.clone(),
+            self.layout.clone(),
+            self.snapshot.wire(),
+        )
+        .fallback(fallback);
+        // The request's own schema version, which the checks refuse when it is not 2. What only Android reads is
+        // this crate's: activitykit is not asked about it.
+        start.schema_version = self.schema_version;
+        start.styles = self.styles.clone();
+        start.push = self.push.clone();
+        start
     }
 
     /// Checks `update` against this start as the native layer does: the same keys and value types, the layout's
@@ -519,24 +519,20 @@ impl LayoutStartInput {
 
 impl LayoutUpdateInput {
     fn wire(&self) -> wire::LayoutUpdateInput {
-        wire::LayoutUpdateInput {
-            id: self.id.clone(),
-            snapshot: self.snapshot.wire(),
-        }
+        wire::LayoutUpdateInput::new(self.id.clone(), self.snapshot.wire())
     }
 }
 
 impl LayoutEndInput {
     fn wire(&self) -> wire::EndInput {
-        wire::EndInput {
-            id: self.id.clone(),
-            policy: match self.policy {
-                EndPolicy::Immediate {} => wire::EndPolicy::Immediate {},
-                EndPolicy::Default {} => wire::EndPolicy::Default {},
-                EndPolicy::After { at } => wire::EndPolicy::After { at },
-            },
-            snapshot: self.snapshot.as_ref().map(LayoutSnapshot::wire),
-        }
+        let policy = match self.policy {
+            EndPolicy::Immediate {} => wire::EndPolicy::immediate(),
+            EndPolicy::Default {} => wire::EndPolicy::default(),
+            EndPolicy::After { at } => wire::EndPolicy::after(at),
+        };
+        let mut end = wire::EndInput::new(self.id.clone(), policy);
+        end.snapshot = self.snapshot.as_ref().map(LayoutSnapshot::wire);
+        end
     }
 }
 

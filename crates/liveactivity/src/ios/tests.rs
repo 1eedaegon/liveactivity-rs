@@ -375,9 +375,7 @@ fn a_broken_request_never_reaches_activitykit_and_activitykit_errors_keep_their_
     for error in [
         Kit::NotForeground("ActivityKit refused the start: visibility".into()),
         Kit::PermissionDenied("Live Activities are turned off".into()),
-        Kit::SystemLimit {
-            scope: LimitScope::Device,
-        },
+        Kit::system_limit(LimitScope::Device),
         Kit::Unsupported,
         Kit::ConfigurationRequired(
             "Embed a widget extension built from the layout template.".into(),
@@ -784,6 +782,41 @@ fn req_i_001_a_relevance_reaches_the_kit_and_the_record_reports_it() {
 }
 
 #[test]
+fn req_i_016_a_record_without_the_systems_score_has_no_relevance() {
+    // REQ-I-016
+    // iOS 16.1 takes the content alone: the system holds no score and no stale date, and has no frequent-pushes
+    // setting, which activitykit reports as off.
+    let (apple, kit) = apple();
+    kit.book().authorization = Some(Authorization {
+        supported: true,
+        enabled: true,
+        buttons: false,
+        frequent_pushes: false,
+        later: crate::IosCapabilities::default(),
+    });
+    assert_eq!(
+        apple.permissions(false).frequent_pushes,
+        PermissionState::Denied
+    );
+    let mut first = start("demo:1", "green");
+    first.snapshot.relevance = Some(50.0);
+    first.snapshot.stale_at = Some(9_000);
+    let record = block_on(apple.start_layout(first)).unwrap();
+    // The request is handed on as on later versions; the system keeps no score of it.
+    assert_eq!(kit.book().starts[0].relevance, Some(50.0));
+    kit.book().entries[0].relevance = None;
+    let listed = block_on(apple.list_layout()).unwrap();
+    let listed = listed.iter().find(|listed| listed.id == record.id).unwrap();
+    assert_eq!(listed.snapshot.relevance, None);
+    // The stale date that the application gave is kept in the record.
+    assert_eq!(listed.snapshot.stale_at, Some(9_000));
+    // Below iOS 16.1 the platform has none, and the message says the floors.
+    let below = Error::from(Kit::Unsupported);
+    assert_eq!(below.code, "UNSUPPORTED_PLATFORM");
+    assert!(below.message.contains("iOS 16.1"), "{}", below.message);
+}
+
+#[test]
 fn req_i_002_an_alert_reaches_the_kit_with_its_update() {
     // REQ-I-002
     let (apple, kit) = apple();
@@ -904,6 +937,7 @@ fn req_i_004_a_toggle_reaches_the_kit_and_its_tap_says_what_was_asked() {
         action_id,
         bind,
         child,
+        ..
     } = &layout.lock_screen.element
     else {
         panic!("a toggle")

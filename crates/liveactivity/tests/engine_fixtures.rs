@@ -233,6 +233,46 @@ fn req_i_015_the_engines_widget_keeps_the_expanded_islands_corners_clear() {
 }
 
 #[test]
+fn req_i_016_the_engines_iphones_begin_with_ios_16_1() {
+    // REQ-I-016
+    // Since activitykit 0.8.0 an iPhone runs Live Activities from iOS 16.1, ActivityKit's first release, and the
+    // documents name that floor.
+    let support = engine().join("swift/Sources/ActivityKitCore/PlatformSupport.swift");
+    let support = fs::read_to_string(support).expect("activitykit ships the platform's support");
+    assert!(
+        support.contains(
+            "case .phone: return version.majorVersion > 16 || (version.majorVersion == 16 && version.minorVersion >= 1)"
+        ),
+        "an iPhone from iOS 16.1"
+    );
+    assert!(
+        support.contains("case .pad: return version.majorVersion >= 17"),
+        "an iPad from iPadOS 17"
+    );
+    let crate_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let read = |name: &str| fs::read_to_string(crate_root.join(name)).unwrap();
+    let setup = read("docs/ios-setup.md");
+    let readme = read("README.md");
+    for said in [
+        "- iOS 16.1 on an iPhone, iPadOS 17 on an iPad.",
+        "a deployment target of iOS 16.1 or later",
+        "The device is below iOS 16.1",
+    ] {
+        assert!(setup.contains(said), "the setup says {said:?}");
+    }
+    assert!(
+        readme.contains("Activities need iOS 16.1"),
+        "and so does the README"
+    );
+    for document in [&setup, &readme] {
+        assert!(
+            !document.contains("need iOS 16.2") && !document.contains("iOS 16.2 or later"),
+            "no document names the floor of activitykit 0.7"
+        );
+    }
+}
+
+#[test]
 fn req_a_031_the_aar_has_what_the_setup_names() {
     // REQ-A-031
     let kotlin = package("liveupdate")

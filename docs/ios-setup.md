@@ -27,8 +27,12 @@ A tap -> ActivityKitActionIntent in the app (product ActivityKitIntent) -> activ
   the Rust library. It names SwiftPM's own build system (activitykit 0.6.6), for Xcode 27, whose
   `swift build` defaults to Swift Build: an application built with Xcode 27.2 reported that the
   bridge did not build for iOS without it. Neither activitykit nor this crate has run Xcode 27.
-- iOS 16.2 on an iPhone, iPadOS 17 on an iPad. Below that every command answers
+- iOS 16.1 on an iPhone, iPadOS 17 on an iPad. Below that every command answers
   `UNSUPPORTED_PLATFORM` and `capabilities()` reports every feature as `unsupported`.
+- iOS 16.2 for a stale date, a relevance score and frequent pushes. iOS 16.1, ActivityKit's first
+  release, takes the content alone: a snapshot's `staleAt` and `relevance` are taken and do not
+  reach the system, so the stale nodes are never drawn and no `stale` state comes, a record has no
+  relevance, and `permissions().frequentPushes` is `denied`. An alert comes as on later versions.
 - iOS 17.2 for buttons and toggles. Below it the widget shows the label of a button or a toggle
   without the control, and `capabilities().actions` is `unsupported`. The `LiveActivityIntent`
   protocol is of iOS 17.0, but Xcode writes activitykit's intent into the application's App Intents
@@ -110,7 +114,7 @@ when the version changes, so the widget and the Rust library come from the same 
 
 ## 4. The widget extension
 
-Add a Widget Extension target with a deployment target of iOS 16.2 or later. Link the
+Add a Widget Extension target with a deployment target of iOS 16.1 or later. Link the
 `ActivityKitWidget` product and replace the target's Swift files with this one:
 
 ```swift
@@ -187,7 +191,8 @@ what the server needs and reports it. It holds no key and sends nothing.
   Without it, and in the simulator, a start that asks for a token answers
   `CONFIGURATION_REQUIRED`.
 - **`NSSupportsLiveActivitiesFrequentUpdates`** set to `YES`, for frequent pushes. The person can
-  turn them off in Settings; `permissions().frequentPushes` reports `granted` or `denied`.
+  turn them off in Settings (iOS 16.2); `permissions().frequentPushes` reports `granted` or
+  `denied`, and `denied` on iOS 16.1.
 - **Broadcast capability** under Push Notifications in the developer account, for channels
   (iOS 18). Xcode cannot set it.
 
@@ -243,6 +248,9 @@ them. Two rules matter for the application:
   revision is above every revision the app sent or accepted for the activity. Number the server's
   pushes above the app's revisions.
 - The app's own updates do not come back as `Event::Updated`.
+- A later server may send members that this version does not know. The widget draws the content
+  with what it knows, and a node of a type it does not know as nothing (activitykit 0.8). A request
+  of the application with such a member is `INVALID_INPUT`.
 
 ## Relevance and alerts
 
@@ -323,6 +331,9 @@ fn connect() -> Result<LiveActivity> {
 | `receipts(Receipts::Redacted)` | keeps a SHA-256 digest of the accepted content instead of the values |
 | `push_to_start(true)` | watches the app's push-to-start token and reports it as `Event::PushToStartToken` |
 
+A receipt that cannot be read costs that receipt and not the list: `list()` answers `NATIVE_ERROR`
+only for a file that cannot be opened or written. The Swift layer keeps the newest 256 receipts.
+
 The settings hold for the whole process, and the first ones win. A second `build()` with other
 settings answers `CONFLICT`; the same settings again are fine. Build the kit before any other use of
 activitykit in the process.
@@ -369,12 +380,12 @@ wakes the app in the background reaches it only once the kit exists.
 **A start answers `SYSTEM_LIMIT`.** The app's or the device's limit of Live Activities is reached.
 The message says which. End activities that are no longer needed.
 
-**Every call answers `UNSUPPORTED_PLATFORM`.** The device is below iOS 16.2, an iPad below
+**Every call answers `UNSUPPORTED_PLATFORM`.** The device is below iOS 16.1, an iPad below
 iPadOS 17, or the target is not iOS.
 
 **A start succeeds but nothing shows.** A successful call does not prove that anything was shown;
 records keep `visibility: unknown`. Check that the extension links `ActivityKitWidget`, that its
-bundle is `ActivityKitLayoutWidget()`, and that its deployment target is iOS 16.2 or later.
+bundle is `ActivityKitLayoutWidget()`, and that its deployment target is iOS 16.1 or later.
 
 **A button or a toggle does nothing.** The app target does not link `ActivityKitIntent`, or it
 compiles no Swift file, so Xcode extracted no App Intents metadata. Below iOS 17.2 buttons and
@@ -393,7 +404,7 @@ sends an update with the value that the event's `on` names.
 
 **The stale nodes do not show.** The system draws them once the snapshot's `staleAt` has passed.
 That can take a while after the time: on a simulator the Lock Screen turned to the stale content
-after 45 to 90 seconds.
+after 45 to 90 seconds. iOS 16.1 has no stale date and never draws them.
 
 **An image draws nothing.** The file was not written, or the `asset` name is not in the extension's
 asset catalog. Neither is reported.

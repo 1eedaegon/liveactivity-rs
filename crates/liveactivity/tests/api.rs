@@ -152,6 +152,67 @@ fn req_c_012_a_constructor_builds_what_the_literal_was() {
 }
 
 #[test]
+fn req_c_012_a_layout_is_built_on_activitykits_constructors() {
+    // REQ-C-012
+    // Since activitykit 0.8.0 its types are `#[non_exhaustive]`: a layout is built on their constructors, and is the
+    // JSON that the literal was.
+    use liveactivity::activitykit::layout::{button, hstack, symbol, text, vstack};
+    use liveactivity::{Bound, Color, Element, Island, IslandExpanded, Layout, Style};
+
+    let layout = Layout::new(vstack([
+        text(Bound::key("title")).style("title"),
+        button("track", text("Track")),
+    ]))
+    .island(
+        Island::new()
+            .expanded(IslandExpanded::new().center(text(Bound::key("title"))))
+            .compact_leading(symbol("shippingbox.fill"))
+            .compact_trailing(text(Bound::key("eta")))
+            .minimal(symbol("shippingbox.fill")),
+    )
+    .background(Color::adaptive("#F2F2F7", "#1C1C1E"))
+    .keyline(Color::Hex("#FF9500".into()))
+    .url("myapp://delivery/7")
+    .small(hstack([
+        symbol("shippingbox.fill"),
+        text(Bound::key("eta")),
+    ]));
+    assert_eq!(
+        serde_json::to_value(&layout).unwrap(),
+        json!({
+            "lockScreen": {"type":"vstack","children":[
+                {"type":"text","bind":"title","style":"title"},
+                {"type":"button","actionId":"track","child":{"type":"text","value":"Track"}},
+            ]},
+            "island": {
+                "expanded": {"center": {"type":"text","bind":"title"}},
+                "compactLeading": {"type":"symbol","name":"shippingbox.fill"},
+                "compactTrailing": {"type":"text","bind":"eta"},
+                "minimal": {"type":"symbol","name":"shippingbox.fill"},
+            },
+            "background": {"light":"#F2F2F7","dark":"#1C1C1E"},
+            "keyline": "#FF9500",
+            "url": "myapp://delivery/7",
+            "small": {"type":"hstack","children":[
+                {"type":"symbol","name":"shippingbox.fill"},
+                {"type":"text","bind":"eta"},
+            ]},
+        })
+    );
+    let style = Style::new().color(Bound::key("tone"));
+    assert_eq!(
+        serde_json::to_value(&style).unwrap(),
+        json!({"color":{"bind":"tone"}})
+    );
+    // Its enums are matched with a last arm.
+    let kind = match &layout.lock_screen.element {
+        Element::Vstack { .. } => "vstack",
+        _ => "another",
+    };
+    assert_eq!(kind, "vstack");
+}
+
+#[test]
 fn req_c_012_the_reexported_vocabulary_is_built_on_its_constructors() {
     // REQ-C-012
     // liveupdate's constructors, through this crate: a member that liveupdate adds later is left at its default.

@@ -131,24 +131,17 @@ mod tests {
         }
         let invalid = Kit::InvalidInput("Request does not match the live activity contract".into());
         assert_eq!(Error::from(invalid), Error::invalid());
-        let feature = Error::from(Kit::UnsupportedFeature {
-            feature: "transient".into(),
-            minimum_ios: (18, 0),
-        });
+        let feature = Error::from(Kit::unsupported_feature("transient", (18, 0)));
         assert_eq!(
             (feature.code.as_str(), feature.message.as_str()),
             ("UNSUPPORTED_FEATURE", "transient needs iOS 18.0")
         );
-        let limit = Error::from(Kit::SystemLimit {
-            scope: LimitScope::App,
-        });
+        let limit = Error::from(Kit::system_limit(LimitScope::App));
         assert_eq!(
             limit.to_string(),
             "SYSTEM_LIMIT: the app's limit of Live Activities is reached"
         );
-        let device = Error::from(Kit::SystemLimit {
-            scope: LimitScope::Device,
-        });
+        let device = Error::from(Kit::system_limit(LimitScope::Device));
         assert_eq!(
             device.message,
             "the device's limit of Live Activities is reached"

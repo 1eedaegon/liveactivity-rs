@@ -62,10 +62,8 @@ impl MemoryBackend {
             .ok_or_else(not_found)?;
         if let Some(events) = self.events.get() {
             events.emit(Event::Action(ActionEvent {
-                action_id: action_id.into(),
-                activity_id: id.into(),
                 activity_key: Some(activity_key),
-                on: None,
+                ..ActionEvent::new(action_id, id)
             }));
         }
         Ok(())
@@ -211,6 +209,7 @@ impl LiveActivityBackend for MemoryBackend {
                 layout: no,
                 push: no,
                 android_presentation: None,
+                ios: None,
             })
         })
     }

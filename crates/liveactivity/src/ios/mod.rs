@@ -105,6 +105,8 @@ pub(crate) struct Authorization {
     pub(crate) buttons: bool,
     /// Supported, and frequent pushes are allowed for the app in Settings.
     pub(crate) frequent_pushes: bool,
+    /// What the device runs of the features after the first Live Activities.
+    pub(crate) later: crate::IosCapabilities,
 }
 
 /// A start: activitykit's `Start` with a key, a revision, a stale date, a timestamp, a relevance, what it asks
@@ -197,13 +199,19 @@ fn kind<H: Handle>(handle: &H) -> Kind {
 
 /// The tap of a button or a toggle of `handle` as the event sink gets it; `on` is the state a toggle was asked
 /// for.
-pub(crate) fn action_event<H: Handle>(handle: &H, action: String, on: Option<bool>) -> ActionEvent {
+pub(crate) fn action_event<H: Handle>(
+    handle: &H,
+    action: String,
+    on: Option<bool>,
+    tap: crate::Tap,
+) -> ActionEvent {
     let key = handle.key();
     ActionEvent {
         action_id: action,
         activity_id: handle.id().to_owned(),
         activity_key: (!key.is_empty()).then(|| key.to_owned()),
         on,
+        tap,
     }
 }
 
@@ -403,6 +411,7 @@ impl<K: Kit> Apple<K> {
             layout: supported,
             push: supported,
             android_presentation: None,
+            ios: Some(authorization.later),
         }
     }
 

@@ -409,6 +409,55 @@ pub struct ActionEvent {
     /// update the value to move the switch. Absent for a button and for an action of an Android content.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
+    /// Which tap it is and when it was made; absent when nothing of it is known.
+    #[serde(default, skip_serializing_if = "Tap::is_unknown")]
+    pub tap: Tap,
+}
+
+impl ActionEvent {
+    /// A tap on the action `action_id` of the activity `activity_id`, of no known key, state or tap.
+    pub fn new(action_id: impl Into<String>, activity_id: impl Into<String>) -> Self {
+        Self {
+            action_id: action_id.into(),
+            activity_id: activity_id.into(),
+            activity_key: None,
+            on: None,
+            tap: Tap::default(),
+        }
+    }
+}
+
+/// What a tap says of itself, beside the activity and the action of an [`ActionEvent`]. Each member is absent when it
+/// is not known.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tap {
+    /// The same for a tap however often it is handed on, also in a later launch: an application that keeps what it
+    /// handled can tell a tap it saw before. On Android the adapter's sequence of the stored tap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// When the person tapped, in epoch milliseconds. On Android when the tap was stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<u64>,
+    /// The revision of the content the activity showed (iOS). A tap on content older than the activity's current
+    /// revision acts on what the person saw.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
+    /// iOS: the application did not take the tap while its intent posted it, so it was kept in the application's
+    /// container and comes to a later kit, in this launch or the next, at most 12 hours later. The activity may have
+    /// ended since. Never on Android.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub late: bool,
+}
+
+impl Tap {
+    fn is_unknown(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 impl LayoutSnapshot {

@@ -408,7 +408,12 @@ fn capabilities_and_permissions_follow_activitykits_authorization() {
             "actions":actions,"stateObservation":all,"silentUpdate":all,"nativeLiveActivity":all,
             "maxPayloadBytes":4096,"layout":all,"push":all})
     };
-    let reported = |apple: &Apple<FakeKit>| serde_json::to_value(apple.capabilities()).unwrap();
+    // What the device runs of the later features is REQ-I-014's test.
+    let reported = |apple: &Apple<FakeKit>| {
+        let mut reported = serde_json::to_value(apple.capabilities()).unwrap();
+        reported.as_object_mut().unwrap().remove("ios");
+        reported
+    };
     assert_eq!(
         reported(&apple),
         features("activityKit", "supported", "supported")
@@ -422,6 +427,7 @@ fn capabilities_and_permissions_follow_activitykits_authorization() {
         enabled: false,
         buttons: false,
         frequent_pushes: false,
+        later: crate::IosCapabilities::default(),
     });
     assert_eq!(
         reported(&apple),
@@ -455,6 +461,7 @@ fn capabilities_and_permissions_follow_activitykits_authorization() {
         enabled: false,
         buttons: false,
         frequent_pushes: false,
+        later: crate::IosCapabilities::default(),
     });
     assert_eq!(
         reported(&apple),
@@ -661,6 +668,7 @@ fn permissions_and_capabilities_report_pushes() {
         enabled: true,
         buttons: true,
         frequent_pushes: false,
+        later: crate::IosCapabilities::default(),
     });
     // A switch in Settings, which the app offers with NSSupportsLiveActivitiesFrequentUpdates: a request changes
     // nothing about it.
@@ -677,6 +685,7 @@ fn permissions_and_capabilities_report_pushes() {
         enabled: false,
         buttons: false,
         frequent_pushes: false,
+        later: crate::IosCapabilities::default(),
     });
     assert_eq!(apple.capabilities().push, FeatureSupport::Unsupported);
     assert_eq!(
@@ -691,18 +700,23 @@ fn a_tap_names_the_action_the_activity_and_its_key() {
         action_event(
             &kit.handle("la-ios-layout-1", "mochi:buttons"),
             "pet".into(),
-            None
+            None,
+            crate::Tap::default()
         ),
         ActionEvent {
-            action_id: "pet".into(),
-            activity_id: "la-ios-layout-1".into(),
             activity_key: Some("mochi:buttons".into()),
-            on: None,
+            ..ActionEvent::new("pet", "la-ios-layout-1")
         }
     );
     // activitykit names no key once ActivityKit no longer lists the activity.
     assert_eq!(
-        action_event(&kit.handle("gone", ""), "pet".into(), None).activity_key,
+        action_event(
+            &kit.handle("gone", ""),
+            "pet".into(),
+            None,
+            crate::Tap::default()
+        )
+        .activity_key,
         None
     );
 }
@@ -900,20 +914,14 @@ fn req_i_004_a_toggle_reaches_the_kit_and_its_tap_says_what_was_asked() {
     // A tap says which state the person asked for; a button's says none.
     let handle = kit.handle(&record.id, "ride:7");
     let tap = |on| ActionEvent {
-        action_id: "mute".into(),
-        activity_id: record.id.clone(),
         activity_key: Some("ride:7".into()),
         on,
+        ..ActionEvent::new("mute", record.id.clone())
     };
-    assert_eq!(
-        action_event(&handle, "mute".into(), Some(true)),
-        tap(Some(true))
-    );
-    assert_eq!(
-        action_event(&handle, "mute".into(), Some(false)),
-        tap(Some(false))
-    );
-    assert_eq!(action_event(&handle, "mute".into(), None), tap(None));
+    let event = |on| action_event(&handle, "mute".into(), on, crate::Tap::default());
+    assert_eq!(event(Some(true)), tap(Some(true)));
+    assert_eq!(event(Some(false)), tap(Some(false)));
+    assert_eq!(event(None), tap(None));
 }
 
 #[test]
@@ -1136,4 +1144,32 @@ fn req_i_008_an_end_answers_ended_also_once_the_system_dismissed_the_activity() 
             .map(|record| record.state)
     };
     assert_eq!(state(&kept.id), Some(ActivityState::Dismissed));
+}
+
+#[test]
+fn req_i_014_the_capabilities_say_what_the_device_runs() {
+    // REQ-I-014
+    let (apple, kit) = apple();
+    let ios =
+        |apple: &Apple<FakeKit>| serde_json::to_value(apple.capabilities()).unwrap()["ios"].clone();
+    // The fake device runs all but the small family, whose widget extension does not draw it.
+    assert_eq!(
+        ios(&apple),
+        json!({"pushToStart":true,"pushChannels":true,"transient":true,"scheduledStart":true,"smallFamily":false})
+    );
+    // An iPhone of iOS 17.2: push-to-start alone.
+    kit.book().authorization = Some(Authorization {
+        supported: true,
+        enabled: true,
+        buttons: true,
+        frequent_pushes: false,
+        later: crate::IosCapabilities {
+            push_to_start: true,
+            ..crate::IosCapabilities::default()
+        },
+    });
+    assert_eq!(
+        ios(&apple),
+        json!({"pushToStart":true,"pushChannels":false,"transient":false,"scheduledStart":false,"smallFamily":false})
+    );
 }

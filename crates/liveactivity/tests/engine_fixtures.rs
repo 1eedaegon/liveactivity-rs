@@ -172,10 +172,11 @@ fn req_i_011_the_engines_buttons_and_toggles_begin_with_ios_17_2() {
         !widget.contains("#available(iOS 17.0, *)"),
         "and below it a label"
     );
-    let system = fs::read_to_string(sources.join("ActivityKitBridge/ActivityKitSystem.swift"))
-        .expect("activitykit ships its authorization");
+    // Since activitykit 0.7.0 the authorization's floors are one table of the platform's support.
+    let support = fs::read_to_string(sources.join("ActivityKitCore/PlatformSupport.swift"))
+        .expect("activitykit ships the platform's support");
     assert!(
-        system.contains("if #available(iOS 17.2, *) { buttons = true }"),
+        support.contains("buttons = from(17, 2)"),
         "and says buttons from iOS 17.2, which the capability `actions` follows"
     );
 }
@@ -203,6 +204,32 @@ fn req_i_013_the_engines_build_names_swiftpms_own_build_system() {
         script.contains(r#".args(["--build-system", "native"])"#),
         "the build names SwiftPM's own build system"
     );
+}
+
+#[test]
+fn req_i_015_the_engines_widget_keeps_the_expanded_islands_corners_clear() {
+    // REQ-I-015
+    // The top outer corner of the expanded island cut the last letter of a short trailing value. Since activitykit
+    // 0.7.0 the widget keeps the leading and trailing content 6 points from the top and from its outer side.
+    let widget = engine().join("swift/Sources/ActivityKitWidget/LayoutWidget.swift");
+    let widget = fs::read_to_string(widget).expect("activitykit ships its widget");
+    assert!(
+        widget.contains("private static let expandedCornerClearance: CGFloat = 6"),
+        "the widget keeps 6 points clear"
+    );
+    for side in ["leading", "trailing"] {
+        let region = if side == "leading" {
+            "expandedLeading"
+        } else {
+            "expandedTrailing"
+        };
+        assert!(
+            widget.contains(&format!(
+                "Self.clear(LayoutRegionView(context: context, region: .{region}), of: .{side})"
+            )),
+            "of the {side} region"
+        );
+    }
 }
 
 fn cases<'a>(fixtures: &'a Value, group: &str) -> &'a Vec<Value> {

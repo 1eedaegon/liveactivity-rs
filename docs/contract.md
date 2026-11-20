@@ -582,9 +582,18 @@ extension shares; on Android to the app's private files.
   "progress": "supported", "timer": "supported", "actions": "supported",
   "stateObservation": "supported", "silentUpdate": "supported",
   "nativeLiveActivity": "supported", "maxPayloadBytes": 4096,
-  "layout": "supported", "push": "supported"
+  "layout": "supported", "push": "supported",
+  "ios": { "pushToStart": true, "pushChannels": true, "transient": true,
+           "scheduledStart": false, "smallFamily": true }
 }
 ```
+
+`ios` says what the iPhone runs of the features after the first Live Activities, as activitykit's
+authorization says (0.7.0): `pushToStart` from iOS 17.2, `pushChannels` (a start's broadcast channel) and
+`transient` from iOS 18, `scheduledStart` from iOS 26 in an application built with the iOS 26 SDK, and
+`smallFamily` from iOS 18 when the widget extension draws the small family. Each is false on a device without
+Live Activities, and `ios` is absent off iOS. A start that asks for one of them where it is false answers
+`UNSUPPORTED_FEATURE`, as before.
 
 On Android, when the backend has the app's files, the capabilities also say which notification
 styles the device draws and what else it offers, for [an Android content](#an-android-content)
@@ -685,7 +694,7 @@ match with a `_` arm.
 
 | Variant | Payload | From |
 | --- | --- | --- |
-| `Event::Action` | `ActionEvent` | iOS, Android: a tap on a `button` or a `toggle` node, or on an action of an Android content. For a toggle it has `on`, the state the person asked for |
+| `Event::Action` | `ActionEvent` | iOS, Android: a tap on a `button` or a `toggle` node, or on an action of an Android content. For a toggle it has `on`, the state the person asked for, and `tap` says which tap it is ([A tap](#a-tap)) |
 | `Event::PushToken` | `PushTokenEvent` | iOS: a push token of an activity, new or changed |
 | `Event::PushToStartToken` | `PushToStartTokenEvent` | iOS: the app's push-to-start token, new or changed |
 | `Event::Updated` | `UpdatedEvent` | iOS: content that a push delivered to a layout activity |
@@ -1010,6 +1019,10 @@ ASCII is `INVALID_INPUT`: percent-encode it.
 | `expanded.belowIfTooWide` | 1 or 2 of `leading` and `trailing`, each once and each a region the layout has: the region goes below the camera when it is too wide to stand beside it |
 | `margins` | an object with at least one of `expanded`, `compactLeading`, `compactTrailing`, `minimal`: the margins of that presentation as a style's `padding`. A presentation without them keeps the system's |
 
+activitykit's widget keeps the expanded island's leading and trailing content 6 points from the top and from its
+outer side, on top of these margins and the padding of the layout: the top outer corner cut the last letter of a
+short trailing value before (activitykit 0.7.0, measured on the iOS 26.3 simulator).
+
 The options are no region and no part: `expanded` still needs a region, and `island` a part.
 
 ### Buttons and actions
@@ -1040,6 +1053,29 @@ Event::Action(tap) if tap.action_id == "mute" => {
 
 iOS draws the switch from iOS 17.2; before it shows the label alone. Android shows it as an action
 of the notification: see [What Android shows](#what-android-shows).
+
+### A tap
+
+`ActionEvent.tap` says which tap it is and when it was made. Each member is left out when it is not known, and so
+is `tap` when nothing is:
+
+```json
+{ "actionId": "pet", "activityId": "la-ios-layout-…", "activityKey": "mochi:buttons",
+  "tap": { "id": "…", "at": 1800000000123, "revision": 3, "late": true } }
+```
+
+| Member | iOS | Android |
+| --- | --- | --- |
+| `id` | the same however often the tap is handed on, also in a later launch | the adapter's sequence of the stored tap |
+| `at` | when the person tapped, in epoch milliseconds | when the tap was stored |
+| `revision` | the revision of the content the activity showed | absent |
+| `late` | the application did not take the tap while its intent posted it | never |
+
+On iOS a tap that the application does not take within the intent's first two posts (200 ms) is kept in the
+application's container, at most 32 and 12 hours, and comes to the sink of a later kit, in this launch or the next,
+with `late` (activitykit 0.7.0). That is a tap that launched the application before it connected, or one whose
+process ended first. The activity may have ended since; its key is then the one the button was drawn with. An
+application that acts on a tap once keeps the ids it handled.
 
 ### Staleness
 

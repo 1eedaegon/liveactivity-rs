@@ -510,7 +510,7 @@ started as `Event::Started`. The steps are in
 
 | Event | When | iOS | Android |
 | --- | --- | --- | --- |
-| `Event::Action` | a button, a toggle or an action was tapped | ✓ | ✓ |
+| `Event::Action` | a button, a toggle or an action was tapped; `tap` says which tap and when | ✓ also a tap the app took late | ✓ |
 | `Event::State` | an activity has a new lifecycle state | every change while the app runs | the state it has when the backend is asked, once (`active`, `stale`, `ended`, `dismissed`) |
 | `Event::Started` | a layout activity began, also one a push started | ✓ | |
 | `Event::Updated` | a push changed the content of a layout activity | ✓ | |
@@ -519,6 +519,21 @@ started as `Event::Started`. The steps are in
 | `Event::Permissions` | the person changed what the app may do | ✓ | |
 | `Event::Opened` | the person opened the application from a notification | the application gets the URL itself | ✓ when the host reports the opening intent |
 | `Event::Unknown` | something this version has no event for | | ✓ when the AAR is of a later liveupdate than the crate |
+
+A tap that the app did not take at once, because the tap launched it or its
+process ended, comes to a later connection with `tap.late` (iOS); act on each
+`tap.id` once:
+
+```rust
+// `handled` is the application's own set of tap ids, kept across launches.
+if let Event::Action(action) = &event {
+    if let Some(id) = &action.tap.id {
+        if !handled.insert(id.clone()) {
+            return; // this tap was handled already
+        }
+    }
+}
+```
 
 The enum may grow: match with a `_` arm. An activity is over when a `State`
 event says `ended` or `dismissed`, on either platform:
@@ -585,7 +600,10 @@ if permissions.notifications == PermissionState::Prompt {
 ```
 
 A feature is supported, unsupported or unknown, and unknown never counts as
-supported. On Android `capabilities.android_presentation` also says which
+supported. On iOS `capabilities.ios` says what the device runs of the later
+features (`push_to_start`, `push_channels`, `transient`, `scheduled_start`,
+`small_family`), so a request need not be tried to learn it. On Android
+`capabilities.android_presentation` also says which
 notification styles the device draws and which extensions it offers: links, a
 header clock, a style that changes, a last content that stays, an update that
 alerts, a public version and branding. On iOS Live Activities are a switch in

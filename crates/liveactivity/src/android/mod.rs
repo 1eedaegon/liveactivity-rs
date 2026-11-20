@@ -202,10 +202,8 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
                 .into_iter()
                 .filter_map(|event| match event.kind {
                     EventKind::Action { action_id } => Some(Event::Action(crate::ActionEvent {
-                        action_id,
-                        activity_id: event.activity_id,
-                        activity_key: None,
-                        on: None,
+                        tap: layouts::stored_tap(event.sequence, event.occurred_at),
+                        ..crate::ActionEvent::new(action_id, event.activity_id)
                     })),
                     EventKind::Opened { action_id } => Some(Event::Opened(crate::OpenedEvent {
                         activity_id: event.activity_id,

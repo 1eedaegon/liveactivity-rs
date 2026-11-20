@@ -478,12 +478,14 @@ fn a_stored_tap_comes_out_with_the_activity_key() {
                 activity_id: record.id.clone(),
                 activity_key: Some("snack:1".into()),
                 on: None,
+                tap: stored_tap(1, 1_000),
             }),
             Event::Action(ActionEvent {
                 action_id: "pet".into(),
                 activity_id: "gone".into(),
                 activity_key: None,
                 on: None,
+                tap: stored_tap(3, 1_000),
             }),
         ]
     );
@@ -738,6 +740,7 @@ fn a_store_that_cannot_be_read_loses_no_tap() {
             activity_id: record.id,
             activity_key: None,
             on: None,
+            tap: stored_tap(1, 1_000),
         })]
     );
 }
@@ -755,4 +758,15 @@ fn a_start_with_a_push_is_projected_without_it() {
     let same = f.layouts.start(&f.updates, again).unwrap();
     assert_eq!(same.id, record.id);
     assert_eq!(f.android.0.lock().unwrap().starts, 1);
+}
+
+#[test]
+fn req_e_009_a_stored_tap_says_its_sequence_and_time() {
+    // REQ-E-009
+    // The adapter's sequence is no other event's, and the time is when the tap was stored; a tap on Android has no
+    // revision and is never late.
+    assert_eq!(
+        serde_json::to_value(stored_tap(42, 1_800_000_000_000)).unwrap(),
+        serde_json::json!({"id": "42", "at": 1_800_000_000_000_u64})
+    );
 }

@@ -13,7 +13,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/1eedaegon/liveactivity-rs"
 
 [workspace.dependencies]
-activitykit = "0.6.6"
+activitykit = "0.7.0"
 futures-executor = "0.3"
 liveupdate = "0.7.1"
 serde = { version = "1", features = ["derive"] }

@@ -36,6 +36,7 @@ impl LiveActivityBackend for UnsupportedBackend {
                 layout: Unsupported,
                 push: Unsupported,
                 android_presentation: None,
+                ios: None,
             })
         })
     }

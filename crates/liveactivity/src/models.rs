@@ -202,6 +202,32 @@ pub struct Capabilities {
     /// that stays. Present when the Android backend runs layouts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub android_presentation: Option<crate::layout::PresentationCapabilities>,
+    /// What an iPhone runs of the features after the first Live Activities. Present on iOS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ios: Option<IosCapabilities>,
+}
+
+/// What an iPhone runs of the features after the first Live Activities, as ActivityKit's authorization says: an
+/// application need not try a request to learn it. Each is false on a device without Live Activities.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IosCapabilities {
+    /// A push-to-start token: iOS 17.2.
+    #[serde(default)]
+    pub push_to_start: bool,
+    /// A start that subscribes to a broadcast channel: iOS 18.
+    #[serde(default)]
+    pub push_channels: bool,
+    /// A transient start (`ios.transient`): iOS 18.
+    #[serde(default)]
+    pub transient: bool,
+    /// A scheduled start: iOS 26, in an application built with the iOS 26 SDK.
+    #[serde(default)]
+    pub scheduled_start: bool,
+    /// A layout's `small` region on a paired Apple Watch and in CarPlay: iOS 18, and the widget extension draws the
+    /// small family.
+    #[serde(default)]
+    pub small_family: bool,
 }
 
 fn unsupported() -> FeatureSupport {

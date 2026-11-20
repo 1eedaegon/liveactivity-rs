@@ -4,6 +4,27 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on activitykit 0.8.1.
+
+- Live Activities from iOS 16.1, ActivityKit's first release, where every command answered `UNSUPPORTED_PLATFORM`
+  below iOS 16.2. iOS 16.1 takes the content alone: a snapshot's `staleAt` and `relevance` do not reach the system,
+  a record has no relevance, no `stale` state comes, and `permissions().frequentPushes` is `denied`. The widget
+  extension can be built for iOS 16.1.
+- activitykit's widget draws an activity that a later crate or a push of a later server wrote, without the members
+  it does not know, and a node of a type it does not know as nothing, where it drew the activity empty. A request of
+  the application with such a member stays `INVALID_INPUT`.
+- A receipt of the Swift layer that cannot be read costs that receipt: `list()` no longer answers `NATIVE_ERROR`
+  for it. The Swift layer keeps the newest 256 receipts.
+- Breaking: activitykit's types, which this crate re-exports, are `#[non_exhaustive]`, so a later member or variant
+  breaks no code. A literal of them does not compile, nor a `match` on `Element`, `Value` or `Bindable` without a
+  `_` arm.
+
+When updating: build a layout with `Layout::new(lock_screen)` and `.island(..)`, `.background(..)`, `.keyline(..)`,
+`.url(..)` and `.small(..)`, an island with `Island::new()` and `IslandExpanded::new()`, a style with `Style::new()`
+and a pair of colors with `Color::adaptive(light, dark)`; give a `match` on activitykit's enums a `_` arm, and a
+pattern of a variant with named members `..`. Point the widget extension's package reference at activitykit 0.8.1,
+and lower its deployment target to iOS 16.1 to reach those devices.
+
 ## 0.10.2 - 2026-11-20
 
 - fix: every call's read costs less, with liveupdate 0.8.2 (#36) (`3bf1b53`)

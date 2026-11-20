@@ -211,9 +211,17 @@ enums are all `#[non_exhaustive]` and whose structs have constructors (`BigTextS
 The backend's `next_check` answers liveupdate's `NextCheck`, which may gain an answer: in a `_` arm, ask again
 shortly.
 
+activitykit follows it since 0.8.0: each of its public enums, each variant with named members and each struct whose
+members are all public is `#[non_exhaustive]`, and since 0.8.1 the contract's types have constructors again. A
+layout is built with `Layout::new(lock_screen)` and `.island`, `.background`, `.keyline`, `.url` and `.small`, with
+`Island::new`, `IslandExpanded::new`, `Style::new`, `Color::adaptive(light, dark)` and the node functions; a
+literal of them, or a `match` on `Element`, `Value` or `Bindable` without a `_` arm, does not compile. What the
+constructors build is written as the JSON that the literal was.
+
 Evidence: `api::req_c_012_every_public_enum_may_gain_a_variant`,
-`api::req_c_012_a_constructor_builds_what_the_literal_was` and
-`api::req_c_012_the_reexported_vocabulary_is_built_on_its_constructors`.
+`api::req_c_012_a_constructor_builds_what_the_literal_was`,
+`api::req_c_012_the_reexported_vocabulary_is_built_on_its_constructors` and
+`api::req_c_012_a_layout_is_built_on_activitykits_constructors`.
 
 ## REQ-I-001 Relevance
 
@@ -367,6 +375,33 @@ the last letter of a short trailing value (activitykit's iOS 26.3 simulator). Th
 written.
 
 Evidence: `engine_fixtures::req_i_015_the_engines_widget_keeps_the_expanded_islands_corners_clear`.
+
+## REQ-I-016 Live Activities from iOS 16.1
+
+An iPhone runs Live Activities from iOS 16.1, ActivityKit's first release, as activitykit does since 0.8.0, which
+this crate builds on; an iPad from iPadOS 17. Below that every command answers `UNSUPPORTED_PLATFORM`, whose message
+says the two floors. On iOS 16.1 ActivityKit takes the content alone: a snapshot's `staleAt` and `relevance` do not
+reach the system, so the stale nodes are never drawn, no `stale` state comes, and a record has no relevance (it keeps
+the `staleAt` it was given). The person's frequent-pushes setting begins with iOS 16.2: on 16.1
+`permissions().frequentPushes` is `denied`. An alert comes with an update as on later versions. The widget
+extension can be built for iOS 16.1, and the setup and the README name the floor that activitykit has.
+
+Evidence: `engine_fixtures::req_i_016_the_engines_iphones_begin_with_ios_16_1` and
+`ios::tests::req_i_016_a_record_without_the_systems_score_has_no_relevance`. activitykit runs iOS 16.1 on no
+simulator of its CI; its tests of the floors are its own.
+
+## REQ-I-017 Activities of a later version
+
+A request with a member, a node type or a value that this version does not know is `INVALID_INPUT`, on every
+platform, as before. activitykit's widget reads leniently since 0.8.0 what it did not get from this application's
+requests: a content state or a layout that a later crate or a push of a later server wrote is drawn without the
+members the widget does not know, and a node of a type it does not know is drawn as nothing, where the activity was
+drawn empty. A value it does not know of a member it knows still refuses the layout. A receipt of the Swift layer
+that cannot be read costs that receipt, not the list: `list()` answers `NATIVE_ERROR` only for a file that cannot be
+opened or written, and a load keeps the newest 256.
+
+Evidence: `contract::req_i_017_a_request_that_this_version_cannot_read_in_full_is_refused`. The widget's reading
+and the receipts are run by activitykit's tests.
 
 ## REQ-E-002 Started, state and permission events
 

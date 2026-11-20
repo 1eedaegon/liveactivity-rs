@@ -100,31 +100,17 @@ pub(crate) fn layout(template: Template) -> (Layout, BTreeMap<String, Style>) {
             symbol("timer"),
         ),
     };
-    let layout = Layout {
-        lock_screen: card(template, "status", 8.0).style("card"),
-        island: Some(Island {
-            expanded: Some(IslandExpanded {
-                center: Some(card(template, "caption", 6.0)),
-                ..IslandExpanded::default()
-            }),
-            compact_leading: Some(leading),
-            compact_trailing: Some(trailing),
-            minimal: Some(minimal),
-            margins: None,
-        }),
+    // A watch and CarPlay show the compact parts of a template, as the system arranges them: no small region.
+    let layout = Layout::new(card(template, "status", 8.0).style("card"))
+        .island(
+            Island::new()
+                .expanded(IslandExpanded::new().center(card(template, "caption", 6.0)))
+                .compact_leading(leading)
+                .compact_trailing(trailing)
+                .minimal(minimal),
+        )
         // The system's secondary background, in light and dark.
-        background: Some(
-            Color::Adaptive {
-                light: "#F2F2F7".into(),
-                dark: "#1C1C1E".into(),
-            }
-            .into(),
-        ),
-        keyline: None,
-        url: None,
-        // A watch and CarPlay show the compact parts of a template, as the system arranges them.
-        small: None,
-    };
+        .background(Color::adaptive("#F2F2F7", "#1C1C1E"));
     (layout, styles())
 }
 

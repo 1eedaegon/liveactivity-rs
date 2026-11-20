@@ -30,7 +30,8 @@ pub(crate) fn millis(at: SystemTime) -> Option<u64> {
     u64::try_from(at.duration_since(UNIX_EPOCH).ok()?.as_millis()).ok()
 }
 
-/// activitykit's start, or `INVALID_INPUT` for a channel that is no id, which the check of the request keeps out.
+/// activitykit's start, or `INVALID_INPUT` for a channel that is no id, which the check of the request keeps out, and
+/// for a kind of push that a later activitykit adds and this version cannot start.
 pub(crate) fn start_of(spec: StartSpec) -> activitykit::Result<Start> {
     let start = Start::new(spec.layout, spec.values)
         .key(spec.key)
@@ -56,11 +57,15 @@ pub(crate) fn start_of(spec: StartSpec) -> activitykit::Result<Start> {
         Some(scheduled) => start.scheduled(time(scheduled.at), alert_of(scheduled.alert)),
         None => start,
     };
-    Ok(match spec.push {
-        Some(LayoutPush::Token) => start.push(Push::Token),
-        Some(LayoutPush::Channel(id)) => start.push(Push::Channel(ChannelId::new(id)?)),
-        None => start,
-    })
+    match spec.push {
+        Some(LayoutPush::Token) => Ok(start.push(Push::Token)),
+        Some(LayoutPush::Channel(id)) => Ok(start.push(Push::Channel(ChannelId::new(id)?))),
+        None => Ok(start),
+        // A start without the push it asked for would be one the application did not ask for.
+        Some(_) => Err(activitykit::Error::InvalidInput(
+            "A push of a kind this version cannot start".into(),
+        )),
+    }
 }
 
 pub(crate) fn update_of(spec: UpdateSpec) -> Update {

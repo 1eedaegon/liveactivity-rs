@@ -95,24 +95,18 @@ async fn progress_and_timer(live: &LiveActivity) -> Result<()> {
 
 /// A layout of the application's own: a tree of nodes, fixed at start, and values that updates replace.
 async fn layout(live: &LiveActivity) -> Result<String> {
-    let layout = Layout {
-        lock_screen: vstack([
-            text(Bound::key("title")),
-            progress("done"),
-            // A button: its tap reaches the event sink as `Event::Action`.
-            button("track", text("Track")),
-        ]),
-        island: None,
-        background: None,
-        keyline: None,
-        url: None,
-        // What a paired Apple Watch and CarPlay show, when the widget extension draws the small family: a glance,
-        // without buttons. Android has no place for it and names `layout.small`.
-        small: Some(hstack([
-            symbol("shippingbox.fill"),
-            text(Bound::key("title")),
-        ])),
-    };
+    let layout = Layout::new(vstack([
+        text(Bound::key("title")),
+        progress("done"),
+        // A button: its tap reaches the event sink as `Event::Action`.
+        button("track", text("Track")),
+    ]))
+    // What a paired Apple Watch and CarPlay show, when the widget extension draws the small family: a glance,
+    // without buttons. Android has no place for it and names `layout.small`.
+    .small(hstack([
+        symbol("shippingbox.fill"),
+        text(Bound::key("title")),
+    ]));
     let values = values! { "title" => "Delivery 7", "done" => 0.4 }.into_inner();
     let start = LayoutStartInput::new("delivery:7", layout, LayoutSnapshot::new(0, values));
     let record = live.start_layout(start).await?;
@@ -128,30 +122,24 @@ async fn layout(live: &LiveActivity) -> Result<String> {
 /// and its actions open the URLs, a label is the text of what a notification cannot draw, and the record names
 /// what was left out.
 async fn links_accessibility_and_motion(live: &LiveActivity) -> Result<()> {
-    let layout = Layout {
-        lock_screen: vstack([
-            // What VoiceOver reads of a node that has no text of its own.
-            progress("done").accessibility(
-                Accessibility::new()
-                    .label("Delivery progress")
-                    .value(Bound::key("percent")),
-            ),
-            // Hidden on a locked device, when the person asked for that.
-            text(Bound::key("address")).sensitive(),
-            // Shown while `arrived` is true, and how it comes and goes.
-            text("At the door")
-                .when("arrived")
-                .transition(Transition::MoveTop),
-            // A tap on the label opens the application with this URL.
-            link("myapp://delivery/9/map", text("Map")),
-        ]),
-        island: None,
-        background: None,
-        keyline: None,
-        // A tap anywhere else on the activity.
-        url: Some("myapp://delivery/9".into()),
-        small: None,
-    };
+    let layout = Layout::new(vstack([
+        // What VoiceOver reads of a node that has no text of its own.
+        progress("done").accessibility(
+            Accessibility::new()
+                .label("Delivery progress")
+                .value(Bound::key("percent")),
+        ),
+        // Hidden on a locked device, when the person asked for that.
+        text(Bound::key("address")).sensitive(),
+        // Shown while `arrived` is true, and how it comes and goes.
+        text("At the door")
+            .when("arrived")
+            .transition(Transition::MoveTop),
+        // A tap on the label opens the application with this URL.
+        link("myapp://delivery/9/map", text("Map")),
+    ]))
+    // A tap anywhere else on the activity.
+    .url("myapp://delivery/9");
     let values = values! {
         "done" => 0.4, "percent" => "40 percent", "address" => "12 Hill Street", "arrived" => false,
     }
@@ -167,20 +155,13 @@ async fn links_accessibility_and_motion(live: &LiveActivity) -> Result<()> {
 /// stale nodes, without the application running. Android shows the toggle as an action whose title has a check
 /// mark while it is on, draws the content as it is while fresh, and tells the sink that the activity is stale.
 async fn toggle_and_staleness(live: &LiveActivity, stale_at: u64) -> Result<()> {
-    let layout = Layout {
-        lock_screen: vstack([
-            // Drawn while the content is fresh, and the other in its place once its stale date has passed.
-            text(Bound::key("eta")).unless_stale(),
-            text("No signal").when_stale(),
-            // A switch that shows `muted`. A tap asks for the other state and changes nothing itself.
-            toggle("mute", "muted", text("Mute")),
-        ]),
-        island: None,
-        background: None,
-        keyline: None,
-        url: None,
-        small: None,
-    };
+    let layout = Layout::new(vstack([
+        // Drawn while the content is fresh, and the other in its place once its stale date has passed.
+        text(Bound::key("eta")).unless_stale(),
+        text("No signal").when_stale(),
+        // A switch that shows `muted`. A tap asks for the other state and changes nothing itself.
+        toggle("mute", "muted", text("Mute")),
+    ]));
     let values = values! { "eta" => "6 min", "muted" => false }.into_inner();
     let mut snapshot = LayoutSnapshot::new(0, values);
     snapshot.stale_at = Some(stale_at);
@@ -478,14 +459,7 @@ fn main() -> Result<()> {
         println!("image: {}", code(image(&live, b"not a png").await));
         let start = LayoutStartInput::new(
             "delivery:8",
-            Layout {
-                lock_screen: text("Delivery 8"),
-                island: None,
-                background: None,
-                keyline: None,
-                url: None,
-                small: None,
-            },
+            Layout::new(text("Delivery 8")),
             LayoutSnapshot::new(0, Default::default()),
         );
         println!(

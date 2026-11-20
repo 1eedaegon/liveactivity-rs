@@ -38,7 +38,7 @@ mod blocking;
 /// plugin re-exports this as its own types.
 pub mod contract {
     pub use crate::error::{ERROR_CODES, Error, Result};
-    pub use crate::event::{OpenedEvent, StartedEvent, StateEvent, UnknownEvent};
+    pub use crate::event::{HandledEvent, OpenedEvent, StartedEvent, StateEvent, UnknownEvent};
     pub use crate::image::{
         ImageInput, MAX_IMAGE_BYTES, MAX_IMAGE_HEIGHT, MAX_IMAGE_WIDTH, check_image,
     };
@@ -73,7 +73,8 @@ pub use backend::{BackendFuture, LiveActivityBackend};
 pub use blocking::{block_on, wait};
 pub use error::{ERROR_CODES, Error, Result};
 pub use event::{
-    BackendContext, Event, EventSink, OpenedEvent, StartedEvent, StateEvent, UnknownEvent,
+    BackendContext, Event, EventSink, HandledEvent, OpenedEvent, StartedEvent, StateEvent,
+    UnknownEvent,
 };
 pub use image::{
     ImageInput, MAX_IMAGE_BYTES, MAX_IMAGE_HEIGHT, MAX_IMAGE_WIDTH, check_image, write as write_png,

@@ -442,6 +442,15 @@ Evidence: `ios::kit::tests::req_e_009_a_tap_of_activitykit_says_which_tap_it_is`
 `android::layouts::tests::req_e_009_a_stored_tap_says_its_sequence_and_time` and
 `contract::req_e_009_a_tap_is_written_with_what_is_known_of_it`.
 
+## REQ-E-010 A tap that the application's component took
+
+A tap whose target took it with `LiveUpdateActions.take` is stored by liveupdate as handled since 0.8.0, and
+reaches the sink as `Event::Handled`: the activity's id, its key when the backend knows it, the action id and what
+is known of the tap (`tap`, with the adapter's sequence and the time it was stored). It is no `Event::Action`: the
+component acted on it already. In JSON it is `HandledEvent { activityId, activityKey?, actionId, tap? }`.
+
+Evidence: `exchange::req_e_010_a_handled_tap_is_reported_and_is_no_action`.
+
 ## REQ-A-001 Android content of a snapshot
 
 A snapshot's Android content is shown as given, in place of the projection of the layout. A snapshot without one
@@ -730,7 +739,7 @@ Evidence: `exchange::req_a_026_a_start_without_room_in_the_store_is_a_system_lim
 
 ## REQ-A-027 The AAR this crate is built with
 
-The crate is built and tested with liveupdate 0.7.1, whose AAR is `liveupdate-android-0.7.1.aar`. The setup
+The crate is built and tested with liveupdate 0.8.0, whose AAR is `liveupdate-android-0.8.0.aar`. The setup
 document names it, what a watch application adds, and what a crate and an AAR of two versions do together: an
 AAR from 0.7.0 posts a record with a member it does not know without it, and an earlier one refuses such a
 request with `INVALID_INPUT`.
@@ -747,6 +756,43 @@ reads as false when it is left out, so a request written for an earlier version 
 of a layout asks for it by itself (REQ-A-023).
 
 Evidence: `api::req_a_028_a_progress_style_from_its_constructor_is_styled_by_its_progress`.
+
+## REQ-A-029 A tap that runs the application's own component
+
+An action can run a service, a foreground service or a receiver of the application at once, with no screen and no
+process running, as liveupdate offers it since 0.8.0: its tap goes by an explicit, immutable PendingIntent to that
+component of the application's own package. An Android content's action takes `target` as liveupdate takes it
+(`{ kind: "service" | "foregroundService" | "broadcast", component, action? }`). A layout's start takes
+`android.targets`, an object of action ids to targets, and the projection puts each target on the action of its
+button or toggle. Each key is the `actionId` of a button or a toggle of the lock screen tree, and each target one
+that liveupdate takes (a component of two or more Java identifiers, an intent action of printable ASCII), else the
+start is `INVALID_INPUT` on every platform; a target beside a link is liveupdate's refusal too. iOS ignores the
+option. `capabilities().android_presentation.action_targets` says whether the device's adapter delivers targets; a
+start or an update that would post one where it does not answers `UNSUPPORTED_FEATURE` and posts nothing.
+
+Evidence: `contract::req_a_029_a_target_is_checked_on_every_platform` and
+`exchange::req_a_029_a_layouts_button_and_a_contents_action_carry_their_targets`.
+
+## REQ-A-030 A backend from the raw pointers of a service
+
+`LiveUpdateBackend::android_from_raw(vm, context)` builds the backend on liveupdate's AAR from the process's
+`JavaVM` and a context, raw JNI pointers valid on the calling thread, as liveupdate's `android_from_raw` does since
+0.8.0: for a service of the application that runs its own Rust, where no activity initialized `ndk-context`. It is
+unsafe for those pointers. The backend then runs as the one of `android()` does.
+
+Evidence: CI's `cargo check --locked -p liveactivity --target aarch64-linux-android`.
+
+## REQ-A-031 What the application's own code does
+
+The setup documents what an application writes beside the crate for liveupdate 0.8.0: a target's component in its
+manifest, not exported and in the application's process; `LiveUpdateActions.take(context, intent)` first in that
+component, which answers the tap (or that a locked device below Android 12 withheld it) and records it as handled;
+`LiveUpdateEvents.addNativeListener`, which is told of every stored event and takes nothing from the queue;
+`LiveUpdateForeground.attachOr(service, type, fallbackId, fallback)`, which keeps a service in the foreground with
+its own notification until an activity holds the placement; and `res/raw/keep.xml` for an icon that only a
+request names. The AAR of the lock has each of those methods.
+
+Evidence: `engine_fixtures::req_a_031_the_aar_has_what_the_setup_names`.
 
 ## REQ-N-001 No framework in the crate
 

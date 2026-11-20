@@ -42,6 +42,23 @@ pub struct OpenedEvent {
     pub action_id: Option<String>,
 }
 
+/// A tap that the application's own component took (Android): the action's target ran it, and the component
+/// recorded it with liveupdate's `LiveUpdateActions.take`. It is no [`Event::Action`]: the component acted on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandledEvent {
+    /// The handle of the activity.
+    pub activity_id: String,
+    /// Absent when the backend no longer knows that activity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_key: Option<String>,
+    /// The id of the action whose target took the tap.
+    pub action_id: String,
+    /// What is known of the tap: the adapter's sequence and when it was stored.
+    #[serde(default, skip_serializing_if = "crate::layout::Tap::is_unknown")]
+    pub tap: crate::layout::Tap,
+}
+
 /// An event of a kind that this version does not know (Android): liveupdate's library of a later version stored
 /// it, and liveupdate read what it knows of it, which is the activity. The application's crate is older than its
 /// AAR, and what happened is in that version's documents.
@@ -81,6 +98,8 @@ pub enum Event {
     Opened(OpenedEvent),
     /// Something that this version has no event for (Android).
     Unknown(UnknownEvent),
+    /// A tap that the application's own component took (Android).
+    Handled(HandledEvent),
 }
 
 /// Where a backend's events go: implemented by a framework plugin, or any closure.

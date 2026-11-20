@@ -274,7 +274,9 @@ The layout and the styles are fixed at start. An update sends values only.
   "visibility": "private",
   "publicVersion": { "title": "Delivery", "status": "On the way" },
   "placement": "foreground",
-  "wearOngoingActivity": false
+  "wearOngoingActivity": false,
+  "targets": { "record": { "kind": "foregroundService", "component": "com.example.RecorderService",
+                           "action": "com.example.RECORD" } }
 }
 ```
 
@@ -285,8 +287,12 @@ The layout and the styles are fixed at start. An update sends values only.
 | `placement` | Optional. `tagged`, which it is when absent, or `foreground`: the notification is the one that a foreground service of the application holds, so that the service shows no second one. One running activity has it at a time; a second is `SYSTEM_LIMIT`. On a device that does not offer `foregroundPlacement` the start is `UNSUPPORTED_FEATURE`. The placement is part of the request: another one under a running key is `CONFLICT`. The service is the application's ([Android setup](android-setup.md#a-foreground-service)) |
 | `wearOngoingActivity` | Optional. `false`: the activity does not carry [a watch's Ongoing Activity](#a-watchs-ongoing-activity), in any of its snapshots. Absent or `true`, it carries one where the device offers it (`wearOngoingActivity` in the capabilities). Anything but a boolean is `INVALID_INPUT`, on every platform |
 
+| `targets` | Optional. An object of action ids to targets: what runs the tap of that button or toggle of the lock screen tree, a service, a foreground service or a receiver of the application, at once and with no screen (liveupdate 0.8.0). A target is `{ "kind": "service" \| "foregroundService" \| "broadcast", "component", "action"? }`: `component` a class of the application's package, two or more Java identifiers joined by dots and at most 256 characters, and `action` an intent action of printable ASCII without spaces, at most 256. A key that names no button or toggle of the lock screen tree, and a target that liveupdate does not take, are `INVALID_INPUT` on every platform. The projection puts each target on its action, a link's excepted; an Android content names the targets of its own actions. A device that does not deliver targets (`androidPresentation.actionTargets`) answers `UNSUPPORTED_FEATURE`. iOS ignores it |
+
 In Rust: `AndroidOptions::new(visibility)`, then set `public_version` or `placement`, or call
-`with_wear_ongoing_activity(false)`.
+`with_wear_ongoing_activity(false)` and `with_target(action_id, target)`. The tap that a target's
+component took reaches the sink as `Event::Handled` ([A tap that runs the application's own
+code](android-setup.md#a-tap-that-runs-your-own-code)).
 
 #### A watch's Ongoing Activity
 
@@ -464,6 +470,7 @@ names `alert`.
 | --- | --- | --- |
 | `openUrl` | The URL a tap on the notification opens in the application. Without it a tap opens the launch activity | `links` |
 | `actions[].openUrl` | The URL the action opens in the application. Such an action sends no tap | `links` |
+| `actions[].target` | A service, a foreground service or a receiver of the application that runs the tap at once, as [a start's `targets`](#options-of-a-start-on-android) has it; not beside `openUrl`. Its component takes the tap with `LiveUpdateActions.take`, and the tap reaches the sink as `Event::Handled` | `actionTargets` |
 | `chronometer` | `{ "timer": { "startedAt", "endsAt" }, "countsDown" }`: a clock in the header, beside any style but `timer`, which is that clock alone | `chronometer` |
 | `alert` | `true`: this revision alerts again. An [alert of the update](#update_layout) sets it for both platforms | `alert` |
 | `publicVersion` | `{ "title", "status" }`: what a secure lock screen shows of a private activity, with the bounds of the content's own | `publicVersion` |
@@ -605,7 +612,7 @@ and for the rules that follow a device:
   "actions": true, "images": true, "events": true, "samsungNowBar": false,
   "chronometer": true, "links": true, "styleChange": true, "delayedEnd": true,
   "foregroundPlacement": true, "alert": true, "publicVersion": true, "branding": true,
-  "scheduledStart": true, "exactStart": false, "wearOngoingActivity": false
+  "scheduledStart": true, "exactStart": false, "wearOngoingActivity": false, "actionTargets": true
 }
 ```
 
@@ -613,7 +620,8 @@ and for the rules that follow a device:
 another style than the activity shows, `delayedEnd` is the `after` policy, `alert` an update that
 alerts, and `foregroundPlacement` the `placement` of a start. `scheduledStart` is
 [a scheduled start](#a-scheduled-start), and `exactStart` says whether it begins at its time or
-when Android chooses. `wearOngoingActivity` says whether a notification carries
+when Android chooses. `actionTargets` says whether an action may run a component of the application (a start's
+`targets`, an action's `target`). `wearOngoingActivity` says whether a notification carries
 [a watch's Ongoing Activity](#a-watchs-ongoing-activity). `links` and `chronometer` also decide what
 [a layout shows](#what-android-shows). A member that the Android side does not report is false.
 Elsewhere `androidPresentation` is absent.
@@ -703,6 +711,7 @@ match with a `_` arm.
 | `Event::Permissions` | `Permissions` | iOS: what the person allows, after a change in Settings |
 | `Event::Opened` | `OpenedEvent` | Android: the person opened the application from a notification, as the host reported it |
 | `Event::Unknown` | `UnknownEvent` | Android: an event of a kind that this version does not know, which the AAR of a later liveupdate stored. It names the activity and nothing else: the application's crate is older than its AAR |
+| `Event::Handled` | `HandledEvent` | Android: a tap that the target of its action ran, and that the application's component took with `LiveUpdateActions.take` (liveupdate 0.8.0): the activity's id and key, the action id and `tap`. It is no `Event::Action`: the component acted on it |
 
 ```json
 { "actionId": "track", "activityId": "9B1D4C70-...", "activityKey": "delivery:7" }

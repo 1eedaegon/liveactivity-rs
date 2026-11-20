@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.7.1.aar` from liveupdate's
+Put `liveupdate-android-0.8.0.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too, and in a watch application the library of [its Ongoing Activity](#a-watch):
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.7.1.aar"))
+    implementation(files("libs/liveupdate-android-0.8.0.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
     implementation("androidx.wear:wear-ongoing:1.1.0") // a watch application only
 }
@@ -90,6 +90,23 @@ let live = liveactivity::LiveActivity::builder().event_sink(sink).build()?;
 ```
 
 That default has no files, so it runs the progress and timer templates only (step 4).
+
+A service of the application that runs its own Rust, where no activity initialized `ndk-context`,
+builds the backend from the raw pointers its JNI entry has (liveupdate 0.8.0):
+
+```rust
+// In the service's JNI entry, `env.with_env(|env| { .. })` with its `context: JObject`, off the main thread.
+let vm = env.get_java_vm()?;
+// SAFETY: the process's VM, and a context that is valid on this thread for the call.
+let backend = unsafe { LiveUpdateBackend::android_from_raw(vm.get_raw().cast(), context.as_raw().cast()) }?
+    .with_files(AndroidFiles::new("Recorder", files_dir));
+let live = LiveActivity::builder().backend(backend).build()?;
+```
+
+liveupdate's `examples/service.rs` has a whole entry of a service.
+
+The pointers must be the process's `JavaVM` and a `Context`, valid on the calling thread for the
+call; a null one is `NATIVE_ERROR`.
 
 ### over_bridge(bridge)
 
@@ -331,6 +348,71 @@ LiveUpdateForeground.setListener { stopService(Intent(this, DeliveryService::cla
 One running activity has the placement at a time: a second start with it is `SYSTEM_LIMIT`. A
 device that does not offer `foregroundPlacement` answers `UNSUPPORTED_FEATURE`. Without a service
 the notification is an ordinary one.
+
+A service that may run before the activity starts, or after it ends, keeps a notification of its
+own with `attachOr` (liveupdate 0.8.0): Android needs one within seconds of the start.
+
+```kotlin
+// The activity's notification when one holds the placement (true), else this one under its own id (false).
+LiveUpdateForeground.attachOr(this, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE, RECORDER_ID) {
+    NotificationCompat.Builder(this, CHANNEL).setContentTitle("Recorder").setSmallIcon(R.drawable.ic_rec).build()
+}
+```
+
+A later `attach` or `attachOr` that finds the activity takes the fallback away, so one notification
+shows; when the activity ends, the service shows its fallback again and stays in the foreground.
+
+### A tap that runs your own code
+
+An action can run a service, a foreground service or a receiver of the application at once, with
+no screen, from the lock screen and while no process of the application runs (liveupdate 0.8.0):
+a recorder's Record, a player's Pause. A layout's start names the target of a button or a toggle
+by its action id; an Android content's action names its own.
+
+```rust
+use liveactivity::{ActionTarget, AndroidOptions, AndroidVisibility, TargetKind};
+
+let record = ActionTarget {
+    action: Some("com.example.RECORD".into()),
+    ..ActionTarget::new(TargetKind::ForegroundService, "com.example.RecorderService")
+};
+start.android = Some(AndroidOptions::new(AndroidVisibility::Public).with_target("record", record));
+```
+
+The component is a class of the application's package, declared in its manifest, not exported,
+and in the application's process. It takes the tap first, before anything else, with
+`LiveUpdateActions.take`, which records it as handled, so that the queue does not act on it a
+second time:
+
+```kotlin
+override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    val tap = LiveUpdateActions.take(this, intent)
+    if (tap != null && !tap.withheld) toggleRecording() // tap.activityId, tap.actionId
+    return START_STICKY
+}
+```
+
+Below Android 12 a locked device sends the tap of an action that asks for the unlock without
+asking: `take` answers it `withheld`, and the component must not act on it. The tap then reaches
+the sink as `Event::Handled`, not as `Event::Action`. A device whose adapter does not deliver
+targets (`android_presentation.action_targets` false) refuses such a start or update with
+`UNSUPPORTED_FEATURE` and posts nothing.
+
+Code of the application that wants every stored event as it is stored, without taking it from the
+queue that the backend drains, adds a listener of its own:
+`LiveUpdateEvents.addNativeListener { event -> … }` (`removeNativeListener` takes it away). The one
+listener of `setListener` is the backend's: replacing it stops the backend's wake-ups.
+
+### An icon that only a request names
+
+An icon of `IconSource::Resource("ic_order")` is found by its name among the drawables and then the
+mipmaps, and nothing in the application's code names it. With resource shrinking
+(`isShrinkResources = true`) the build removes it, and a start that names it fails with
+`INVALID_INPUT`. Keep such icons in `res/raw/keep.xml`:
+
+```xml
+<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@drawable/ic_order,@mipmap/ic_brand" />
+```
 
 ### A scheduled start
 

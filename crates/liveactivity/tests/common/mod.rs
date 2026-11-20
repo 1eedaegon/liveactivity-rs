@@ -190,6 +190,19 @@ impl MemoryDriver {
         state.observed.extend(shown);
     }
 
+    /// The application's own component took a tap of a target with `LiveUpdateActions.take`: the Android side
+    /// stores it as handled.
+    pub fn handled(&self, id: &str, sequence: u64, action: &str) {
+        let event: ActivityEvent = serde_json::from_value(json!({
+            "sequence": sequence,
+            "activityId": id,
+            "occurredAt": 1_800_000_000_000_u64,
+            "kind": {"kind": "handled", "actionId": action},
+        }))
+        .unwrap();
+        self.lock().events.events.push(event);
+    }
+
     /// The person removes a notification: it is gone, and the Android side queues the dismissal.
     pub fn dismiss(&self, id: &str, sequence: u64) {
         self.lock().observed.remove(id);

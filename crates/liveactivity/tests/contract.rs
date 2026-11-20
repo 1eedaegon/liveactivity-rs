@@ -594,3 +594,59 @@ fn req_e_009_a_tap_is_written_with_what_is_known_of_it() {
         json!({"id": "42", "at": 1_000})
     );
 }
+
+#[test]
+fn req_a_029_a_target_is_checked_on_every_platform() {
+    // REQ-A-029
+    let start = |android: serde_json::Value| {
+        json!({"activityKey": "rec:1", "schemaVersion": 2, "fallback": "notification",
+            "layout": {"lockScreen": {"type": "vstack", "children": [
+                {"type": "text", "value": "Recorder"},
+                {"type": "button", "actionId": "record", "child": {"type": "text", "value": "Record"}},
+                {"type": "link", "url": "myapp://open", "child": {"type": "text", "value": "Open"}},
+            ]}},
+            "snapshot": {"revision": 0, "values": {}}, "android": android})
+    };
+    let target =
+        json!({"kind": "foregroundService", "component": "dev.example.app.RecorderService"});
+    let verdict = |android: serde_json::Value| {
+        validate_request("start_layout", start(android)).map_err(|error| error.code)
+    };
+    assert_eq!(
+        verdict(json!({"visibility": "public", "targets": {"record": target}})),
+        Ok(())
+    );
+    for wrong in [
+        // A key that names no button or toggle of the lock screen tree.
+        json!({"visibility": "public", "targets": {"missing": target}}),
+        json!({"visibility": "public", "targets": {"link:1": target}}),
+        // A target liveupdate does not take.
+        json!({"visibility": "public", "targets": {"record": {"kind": "foregroundService", "component": "Recorder"}}}),
+        json!({"visibility": "public", "targets": {"record": {"kind": "activity", "component": "dev.example.A"}}}),
+        json!({"visibility": "public", "targets": {"record": {"kind": "service", "component": "dev.example.S",
+            "action": "has space"}}}),
+        json!({"visibility": "public", "targets": {"record": {"kind": "service", "component": "dev.example.S",
+            "extra": 1}}}),
+        json!({"visibility": "public", "targets": null}),
+        json!({"visibility": "public", "targets": ["record"]}),
+    ] {
+        assert_eq!(
+            verdict(wrong.clone()),
+            Err("INVALID_INPUT".to_owned()),
+            "{wrong}"
+        );
+    }
+    // The options built in Rust write the same JSON.
+    let options = liveactivity::AndroidOptions::new(liveactivity::AndroidVisibility::Public)
+        .with_target(
+            "record",
+            liveactivity::ActionTarget::new(
+                liveactivity::TargetKind::ForegroundService,
+                "dev.example.app.RecorderService",
+            ),
+        );
+    assert_eq!(
+        serde_json::to_value(options).unwrap(),
+        json!({"visibility": "public", "targets": {"record": target}})
+    );
+}

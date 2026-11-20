@@ -4,6 +4,26 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.8.0, with its AAR `liveupdate-android-0.8.0.aar`: an action can run the application's own
+service or receiver at once, with no screen.
+
+- **A layout's target**: `android.targets` of a layout's start (`AndroidOptions::with_target(action_id, target)`),
+  an object of action ids to liveupdate's `ActionTarget { kind, component, action }`. The projection puts each on
+  its button's or toggle's action. A key that names no control of the lock screen tree, or a target liveupdate does
+  not take, is `INVALID_INPUT` on every platform; iOS ignores it.
+- **An Android content's action** takes `target` as liveupdate does. `ActionTarget` and `TargetKind` are
+  re-exported, and `capabilities().android_presentation.action_targets` says whether the device delivers targets;
+  where it does not, a start or an update with one is `UNSUPPORTED_FEATURE`.
+- **`Event::Handled(HandledEvent)`**: a tap that the target's component took with `LiveUpdateActions.take`, with
+  the activity's id and key, the action id and `tap`. It is no `Event::Action`.
+- **`LiveUpdateBackend::android_from_raw(vm, context)`**: the backend for a service's own Rust, without
+  `ndk-context`.
+- The setup documents `LiveUpdateActions.take`, `LiveUpdateEvents.addNativeListener`,
+  `LiveUpdateForeground.attachOr` and `res/raw/keep.xml`.
+
+When updating: take `liveupdate-android-0.8.0.aar`. A struct literal of `AndroidOptions` names `targets` or builds
+on `AndroidOptions::new`; a `match` on `Event` has its `_` arm already.
+
 ## 0.9.0 - 2026-11-20
 
 - feat: a tap says which tap it is, and the capabilities what an iPhone runs, on activitykit 0.7.0 (#33) (`6a42577`)

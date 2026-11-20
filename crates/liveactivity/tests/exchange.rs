@@ -2863,3 +2863,103 @@ fn stored(sequence: u64) -> liveactivity::Tap {
         ..liveactivity::Tap::default()
     }
 }
+
+#[test]
+fn req_a_029_a_layouts_button_and_a_contents_action_carry_their_targets() {
+    // REQ-A-029
+    let record_target = serde_json::json!({ "kind": "foregroundService", "component": "dev.example.app.RecorderService",
+        "action": "dev.example.app.RECORD" });
+    let start = |key: &str| {
+        let mut request = serde_json::to_value(ride(key, None)).unwrap();
+        request["android"] =
+            serde_json::json!({ "visibility": "public", "targets": { "pet": record_target } });
+        liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", request)
+            .unwrap()
+    };
+    let target_of = |driver: &MemoryDriver, id: &str, action: &str| {
+        driver
+            .posted(id)
+            .presentation
+            .unwrap()
+            .actions
+            .into_iter()
+            .find(|posted| posted.id == action)
+            .and_then(|posted| posted.target)
+            .map(|target| serde_json::to_value(target).unwrap())
+    };
+
+    // A device whose adapter delivers targets: the projected button carries the start's target, in every snapshot.
+    let offering = MemoryDriver::offering(|offered| offered.action_targets = true);
+    let (live, _events, driver) = android_on(offering, "targets");
+    let record = block_on(live.start_layout(start("rec:1"))).unwrap();
+    assert_eq!(
+        target_of(&driver, &record.id, "pet"),
+        Some(record_target.clone())
+    );
+    block_on(live.update_layout(layout_update(ride_update(&record.id, 1, None)))).unwrap();
+    assert_eq!(
+        target_of(&driver, &record.id, "pet"),
+        Some(record_target.clone())
+    );
+    // An Android content names its own: the start's target is the projection's alone.
+    let mut content = driving(60, "3 min");
+    content["presentation"]["actions"] = serde_json::json!([
+        { "id": "stop", "title": "Stop", "target": { "kind": "broadcast", "component": "dev.example.app.StopReceiver" } },
+        { "id": "pet", "title": "Pet" },
+    ]);
+    block_on(live.update_layout(layout_update(ride_update(
+        &record.id,
+        2,
+        Some(content.clone()),
+    ))))
+    .unwrap();
+    assert_eq!(
+        target_of(&driver, &record.id, "stop"),
+        Some(
+            serde_json::json!({ "kind": "broadcast", "component": "dev.example.app.StopReceiver" })
+        )
+    );
+    assert_eq!(target_of(&driver, &record.id, "pet"), None);
+
+    // A device that does not deliver them: the start is refused and nothing is posted.
+    let (live, _events, driver) = android_with_files("no-targets");
+    let refused = block_on(live.start_layout(start("rec:2"))).unwrap_err();
+    assert_eq!(refused.code, "UNSUPPORTED_FEATURE");
+    assert!(block_on(live.list_layout()).unwrap().is_empty());
+    let _ = driver;
+}
+
+#[test]
+fn req_e_010_a_handled_tap_is_reported_and_is_no_action() {
+    // REQ-E-010
+    let (live, events, driver) = android_with_files("handled");
+    let record = block_on(live.start_layout(ride("ride:7", None))).unwrap();
+    driver.handled(&record.id, 5, "pet");
+    block_on(live.sync_events()).unwrap();
+    let handled = events
+        .try_iter()
+        .find(|event| !matches!(event, Event::State(_) | Event::Started(_)))
+        .unwrap();
+    assert_eq!(
+        handled,
+        Event::Handled(liveactivity::HandledEvent {
+            activity_id: record.id.clone(),
+            activity_key: Some("ride:7".into()),
+            action_id: "pet".into(),
+            tap: stored(5),
+        })
+    );
+    assert!(
+        !events
+            .try_iter()
+            .any(|event| matches!(event, Event::Action(_)))
+    );
+    let Event::Handled(payload) = handled else {
+        panic!("a handled tap is `Event::Handled`");
+    };
+    assert_eq!(
+        serde_json::to_value(&payload).unwrap(),
+        serde_json::json!({ "activityId": record.id, "activityKey": "ride:7", "actionId": "pet",
+            "tap": { "id": "5", "at": 1_800_000_000_000_u64 } })
+    );
+}

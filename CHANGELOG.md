@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.9.0 - 2026-11-20
+
+- feat: a tap says which tap it is, and the capabilities what an iPhone runs, on activitykit 0.7.0 (#33) (`6a42577`)
+
 Built on activitykit 0.7.0. Its taps say which tap they are, and its authorization what the device runs.
 
 - **`ActionEvent.tap`**: `id`, `at` (epoch milliseconds), `revision` and `late`, each left out when unknown. On

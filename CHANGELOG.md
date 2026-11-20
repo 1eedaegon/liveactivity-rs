@@ -4,6 +4,15 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.8.1, with its AAR `liveupdate-android-0.8.1.aar`: a target's tap reads the stored receipts once
+below Android 12, where 0.8.0 read them twice. Nothing of this crate's API changes.
+
+- The setup and the contract say what liveupdate saw on a device: an update of the application that removes a
+  target's component makes every update of an activity that names it fail with `INVALID_INPUT`; name another
+  target, or none.
+
+When updating: take `liveupdate-android-0.8.1.aar`.
+
 ## 0.10.0 - 2026-11-20
 
 - feat: a tap that runs the application's own component, on liveupdate 0.8.0 (#34) (`94f8a10`)

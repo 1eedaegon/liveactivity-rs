@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.11.0 - 2026-11-20
+
+- feat: Live Activities from iOS 16.1 and layouts on activitykit's constructors, with activitykit 0.8.1 (#37) (`1c66f8b`)
+
 Built on activitykit 0.8.1.
 
 - Live Activities from iOS 16.1, ActivityKit's first release, where every command answered `UNSUPPORTED_PLATFORM`

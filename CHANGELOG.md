@@ -4,6 +4,12 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.8.2, with its AAR `liveupdate-android-0.8.2.aar`: the AAR passes the stored receipts on as they
+are, counted without parsing them, so every call's read costs less (160 records: 114 ms to 7 ms on the JVM, by
+liveupdate's measure). Nothing of liveupdate's API or JSON changes, nor of this crate's.
+
+When updating: take `liveupdate-android-0.8.2.aar`.
+
 ## 0.10.1 - 2026-11-20
 
 - fix: a target's tap reads the stored receipts once, with liveupdate 0.8.1 (#35) (`a17be64`)

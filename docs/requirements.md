@@ -739,7 +739,7 @@ Evidence: `exchange::req_a_026_a_start_without_room_in_the_store_is_a_system_lim
 
 ## REQ-A-027 The AAR this crate is built with
 
-The crate is built and tested with liveupdate 0.8.1, whose AAR is `liveupdate-android-0.8.1.aar`. The setup
+The crate is built and tested with liveupdate 0.8.2, whose AAR is `liveupdate-android-0.8.2.aar`. The setup
 document names it, what a watch application adds, and what a crate and an AAR of two versions do together: an
 AAR from 0.7.0 posts a record with a member it does not know without it, and an earlier one refuses such a
 request with `INVALID_INPUT`.

@@ -33,9 +33,10 @@ pub use activitykit::layout::{
 /// Android's notification styles, for the [`AndroidContent`] of a snapshot. A [`TimerStyle`] takes liveupdate's
 /// `Timer`, which is `liveactivity::liveupdate::Timer`.
 pub use liveupdate::{
-    AndroidPresentation, BigTextStyle, IconSource, Metric, MetricStyle, MetricValue,
+    ActionTarget, AndroidPresentation, BigTextStyle, IconSource, Metric, MetricStyle, MetricValue,
     NotificationAction, PresentationCapabilities, PresentationStyle, ProgressPoint,
-    ProgressSegment, ProgressStyle, PublicVersion, SamsungNowBar, SemanticStyle, TimerStyle,
+    ProgressSegment, ProgressStyle, PublicVersion, SamsungNowBar, SemanticStyle, TargetKind,
+    TimerStyle,
 };
 
 /// Lock screen visibility of the Android notification.
@@ -87,6 +88,12 @@ pub struct AndroidOptions {
     /// the activity, the projected ones and an Android content, whatever that says of it.
     #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
     pub wear_ongoing_activity: Option<bool>,
+    /// What runs the tap of a button or a toggle of the lock screen tree, by its action id: a service, a foreground
+    /// service or a receiver of the application, at once and with no screen. The projection puts each target on
+    /// its action; a device without `action_targets` answers `UNSUPPORTED_FEATURE`. An Android content names the
+    /// targets of its own actions.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub targets: BTreeMap<String, ActionTarget>,
 }
 
 impl AndroidOptions {
@@ -97,7 +104,15 @@ impl AndroidOptions {
             public_version: None,
             placement: None,
             wear_ongoing_activity: None,
+            targets: BTreeMap::new(),
         }
+    }
+
+    /// The options with `target` running the tap of the button or toggle `action_id`.
+    #[must_use]
+    pub fn with_target(mut self, action_id: impl Into<String>, target: ActionTarget) -> Self {
+        self.targets.insert(action_id.into(), target);
+        self
     }
 
     /// The options of an activity that carries a watch's Ongoing Activity, or does not.
@@ -451,7 +466,7 @@ pub struct Tap {
 }
 
 impl Tap {
-    fn is_unknown(&self) -> bool {
+    pub(crate) fn is_unknown(&self) -> bool {
         self == &Self::default()
     }
 }
@@ -645,12 +660,52 @@ impl LayoutStartInput {
     }
 }
 
+impl LayoutStartInput {
+    /// The rule of the targets among the Android options: each names a button or a toggle of the lock screen tree,
+    /// which is what Android projects, and each is a target that liveupdate takes on an action of that id.
+    fn targets_fit(&self) -> bool {
+        let Some(android) = &self.android else {
+            return true;
+        };
+        android.targets.iter().all(|(action_id, target)| {
+            let action = NotificationAction {
+                target: Some(target.clone()),
+                ..NotificationAction::new(action_id.clone(), "Action")
+            };
+            let bounded = AndroidPresentation {
+                actions: vec![action],
+                ..AndroidPresentation::new(PresentationStyle::Standard)
+            };
+            controls(&self.layout.lock_screen, action_id) && bounded.validate().is_ok()
+        })
+    }
+}
+
+/// Whether a button or a toggle of the tree has `action_id`, shown or not.
+pub(crate) fn controls(node: &Node, action_id: &str) -> bool {
+    match &node.element {
+        Element::Button { action_id: id, .. } | Element::Toggle { action_id: id, .. }
+            if id == action_id =>
+        {
+            true
+        }
+        Element::Button { child, .. } | Element::Toggle { child, .. } => controls(child, action_id),
+        Element::Vstack { children, .. }
+        | Element::Hstack { children, .. }
+        | Element::Zstack { children, .. } => {
+            children.iter().any(|child| controls(child, action_id))
+        }
+        _ => false,
+    }
+}
+
 impl Validate for LayoutStartInput {
     fn validate(&self) -> Result<()> {
         self.validate_contract()?;
         self.snapshot.beside_the_layout()?;
         require(self.takes_public_version_of(&self.snapshot))?;
         require(self.public_version_of_the_start_fits())?;
+        require(self.targets_fit())?;
         self.scheduled.as_ref().map_or(Ok(()), Validate::validate)?;
         unmarked(&self.snapshot)
     }

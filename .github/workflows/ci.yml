@@ -34,6 +34,7 @@ jobs:
       - run: bash tests/release/run.sh
       # The JNI path of the Android backend compiles only for Android.
       - run: rustup target add aarch64-linux-android
+      # REQ-A-030: the backend built from raw JNI pointers exists on Android only, and builds here.
       - run: cargo check --locked -p liveactivity --target aarch64-linux-android
 
   msrv:

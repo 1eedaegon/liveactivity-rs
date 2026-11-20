@@ -232,6 +232,39 @@ fn req_i_015_the_engines_widget_keeps_the_expanded_islands_corners_clear() {
     }
 }
 
+#[test]
+fn req_a_031_the_aar_has_what_the_setup_names() {
+    // REQ-A-031
+    let kotlin = package("liveupdate")
+        .0
+        .join("android/src/main/java/io/github/eedaegon/liveupdate");
+    let read =
+        |file: &str| fs::read_to_string(kotlin.join(file)).expect("liveupdate ships its Kotlin");
+    let actions = read("LiveUpdateActions.kt");
+    assert!(
+        actions.contains("fun take(context: Context, intent: Intent?)"),
+        "take"
+    );
+    let events = read("LiveUpdateEvents.kt");
+    assert!(
+        events.contains("fun addNativeListener(") && events.contains("fun removeNativeListener("),
+        "listeners"
+    );
+    let foreground = read("LiveUpdateForeground.kt");
+    assert!(foreground.contains("fun attachOr("), "attachOr");
+    let setup = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/android-setup.md");
+    let setup = fs::read_to_string(setup).expect("the setup document is in the repository");
+    for named in [
+        "LiveUpdateActions.take",
+        "addNativeListener",
+        "attachOr",
+        "res/raw/keep.xml",
+        "android_from_raw",
+    ] {
+        assert!(setup.contains(named), "the setup names {named}");
+    }
+}
+
 fn cases<'a>(fixtures: &'a Value, group: &str) -> &'a Vec<Value> {
     fixtures[group].as_array().unwrap()
 }

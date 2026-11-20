@@ -10,10 +10,10 @@ use super::{
     layout::{self as android_layout, Environment},
 };
 use crate::{
-    ActionEvent, Backend, EndPolicy, Error, Event, LayoutActivityRecord, LayoutEndInput,
-    LayoutSnapshot, LayoutStartInput, LayoutUpdateInput, OpenedEvent, Result, UnknownEvent,
-    Visibility,
-    layout::{Alert, AndroidOptions, AndroidPlacement, AndroidVisibility, Element, Node},
+    ActionEvent, Backend, EndPolicy, Error, Event, HandledEvent, LayoutActivityRecord,
+    LayoutEndInput, LayoutSnapshot, LayoutStartInput, LayoutUpdateInput, OpenedEvent, Result,
+    UnknownEvent, Visibility,
+    layout::{Alert, AndroidOptions, AndroidPlacement, AndroidVisibility},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -341,6 +341,15 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                             action_id,
                         }))
                     }
+                    // A tap that the application's own component took: reported, and no tap to act on.
+                    liveupdate::EventKind::Handled { action_id } => {
+                        Some(Event::Handled(HandledEvent {
+                            activity_id: event.activity_id,
+                            activity_key,
+                            action_id,
+                            tap: stored_tap(event.sequence, event.occurred_at),
+                        }))
+                    }
                     // A dismissal is reported with the other states, by the backend: its stored event is the
                     // prompt to ask.
                     liveupdate::EventKind::Dismissed => None,
@@ -531,7 +540,13 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                 snapshot: content.snapshot(snapshot.revision, snapshot.stale_at),
                 degraded: Vec::new(),
             }),
-            None => self.project(offered, input, snapshot, links),
+            None => {
+                let projection = self.project(offered, input, snapshot, links)?;
+                Ok(android_layout::Projection {
+                    snapshot: targeted(projection.snapshot, input),
+                    ..projection
+                })
+            }
         }
     }
 
@@ -762,7 +777,7 @@ fn with_actions(kept: Vec<String>, snapshot: &LayoutSnapshot) -> Vec<String> {
 /// Whether the activity declared `action_id`: a button or a toggle of its layout, or an action of an Android
 /// content it has shown.
 fn declares(entry: &Entry, action_id: &str) -> bool {
-    control(&entry.origin.layout.lock_screen, action_id)
+    crate::layout::controls(&entry.origin.layout.lock_screen, action_id)
         || entry.actions.iter().any(|id| id == action_id)
 }
 
@@ -776,21 +791,36 @@ fn asked_for(entry: &Entry, action_id: &str) -> Option<bool> {
     android_layout::asked_for(&entry.origin.layout, &entry.snapshot.values, action_id)
 }
 
-/// Whether a button or a toggle of the tree has `action_id`, shown or not.
-fn control(node: &Node, action_id: &str) -> bool {
-    match &node.element {
-        Element::Button { action_id: id, .. } | Element::Toggle { action_id: id, .. }
-            if id == action_id =>
-        {
-            true
-        }
-        Element::Button { child, .. } | Element::Toggle { child, .. } => control(child, action_id),
-        Element::Vstack { children, .. }
-        | Element::Hstack { children, .. }
-        | Element::Zstack { children, .. } => {
-            children.iter().any(|child| control(child, action_id))
-        }
-        _ => false,
+/// The projection of the layout with the start's targets on the actions of their buttons and toggles. A link
+/// takes none: its tap opens its URL.
+fn targeted(snapshot: liveupdate::Snapshot, input: &LayoutStartInput) -> liveupdate::Snapshot {
+    let Some(targets) = input
+        .android
+        .as_ref()
+        .map(|android| &android.targets)
+        .filter(|targets| !targets.is_empty())
+    else {
+        return snapshot;
+    };
+    liveupdate::Snapshot {
+        presentation: snapshot
+            .presentation
+            .map(|presentation| liveupdate::AndroidPresentation {
+                actions: presentation
+                    .actions
+                    .into_iter()
+                    .map(|action| liveupdate::NotificationAction {
+                        target: action
+                            .open_url
+                            .is_none()
+                            .then(|| targets.get(&action.id).cloned())
+                            .flatten(),
+                        ..action
+                    })
+                    .collect(),
+                ..presentation
+            }),
+        ..snapshot
     }
 }
 

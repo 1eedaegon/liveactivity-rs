@@ -205,6 +205,12 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
                         tap: layouts::stored_tap(event.sequence, event.occurred_at),
                         ..crate::ActionEvent::new(action_id, event.activity_id)
                     })),
+                    EventKind::Handled { action_id } => Some(Event::Handled(crate::HandledEvent {
+                        activity_id: event.activity_id,
+                        activity_key: None,
+                        action_id,
+                        tap: layouts::stored_tap(event.sequence, event.occurred_at),
+                    })),
                     EventKind::Opened { action_id } => Some(Event::Opened(crate::OpenedEvent {
                         activity_id: event.activity_id,
                         activity_key: None,
@@ -315,6 +321,31 @@ impl LiveUpdateBackend<liveupdate::AndroidDriver> {
     /// Fails when the Android context or the AAR's bridge class is not available.
     pub fn android() -> Result<Self> {
         let bridge = liveupdate::AndroidBridge::new().map_err(convert::error)?;
+        Ok(Self::over_bridge(bridge))
+    }
+
+    /// The backend on the JNI transport of liveupdate's own AAR, built from the process's `JavaVM` and a context
+    /// without `ndk-context`: for a service of the application that runs its own Rust, where no activity
+    /// initialized it. The backend then runs as the one of [`android`](Self::android) does.
+    ///
+    /// # Safety
+    ///
+    /// `vm` must be the process's `JavaVM` and `context` an Android `Context` (a local or global reference), both
+    /// valid on the calling thread for the call, as liveupdate's `AndroidBridge::from_raw` requires.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a pointer is null, or the context or the AAR's bridge class is not available.
+    // The one entry that takes raw JNI pointers, which only the caller can vouch for: the crate's code is
+    // otherwise safe.
+    #[allow(unsafe_code)]
+    pub unsafe fn android_from_raw(
+        vm: *mut std::ffi::c_void,
+        context: *mut std::ffi::c_void,
+    ) -> Result<Self> {
+        // SAFETY: the caller keeps liveupdate's contract for the two pointers, which this passes on unchanged.
+        let bridge =
+            unsafe { liveupdate::AndroidBridge::from_raw(vm, context) }.map_err(convert::error)?;
         Ok(Self::over_bridge(bridge))
     }
 }

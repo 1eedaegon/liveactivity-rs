@@ -77,6 +77,7 @@ cargo run -p liveactivity --example features --features testkit
 | [Buttons and taps](#buttons-and-taps) | a `button` node, `Event::Action` | ✓ from iOS 17.2; the label alone before | ✓ up to three |
 | [Toggles](#toggles-and-staleness) | a `toggle` node, `ActionEvent.on` | ✓ a switch, from iOS 17.2 | ✓ an action, with a check mark while on |
 | [Staleness](#toggles-and-staleness) | `when_stale()` and `unless_stale()` on a node | ✓ drawn by the system when the time has passed | drawn as while fresh, reported as `layout.ifStale`; the sink is told `stale` |
+| [A tap that runs your own code](#android-options) | `AndroidOptions::with_target`, `NotificationAction.target`, `Event::Handled` | ignored | ✓ a service or a receiver of the application, where the device offers `action_targets` |
 | [A watch](docs/contract.md#a-watchs-ongoing-activity) | `Layout.small`; `AndroidOptions::with_wear_ongoing_activity`, `AndroidPresentation.wear_ongoing_activity` | ✓ a paired Apple Watch, in its Smart Stack from iOS 18: `small` where the widget extension sets `ActivityKitSmallFamily`, else the compact parts, reported as `layout.small`. The Ongoing Activity is ignored | ✓ an application on the watch, Wear OS 3 to 6, with `androidx.wear:wear-ongoing`: the activity's icon on the watch face, its Ongoing Activity, which one activity can do without. A phone's ongoing notification is not bridged to a paired watch, and a Live Update only to some. `small` is not drawn, reported as `layout.small` |
 | [A car](docs/contract.md#layout) | `Layout.small` | ✓ CarPlay, from iOS 26: `small` as on a watch, else the compact parts | none: Android Auto shows the notifications of messaging applications built for it, and Android's documents name no place there for a Live Update. `small` is reported as `layout.small` |
 | [Links](#links-accessibility-and-motion) | a `link` node, `Layout.url` | ✓ | ✓ the notification and its actions open them, where the device opens URLs |
@@ -456,6 +457,17 @@ start.android = Some(
 );
 ```
 
+A button can run the application's own service or receiver at once, with no
+screen, as a Live Activity runs an App Intent: name its target by the action
+id. The component takes the tap with `LiveUpdateActions.take`, and the sink
+gets `Event::Handled`
+([docs/android-setup.md](docs/android-setup.md#a-tap-that-runs-your-own-code)):
+
+```rust
+let record = ActionTarget::new(TargetKind::ForegroundService, "com.example.RecorderService");
+start.android = Some(AndroidOptions::new(AndroidVisibility::Public).with_target("record", record));
+```
+
 ### Ending
 
 ```rust
@@ -519,6 +531,7 @@ started as `Event::Started`. The steps are in
 | `Event::Permissions` | the person changed what the app may do | ✓ | |
 | `Event::Opened` | the person opened the application from a notification | the application gets the URL itself | ✓ when the host reports the opening intent |
 | `Event::Unknown` | something this version has no event for | | ✓ when the AAR is of a later liveupdate than the crate |
+| `Event::Handled` | a tap that the application's own component took | | ✓ with an action's target |
 
 A tap that the app did not take at once, because the tap launched it or its
 process ended, comes to a later connection with `tap.late` (iOS); act on each

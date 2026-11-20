@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.8.0.aar` from liveupdate's
+Put `liveupdate-android-0.8.1.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too, and in a watch application the library of [its Ongoing Activity](#a-watch):
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.8.0.aar"))
+    implementation(files("libs/liveupdate-android-0.8.1.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
     implementation("androidx.wear:wear-ongoing:1.1.0") // a watch application only
 }
@@ -380,7 +380,8 @@ start.android = Some(AndroidOptions::new(AndroidVisibility::Public).with_target(
 ```
 
 The component is a class of the application's package, declared in its manifest, not exported,
-and in the application's process. It takes the tap first, before anything else, with
+and in the application's process. An update of the application that removes it makes every update
+of an activity that names it fail with `INVALID_INPUT`: name another target, or none. It takes the tap first, before anything else, with
 `LiveUpdateActions.take`, which records it as handled, so that the queue does not act on it a
 second time:
 

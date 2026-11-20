@@ -739,7 +739,7 @@ Evidence: `exchange::req_a_026_a_start_without_room_in_the_store_is_a_system_lim
 
 ## REQ-A-027 The AAR this crate is built with
 
-The crate is built and tested with liveupdate 0.8.0, whose AAR is `liveupdate-android-0.8.0.aar`. The setup
+The crate is built and tested with liveupdate 0.8.1, whose AAR is `liveupdate-android-0.8.1.aar`. The setup
 document names it, what a watch application adds, and what a crate and an AAR of two versions do together: an
 AAR from 0.7.0 posts a record with a member it does not know without it, and an earlier one refuses such a
 request with `INVALID_INPUT`.
@@ -768,7 +768,9 @@ button or toggle. Each key is the `actionId` of a button or a toggle of the lock
 that liveupdate takes (a component of two or more Java identifiers, an intent action of printable ASCII), else the
 start is `INVALID_INPUT` on every platform; a target beside a link is liveupdate's refusal too. iOS ignores the
 option. `capabilities().android_presentation.action_targets` says whether the device's adapter delivers targets; a
-start or an update that would post one where it does not answers `UNSUPPORTED_FEATURE` and posts nothing.
+start or an update that would post one where it does not answers `UNSUPPORTED_FEATURE` and posts nothing. A target
+whose component Android does not resolve in the application is `INVALID_INPUT` from the adapter, also in an update
+after an update of the application removed it (liveupdate 0.8.1): an update then names another target, or none.
 
 Evidence: `contract::req_a_029_a_target_is_checked_on_every_platform` and
 `exchange::req_a_029_a_layouts_button_and_a_contents_action_carry_their_targets`.

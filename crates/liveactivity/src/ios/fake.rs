@@ -256,6 +256,13 @@ impl Kit for FakeKit {
             enabled: true,
             buttons: true,
             frequent_pushes: true,
+            later: crate::IosCapabilities {
+                push_to_start: true,
+                push_channels: true,
+                transient: true,
+                scheduled_start: true,
+                small_family: false,
+            },
         })
     }
 

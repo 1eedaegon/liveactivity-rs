@@ -79,6 +79,7 @@ pub(crate) fn capabilities(value: liveupdate::Capabilities, layouts: bool) -> Ca
         push: FeatureSupport::Unsupported,
         // An Android content and the options of a start go through the layout commands.
         android_presentation: layouts.then_some(value.presentation),
+        ios: None,
     }
 }
 

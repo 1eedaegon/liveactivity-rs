@@ -326,10 +326,10 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                         }
                         let on = entry.and_then(|entry| asked_for(entry, &action_id));
                         Some(Event::Action(ActionEvent {
-                            action_id,
-                            activity_id: event.activity_id,
                             activity_key,
                             on,
+                            tap: stored_tap(event.sequence, event.occurred_at),
+                            ..ActionEvent::new(action_id, event.activity_id)
                         }))
                     }
                     // An opening is the host's report of an intent that liveupdate made and checked: its
@@ -868,3 +868,13 @@ fn not_found() -> Error {
 #[cfg(test)]
 #[path = "layouts_tests.rs"]
 mod tests;
+
+/// What the adapter says of a stored tap: its sequence, which no other event of the device has, and when it was
+/// stored. A tap on Android has no revision and is never late: the adapter keeps it until it is drained.
+pub(crate) fn stored_tap(sequence: u64, occurred_at: u64) -> crate::Tap {
+    crate::Tap {
+        id: Some(sequence.to_string()),
+        at: Some(occurred_at),
+        ..crate::Tap::default()
+    }
+}

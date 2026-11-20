@@ -349,6 +349,25 @@ built with Xcode 27.2; activitykit runs no Xcode 27, and no test of this crate b
 
 Evidence: `engine_fixtures::req_i_013_the_engines_build_names_swiftpms_own_build_system`.
 
+## REQ-I-014 What the device runs
+
+`capabilities().ios` says what an iPhone runs of the features after the first Live Activities, as activitykit's
+authorization says since 0.7.0: `push_to_start` (iOS 17.2), `push_channels` and `transient` (iOS 18),
+`scheduled_start` (iOS 26, in an application built with the iOS 26 SDK) and `small_family` (iOS 18, and the widget
+extension draws the small family). An application need not try a request to learn it. It is absent off iOS. In JSON
+it is `ios: { pushToStart, pushChannels, transient, scheduledStart, smallFamily }`.
+
+Evidence: `ios::tests::req_i_014_the_capabilities_say_what_the_device_runs`.
+
+## REQ-I-015 The expanded island's corners
+
+activitykit's widget keeps the expanded Dynamic Island's leading and trailing content 6 points from the top and from
+its outer side since 0.7.0, on top of the margins and the padding a layout states: before, the top outer corner cut
+the last letter of a short trailing value (activitykit's iOS 26.3 simulator). This crate hands the layout on as
+written.
+
+Evidence: `engine_fixtures::req_i_015_the_engines_widget_keeps_the_expanded_islands_corners_clear`.
+
 ## REQ-E-002 Started, state and permission events
 
 The sink receives a layout activity that began, a new lifecycle state of any activity, and the permissions after
@@ -407,6 +426,21 @@ adapter, so one that is not passed on is gone. A dismissal is no such event: it 
 (REQ-E-005).
 
 Evidence: `exchange::req_e_008_an_event_of_an_unknown_kind_reaches_the_sink`.
+
+## REQ-E-009 A tap says which tap it is
+
+`ActionEvent.tap` says which tap it is and when it was made: `id`, the same however often the tap is handed on;
+`at`, the time of the tap in epoch milliseconds; `revision`, the revision of the content the activity showed; and
+`late`. Each is left out when it is not known, and so is `tap` when nothing is. On iOS they are activitykit's, since
+0.7.0: a tap that the application did not take within the intent's first two posts (200 ms) is kept in the
+application's container, at most 32 and 12 hours, and comes to the sink of a later kit, in this launch or the next,
+with `late`; the activity may have ended since, and its key is then the one the button was drawn with. On Android
+`id` is the adapter's sequence of the stored tap and `at` the time it was stored; there is no revision, and a tap is
+never late.
+
+Evidence: `ios::kit::tests::req_e_009_a_tap_of_activitykit_says_which_tap_it_is`,
+`android::layouts::tests::req_e_009_a_stored_tap_says_its_sequence_and_time` and
+`contract::req_e_009_a_tap_is_written_with_what_is_known_of_it`.
 
 ## REQ-A-001 Android content of a snapshot
 

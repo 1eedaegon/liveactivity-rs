@@ -46,12 +46,7 @@ fn req_c_001_the_contract_has_stable_json() {
         serde_json::to_value(Error::new("STALE_REVISION", "Activity revision is stale.")).unwrap(),
         json!({"code": "STALE_REVISION", "message": "Activity revision is stale."})
     );
-    let tap = ActionEvent {
-        action_id: "track".into(),
-        activity_id: "id".into(),
-        activity_key: None,
-        on: None,
-    };
+    let tap = ActionEvent::new("track", "id");
     assert_eq!(
         serde_json::to_value(tap).unwrap(),
         json!({"actionId": "track", "activityId": "id"})
@@ -378,10 +373,8 @@ fn req_i_004_a_wrong_toggle_reaches_no_backend() {
 
     // The state a toggle was asked for is a member of the event; a button's tap is written as before.
     let tap = |on| ActionEvent {
-        action_id: "mute".into(),
-        activity_id: "id".into(),
-        activity_key: None,
         on,
+        ..ActionEvent::new("mute", "id")
     };
     assert_eq!(
         serde_json::to_value(tap(Some(true))).unwrap(),
@@ -559,4 +552,45 @@ fn req_a_024_a_wrong_ongoing_activity_member_reaches_no_backend() {
     ] {
         assert_eq!(answer_to_a_start(wrong.clone()), "INVALID_INPUT", "{wrong}");
     }
+}
+
+#[test]
+fn req_e_009_a_tap_is_written_with_what_is_known_of_it() {
+    // REQ-E-009
+    // Nothing known of the tap: the member is left out, and the event reads as it was written before.
+    let plain = ActionEvent::new("pet", "id");
+    assert_eq!(
+        serde_json::to_value(&plain).unwrap(),
+        json!({"actionId": "pet", "activityId": "id"})
+    );
+    let late = ActionEvent {
+        activity_key: Some("mochi:buttons".into()),
+        tap: liveactivity::Tap {
+            id: Some("tap-7".into()),
+            at: Some(1_800_000_000_123),
+            revision: Some(3),
+            late: true,
+        },
+        ..ActionEvent::new("pet", "id")
+    };
+    let written = json!({"actionId": "pet", "activityId": "id", "activityKey": "mochi:buttons",
+        "tap": {"id": "tap-7", "at": 1_800_000_000_123_u64, "revision": 3, "late": true}});
+    assert_eq!(serde_json::to_value(&late).unwrap(), written);
+    assert_eq!(
+        serde_json::from_value::<ActionEvent>(written).unwrap(),
+        late
+    );
+    // Each member is left out when it is not known; a tap that is not late says nothing of it.
+    let stored = ActionEvent {
+        tap: liveactivity::Tap {
+            id: Some("42".into()),
+            at: Some(1_000),
+            ..liveactivity::Tap::default()
+        },
+        ..ActionEvent::new("pet", "id")
+    };
+    assert_eq!(
+        serde_json::to_value(&stored).unwrap()["tap"],
+        json!({"id": "42", "at": 1_000})
+    );
 }

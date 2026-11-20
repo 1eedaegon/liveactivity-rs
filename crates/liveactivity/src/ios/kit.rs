@@ -132,6 +132,26 @@ fn authorization_of(authorization: activitykit::Authorization) -> Authorization 
         enabled: authorization.enabled,
         buttons: authorization.buttons,
         frequent_pushes: authorization.frequent_pushes,
+        later: crate::IosCapabilities {
+            push_to_start: authorization.push_to_start,
+            push_channels: authorization.push_channels,
+            transient: authorization.transient,
+            scheduled_start: authorization.scheduled_start,
+            small_family: authorization.small_family,
+        },
+    }
+}
+
+/// What activitykit says of a tap, its time in epoch milliseconds.
+fn tap_of(tap: &activitykit::Tap) -> crate::Tap {
+    crate::Tap {
+        id: tap.id.clone(),
+        at: tap
+            .at
+            .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|since| u64::try_from(since.as_millis()).ok()),
+        revision: tap.revision,
+        late: tap.late,
     }
 }
 
@@ -143,9 +163,10 @@ fn kit_event(event: Event) -> Option<KitEvent<Activity, Acknowledgement>> {
             action,
             on,
             acknowledgement,
+            tap,
             ..
         } => Some(KitEvent::Tap(
-            action_event(&activity, action, on),
+            action_event(&activity, action, on, tap_of(&tap)),
             acknowledgement,
         )),
         Event::PushToken {
@@ -257,6 +278,55 @@ impl Handle for Activity {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn req_e_009_a_tap_of_activitykit_says_which_tap_it_is() {
+        // REQ-E-009
+        let mut tap = activitykit::Tap::default();
+        assert_eq!(tap_of(&tap), crate::Tap::default());
+        tap.id = Some("tap-7".into());
+        tap.at = Some(std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_800_000_000_123));
+        tap.revision = Some(3);
+        tap.late = true;
+        assert_eq!(
+            tap_of(&tap),
+            crate::Tap {
+                id: Some("tap-7".into()),
+                at: Some(1_800_000_000_123),
+                revision: Some(3),
+                late: true,
+            }
+        );
+        // A time before 1970 is no time of a tap.
+        tap.at = Some(std::time::UNIX_EPOCH - std::time::Duration::from_secs(1));
+        assert_eq!(tap_of(&tap).at, None);
+    }
+
+    #[test]
+    fn req_i_014_activitykits_authorization_says_the_later_features() {
+        // REQ-I-014
+        let mut authorization = activitykit::Authorization::default();
+        assert_eq!(
+            authorization_of(authorization).later,
+            crate::IosCapabilities::default()
+        );
+        authorization.supported = true;
+        authorization.push_to_start = true;
+        authorization.push_channels = true;
+        authorization.transient = true;
+        authorization.scheduled_start = true;
+        authorization.small_family = true;
+        assert_eq!(
+            authorization_of(authorization).later,
+            crate::IosCapabilities {
+                push_to_start: true,
+                push_channels: true,
+                transient: true,
+                scheduled_start: true,
+                small_family: true,
+            }
+        );
+    }
 
     fn debug(value: impl std::fmt::Debug) -> String {
         format!("{value:?}")

@@ -197,6 +197,8 @@ fn req_x_004_taps_of_any_backend_reach_the_same_sink() {
             // Without the app's files the backend keeps no key of its own.
             activity_key: None,
             on: None,
+            // REQ-E-009: what the adapter says of the stored tap.
+            tap: stored(1),
         })
     );
     assert!(matches!(taps.try_recv().unwrap(), Event::Action(tap) if tap.activity_id == "gone"));
@@ -441,6 +443,7 @@ fn req_x_007_with_the_apps_files_the_android_default_runs_layouts_images_and_key
             activity_id: record.id.clone(),
             activity_key: Some("pet:1".into()),
             on: None,
+            tap: stored(1),
         })
     );
     assert!(taps.try_recv().is_err());
@@ -722,16 +725,17 @@ fn req_a_002_taps_of_a_content_and_dismissals_reach_the_sink() {
     driver.tap(&record.id, 3, "undeclared");
     driver.dismiss(&record.id, 4);
     block_on(live.sync_events()).unwrap();
-    let tap = |action: &str| {
+    let tap = |action: &str, sequence: u64| {
         Event::Action(ActionEvent {
             action_id: action.into(),
             activity_id: record.id.clone(),
             activity_key: Some("ride:7".into()),
             on: None,
+            tap: stored(sequence),
         })
     };
-    assert_eq!(events.try_recv().unwrap(), tap("call"));
-    assert_eq!(events.try_recv().unwrap(), tap("pet"));
+    assert_eq!(events.try_recv().unwrap(), tap("call", 1));
+    assert_eq!(events.try_recv().unwrap(), tap("pet", 2));
     // The person removed the notification: a state event, after the stored events of the drain.
     assert_eq!(
         events.try_recv().unwrap(),
@@ -2008,12 +2012,13 @@ fn req_a_013_a_toggle_is_an_action_on_android_and_its_tap_says_what_was_asked() 
         posted.actions.iter().map(titled).collect()
     };
     let pair = |id: &str, title: &str| (id.to_owned(), title.to_owned());
-    let tap = |action: &str, on: Option<bool>| {
+    let tap = |action: &str, on: Option<bool>, sequence: u64| {
         Event::Action(ActionEvent {
             action_id: action.into(),
             activity_id: record.id.clone(),
             activity_key: Some("ride:7".into()),
             on,
+            tap: stored(sequence),
         })
     };
 
@@ -2022,8 +2027,8 @@ fn req_a_013_a_toggle_is_an_action_on_android_and_its_tap_says_what_was_asked() 
     driver.tap(&record.id, 1, "mute");
     driver.tap(&record.id, 2, "pet");
     block_on(live.sync_events()).unwrap();
-    assert_eq!(events.try_recv().unwrap(), tap("mute", Some(true)));
-    assert_eq!(events.try_recv().unwrap(), tap("pet", None));
+    assert_eq!(events.try_recv().unwrap(), tap("mute", Some(true), 1));
+    assert_eq!(events.try_recv().unwrap(), tap("pet", None, 2));
     // The tap changed nothing: the application moves the switch with an update, and the next tap asks for off.
     assert_eq!(titles(), [pair("mute", "Mute"), pair("pet", "Pet")]);
     let on = muted_update(&record.id, 1, "5 min", true, serde_json::json!({}));
@@ -2031,7 +2036,7 @@ fn req_a_013_a_toggle_is_an_action_on_android_and_its_tap_says_what_was_asked() 
     assert_eq!(titles(), [pair("mute", "✓ Mute"), pair("pet", "Pet")]);
     driver.tap(&record.id, 3, "mute");
     block_on(live.sync_events()).unwrap();
-    assert_eq!(events.try_recv().unwrap(), tap("mute", Some(false)));
+    assert_eq!(events.try_recv().unwrap(), tap("mute", Some(false), 3));
 
     // A snapshot with an Android content shows that content's actions: one of them has no state to ask for,
     // whatever its id.
@@ -2042,7 +2047,7 @@ fn req_a_013_a_toggle_is_an_action_on_android_and_its_tap_says_what_was_asked() 
     assert_eq!(titles(), [pair("mute", "Mute all")]);
     driver.tap(&record.id, 4, "mute");
     block_on(live.sync_events()).unwrap();
-    assert_eq!(events.try_recv().unwrap(), tap("mute", None));
+    assert_eq!(events.try_recv().unwrap(), tap("mute", None, 4));
     assert!(events.try_recv().is_err());
 
     // An id is asked a state for when the action it names is a toggle's: here a button shows under the id while
@@ -2848,4 +2853,13 @@ fn req_a_026_a_start_without_room_in_the_store_is_a_system_limit() {
     block_on(live.end_layout(ended)).unwrap();
     block_on(live.update_layout(grow(&small.id))).unwrap();
     assert_eq!((shown(&small.id), text_of(&small.id)), (1, 4000));
+}
+
+/// What the adapter says of the tap that `MemoryDriver::tap` stored under `sequence`.
+fn stored(sequence: u64) -> liveactivity::Tap {
+    liveactivity::Tap {
+        id: Some(sequence.to_string()),
+        at: Some(1_800_000_000_000),
+        ..liveactivity::Tap::default()
+    }
 }

@@ -4,6 +4,21 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on activitykit 0.7.0. Its taps say which tap they are, and its authorization what the device runs.
+
+- **`ActionEvent.tap`**: `id`, `at` (epoch milliseconds), `revision` and `late`, each left out when unknown. On
+  iOS a tap that the application did not take at once (it launched the application, or the process ended first)
+  is kept, at most 32 and 12 hours, and comes to a later connection with `late`; its activity may have ended,
+  and its key is the one the button was drawn with. On Android `id` is the adapter's sequence and `at` the time
+  the tap was stored. `ActionEvent::new(action_id, activity_id)` builds one.
+- **`capabilities().ios`**: `push_to_start`, `push_channels`, `transient`, `scheduled_start` and `small_family`,
+  as activitykit's authorization says. Absent off iOS.
+- activitykit's widget keeps the expanded Dynamic Island's leading and trailing content 6 points from the top and
+  the outer side, so a short trailing value is no longer cut; its updates and renders cost less.
+
+When updating: a struct literal of `ActionEvent` names `tap` or builds on `ActionEvent::new`, and one of
+`Capabilities` names `ios`.
+
 ## 0.8.4 - 2026-11-19
 
 - chore: what activitykit saw and did not run, in the documents of 0.6.6 (#31) (`e07c2ce`)

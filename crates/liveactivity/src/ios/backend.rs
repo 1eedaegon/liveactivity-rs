@@ -202,11 +202,16 @@ mod tests {
         let tokens = TokenBook::default();
         forward_events(&kit, context, tokens.clone()).unwrap();
 
+        // What activitykit says of the tap reaches the sink with it.
         let tap = ActionEvent {
-            action_id: "pet".into(),
-            activity_id: "la-1".into(),
             activity_key: Some("demo:1".into()),
-            on: None,
+            tap: crate::Tap {
+                id: Some("tap-1".into()),
+                at: Some(1_000),
+                revision: Some(2),
+                late: true,
+            },
+            ..ActionEvent::new("pet", "la-1")
         };
         kit.send_tap(tap.clone(), FakeAck(log.clone()));
         assert_eq!(
@@ -293,6 +298,7 @@ mod tests {
             enabled: false,
             buttons: true,
             frequent_pushes: false,
+            later: crate::IosCapabilities::default(),
         }));
         let Event::Permissions(permissions) = next() else {
             panic!("a change of the authorization is a permissions event");

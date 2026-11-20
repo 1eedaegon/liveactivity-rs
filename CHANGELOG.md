@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.10.0 - 2026-11-20
+
+- feat: a tap that runs the application's own component, on liveupdate 0.8.0 (#34) (`94f8a10`)
+
 Built on liveupdate 0.8.0, with its AAR `liveupdate-android-0.8.0.aar`: an action can run the application's own
 service or receiver at once, with no screen.
 

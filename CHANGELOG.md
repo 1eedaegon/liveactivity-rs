@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.10.1 - 2026-11-20
+
+- fix: a target's tap reads the stored receipts once, with liveupdate 0.8.1 (#35) (`a17be64`)
+
 Built on liveupdate 0.8.1, with its AAR `liveupdate-android-0.8.1.aar`: a target's tap reads the stored receipts once
 below Android 12, where 0.8.0 read them twice. Nothing of this crate's API changes.
 

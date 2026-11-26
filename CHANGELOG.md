@@ -4,6 +4,11 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.13.0 - 2026-11-26
+
+- feat: pushes from the application's server, one message for every target, and a sender for APNs behind the feature server (#41) (`2760756`)
+- chore: build on liveupdate 0.9.1, an end taken from its state, and the README's one dependency line (#42) (`29f5d87`)
+
 - **Pushes from a server** (`liveactivity::push`): one `Message` (`start`, `update`, `end`) of the contract's own
   types, named by the activity's key, for every `Target` that an application sends its server
   (`{"type":"apnsActivity","token":…}`, `apnsPushToStart`, `apnsChannel`, `fcm`). `message.request(&target,

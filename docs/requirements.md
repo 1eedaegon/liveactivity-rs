@@ -799,7 +799,7 @@ Evidence: `exchange::req_a_026_a_start_without_room_in_the_store_is_a_system_lim
 
 ## REQ-A-027 The AAR this crate is built with
 
-The crate is built and tested with liveupdate 0.9.1, whose AAR is `liveupdate-android-0.9.1.aar`. The setup
+The crate is built and tested with liveupdate 0.10.0, whose AAR is `liveupdate-android-0.10.0.aar`. The setup
 document names it, what a watch application adds, and what a crate and an AAR of two versions do together: an
 AAR from 0.7.0 posts a record with a member it does not know without it, and an earlier one refuses such a
 request with `INVALID_INPUT`.
@@ -894,6 +894,31 @@ liveupdate has them since 0.9.0, and that an application overrides them in its o
 language it has, also for a channel that exists. The AAR of the lock has those four strings.
 
 Evidence: `engine_fixtures::req_a_034_the_setup_names_the_strings_of_the_aars_channels`.
+
+## REQ-A-035 liveupdate's push path is reachable
+
+liveupdate 0.10.0 runs a data message from the application's server through its lifecycle, also in a process that
+the message started. This crate's feature `android-push` turns on liveupdate's feature `push`, which exports its
+native entry from the host's library; the host names the library in the manifest's meta-data
+`io.github.eedaegon.liveupdate.LIBRARY` and hands a data message over with
+`LiveUpdatePush.handle(this, message.data)` in its messaging service, which runs in the application's main process.
+`liveactivity::liveupdate::push::Payload` is liveupdate's own, for an activity of liveupdate's types.
+`capabilities().android_presentation.push` says whether the AAR has the entry. The contract's feature `push` stays
+`unsupported` on Android: a layout activity of this crate is not pushed by liveupdate's payload, which neither
+projects its layout nor keeps its store ([docs/design/android-push](design/android-push/PRD.md)).
+
+Evidence: `engine_fixtures::req_a_035_the_setup_names_the_aars_push_entry` and
+`exchange::req_a_035_the_capabilities_say_whether_the_aar_takes_a_push`.
+
+## REQ-A-038 What a push did reaches the sink
+
+An event that liveupdate stored of a push, taken or refused, reaches the sink as
+`Event::Pushed(PushedEvent { activity_id, activity_key, command, revision, code })`: the activity's id, none when
+the push named no live activity; the key the push named; `start`, `update` or `end`; the snapshot's revision, none
+for an end; and the contract's code of a refusal, none when it did what it asked. In JSON
+`{ activityId?, activityKey, command, revision?, code? }`. It was `Event::Unknown` before liveupdate 0.10.0.
+
+Evidence: `exchange::req_a_038_what_a_push_did_reaches_the_sink`.
 
 ## REQ-P-001 An application without the server
 

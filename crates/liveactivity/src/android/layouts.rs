@@ -353,6 +353,19 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
                     // A dismissal is reported with the other states, by the backend: its stored event is the
                     // prompt to ask.
                     liveupdate::EventKind::Dismissed => None,
+                    // What a push did names its own key, also when it named no live activity.
+                    liveupdate::EventKind::Pushed {
+                        command,
+                        activity_key,
+                        revision,
+                        code,
+                    } => Some(android_liveupdate::pushed(
+                        event.activity_id,
+                        &command,
+                        activity_key,
+                        revision,
+                        code,
+                    )),
                     // A kind that liveupdate does not know, or one that it has and this crate does not.
                     _ => Some(Event::Unknown(UnknownEvent {
                         activity_id: event.activity_id,

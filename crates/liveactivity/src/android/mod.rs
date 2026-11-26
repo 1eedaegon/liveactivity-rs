@@ -218,6 +218,18 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
                     })),
                     // A dismissal is reported with the other states: its stored event is the prompt to ask.
                     EventKind::Dismissed => None,
+                    EventKind::Pushed {
+                        command,
+                        activity_key,
+                        revision,
+                        code,
+                    } => Some(convert::pushed(
+                        event.activity_id,
+                        &command,
+                        activity_key,
+                        revision,
+                        code,
+                    )),
                     // A kind that liveupdate does not know, or one that it has and this crate does not.
                     _ => Some(Event::Unknown(crate::UnknownEvent {
                         activity_id: event.activity_id,

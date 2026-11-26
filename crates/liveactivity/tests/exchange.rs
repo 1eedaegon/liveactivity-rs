@@ -3116,3 +3116,110 @@ fn req_e_010_a_handled_tap_is_reported_and_is_no_action() {
             "tap": { "id": "5", "at": 1_800_000_000_000_u64 } })
     );
 }
+
+#[test]
+fn req_a_038_what_a_push_did_reaches_the_sink() {
+    // REQ-A-038
+    use liveactivity::{PushCommand, PushedEvent};
+    let (live, events, driver) = android_with_files("pushed");
+    let record = block_on(live.start_layout(ride("ride:7", None))).unwrap();
+    // A push that liveupdate took, one it refused, and one that named no live activity.
+    driver.pushed(&record.id, 0, "update", "ride:7", Some(4), None);
+    driver.pushed(
+        &record.id,
+        1,
+        "update",
+        "ride:7",
+        Some(2),
+        Some("STALE_REVISION"),
+    );
+    driver.pushed("", 2, "end", "ride:9", None, Some("NOT_FOUND"));
+    block_on(live.sync_events()).unwrap();
+    let pushed: Vec<PushedEvent> = events
+        .try_iter()
+        .filter_map(|event| match event {
+            Event::Pushed(pushed) => Some(pushed),
+            Event::Unknown(_) => panic!("a push is no event of an unknown kind"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        pushed,
+        [
+            PushedEvent {
+                activity_id: Some(record.id.clone()),
+                activity_key: "ride:7".into(),
+                command: PushCommand::Update,
+                revision: Some(4),
+                code: None,
+            },
+            PushedEvent {
+                activity_id: Some(record.id.clone()),
+                activity_key: "ride:7".into(),
+                command: PushCommand::Update,
+                revision: Some(2),
+                code: Some("STALE_REVISION".into()),
+            },
+            PushedEvent {
+                activity_id: None,
+                activity_key: "ride:9".into(),
+                command: PushCommand::End,
+                revision: None,
+                code: Some("NOT_FOUND".into()),
+            },
+        ]
+    );
+    assert_eq!(
+        serde_json::to_value(&pushed[0]).unwrap(),
+        serde_json::json!({ "activityId": record.id, "activityKey": "ride:7", "command": "update", "revision": 4 })
+    );
+    assert_eq!(
+        serde_json::to_value(&pushed[2]).unwrap(),
+        serde_json::json!({ "activityKey": "ride:9", "command": "end", "code": "NOT_FOUND" })
+    );
+
+    // Without the app's files, and with a code the contract does not have.
+    let driver = MemoryDriver::default();
+    let (templates, events) = connect(LiveUpdateBackend::new(driver.clone()));
+    driver.pushed("la-1", 0, "start", "order:1", Some(0), None);
+    driver.pushed(
+        "",
+        1,
+        "start",
+        "order:2",
+        Some(0),
+        Some("PERMISSION_DENIED"),
+    );
+    block_on(templates.sync_events()).unwrap();
+    let pushed: Vec<PushedEvent> = events
+        .try_iter()
+        .filter_map(|event| match event {
+            Event::Pushed(pushed) => Some(pushed),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(pushed.len(), 2);
+    assert_eq!(pushed[0].command, PushCommand::Start);
+    assert_eq!(pushed[0].activity_id.as_deref(), Some("la-1"));
+    assert_eq!(pushed[1].code.as_deref(), Some("PERMISSION_DENIED"));
+}
+
+#[test]
+fn req_a_035_the_capabilities_say_whether_the_aar_takes_a_push() {
+    // REQ-A-035
+    let (live, _events, _driver) = android_with_files("push-capability");
+    let capabilities = block_on(live.capabilities()).unwrap();
+    let presentation = capabilities.android_presentation.unwrap();
+    assert!(
+        !presentation.push,
+        "the memory adapter has no push entry unless it offers one"
+    );
+    let offering = MemoryDriver::offering(|offered| offered.push = true);
+    let (live, _events, _driver) = android_on(offering, "push-capability-offered");
+    let capabilities = block_on(live.capabilities()).unwrap();
+    assert!(capabilities.android_presentation.unwrap().push);
+    let wire = serde_json::to_value(&capabilities).unwrap();
+    assert_eq!(wire["androidPresentation"]["push"], true);
+    // The capability is liveupdate's, of the AAR; a layout activity is not pushed by liveupdate's payload.
+    assert_eq!(wire["push"], "unsupported");
+}

@@ -4,6 +4,20 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.10.0, with its AAR `liveupdate-android-0.10.0.aar`.
+
+- **liveupdate's push path** (Android): the feature `android-push` turns on liveupdate's `push`, whose native
+  entry takes a data message from the server in a process that the message started; the messaging service hands it
+  over with `LiveUpdatePush.handle(this, message.data)`, and the manifest's meta-data
+  `io.github.eedaegon.liveupdate.LIBRARY` names the library. `capabilities().android_presentation.push` says
+  whether the AAR has it. A layout activity is not pushed this way yet: the contract's `push` stays `unsupported`
+  on Android ([docs/design/android-push](docs/design/android-push/PRD.md)).
+- **`Event::Pushed(PushedEvent)`** (Android): what a push did, taken or refused, with the activity's key, the
+  command, the revision and the contract's code of a refusal. Before liveupdate 0.10.0 such an event was
+  `Event::Unknown`.
+
+When updating: take `liveupdate-android-0.10.0.aar`.
+
 ## 0.13.0 - 2026-11-26
 
 - feat: pushes from the application's server, one message for every target, and a sender for APNs behind the feature server (#41) (`2760756`)

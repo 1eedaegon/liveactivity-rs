@@ -72,6 +72,39 @@ pub struct UnknownEvent {
     pub activity_key: Option<String>,
 }
 
+/// What a push from the application's server did (Android, liveupdate 0.10): liveupdate's push path ran it while
+/// the application may not have run, and stored this. A push is taken or refused as the call it stands for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushedEvent {
+    /// The handle of the activity the push acted on; absent when it named no live activity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_id: Option<String>,
+    /// The key the push named.
+    pub activity_key: String,
+    /// What the push asked for.
+    pub command: PushCommand,
+    /// The revision of the push's snapshot; absent for an end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
+    /// Why the push was refused, one of [`ERROR_CODES`](crate::ERROR_CODES); absent when it did what it asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+}
+
+/// What a push asks of an activity.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PushCommand {
+    /// A start.
+    Start,
+    /// An update.
+    Update,
+    /// An end.
+    End,
+}
+
 /// What a platform reports of the application's activities. More kinds may come: match with a `_` arm.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
@@ -100,6 +133,8 @@ pub enum Event {
     Unknown(UnknownEvent),
     /// A tap that the application's own component took (Android).
     Handled(HandledEvent),
+    /// What a push from the application's server did, taken or refused (Android).
+    Pushed(PushedEvent),
 }
 
 /// Where a backend's events go: implemented by a framework plugin, or any closure.

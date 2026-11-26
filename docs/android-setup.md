@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.9.1.aar` from liveupdate's
+Put `liveupdate-android-0.10.0.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too, and in a watch application the library of [its Ongoing Activity](#a-watch):
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.9.1.aar"))
+    implementation(files("libs/liveupdate-android-0.10.0.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
     implementation("androidx.wear:wear-ongoing:1.1.0") // a watch application only
 }
@@ -699,6 +699,51 @@ A tap on a notification of a killed app starts the process and runs the receiver
 tap. Android starts no Activity for it. The tap reaches the sink at the next `sync_events`, for
 example when the person opens the app.
 
+### Pushes from the server
+
+liveupdate 0.10 runs a data message from the application's server through its lifecycle, also in a
+process that the message started while the application did not run. Turn on the feature, name the
+library that holds the Rust code, and hand each message over in the messaging service:
+
+```toml
+liveactivity = { version = "0.14", features = ["android-push"] }
+```
+
+```xml
+<application>
+    <!-- The library as System.loadLibrary takes it. -->
+    <meta-data android:name="io.github.eedaegon.liveupdate.LIBRARY" android:value="my_app" />
+</application>
+```
+
+```kotlin
+import io.github.eedaegon.liveupdate.LiveUpdatePush
+
+class AppMessagingService : FirebaseMessagingService() {
+    override fun onMessageReceived(message: RemoteMessage) {
+        if (LiveUpdatePush.handle(this, message.data)) return
+        // The application's own messages.
+    }
+}
+```
+
+The service runs in the application's main process, where the application's own client runs: one
+lock of the process serves both. The AAR has no Firebase dependency; any provider that hands over a
+map of strings works. What a push did comes with the other events at the next `sync_events`, as
+`Event::Pushed` with the key, the command, the revision and a refusal's code
+([docs/contract.md](contract.md#events)). `capabilities().android_presentation.push` says whether the
+AAR has the entry; whether the library was built with the feature is the application's to know.
+
+An update or an end acts on the live activity of the key the push names, and `NOT_FOUND` when there
+is none; a stale revision is `STALE_REVISION`, a repeat changes nothing, and a start delivered again
+after its end begins nothing. The server builds the data with liveupdate's own types:
+`liveactivity::liveupdate::push::Payload::{start, update, end}` and `to_data()`, which refuses more
+than FCM's 4096 bytes. That payload is for an activity of liveupdate's types. A layout activity of
+this crate is not pushed by it yet: its layout is projected on the device and its store kept by this
+crate's backend, which a coming liveupdate hands the message to
+([docs/design/android-push](design/android-push/PRD.md)). Until then the contract's `push` is
+`unsupported` on Android.
+
 ## 7. Samsung Now Bar
 
 ```rust
@@ -739,6 +784,7 @@ are not always of one version. They are tested as a pair of one version. Apart, 
 | Later | 0.7.0 or later | The activity is posted. A member that the AAR does not know is not shown, and its capability reads `false` |
 | Later | Up to 0.6.0 | A request with a member that the AAR does not know is `INVALID_INPUT`: `wearOngoingActivity`, with an AAR before 0.6.0. One without it works |
 | Later | Before 0.9.0 | `local_only` reads `false` and an activity kept off the watch is `UNSUPPORTED_FEATURE`; `open_promotion_settings` is `UNSUPPORTED_FEATURE`; the channels keep the AAR's English names |
+| Later | Before 0.10.0 | `push` reads `false`: the AAR has no `LiveUpdatePush`, so a messaging service has nothing to hand a message to |
 | Earlier | Later | It works: liveupdate reads what it knows of a reply. An event of a kind it does not know reaches the sink as `Event::Unknown`; before liveupdate 0.7.0 the events taken with it were lost |
 
 A member that an activity depends on, a start time, the foreground placement, an action's target or an

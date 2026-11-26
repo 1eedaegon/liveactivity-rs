@@ -92,6 +92,10 @@ impl LiveActivityBackend for UnsupportedBackend {
     fn write_image(&self, _name: String, _png: Vec<u8>) -> BackendFuture<'_, ()> {
         unsupported()
     }
+
+    fn open_promotion_settings(&self) -> BackendFuture<'_, ()> {
+        unsupported()
+    }
 }
 
 /// The default backend of the target platform.

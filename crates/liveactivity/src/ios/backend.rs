@@ -355,4 +355,18 @@ mod tests {
         );
         assert!(block_on(live.list_layout()).is_err());
     }
+
+    #[test]
+    fn req_a_033_ios_has_no_settings_of_promotion() {
+        // REQ-A-033
+        // ActivityKit has no screen of its own to open: the backend has no such command.
+        let live = LiveActivity::builder()
+            .backend(ActivityKitBackend::new())
+            .build()
+            .unwrap();
+        assert_eq!(
+            block_on(live.open_promotion_settings()).unwrap_err().code,
+            "UNSUPPORTED_FEATURE"
+        );
+    }
 }

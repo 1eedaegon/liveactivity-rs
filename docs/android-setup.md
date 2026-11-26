@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.8.3.aar` from liveupdate's
+Put `liveupdate-android-0.9.0.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too, and in a watch application the library of [its Ongoing Activity](#a-watch):
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.8.3.aar"))
+    implementation(files("libs/liveupdate-android-0.9.0.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
     implementation("androidx.wear:wear-ongoing:1.1.0") // a watch application only
 }
@@ -514,6 +514,13 @@ By liveupdate's account, which ran its library on a Galaxy Watch4 with Wear OS 5
 on the phone. By Android's documentation an ongoing notification is not bridged to a paired watch, and a Live
 Update is bridged to some watches, by the Wear OS version and the maker. This crate ran on no watch.
 
+A phone's activity can stay off a paired watch where it would be bridged there (liveupdate 0.9.0):
+`AndroidOptions::new(visibility).with_local_only(true)` for a layout keeps every snapshot of the activity local,
+and `local_only: true` in the presentation of an Android content keeps that snapshot local. Android does not
+take back a copy that a watch has already got. `capabilities().android_presentation.local_only` says whether the
+AAR does it; where it does not, such a start or update is `UNSUPPORTED_FEATURE` and posts nothing, since an
+earlier AAR would send the activity to the watch.
+
 ## 5. Permissions
 
 `live.permissions()` reports what Android allows:
@@ -569,6 +576,29 @@ What a start does without promotion depends on `fallback`:
 
 The system can still decline or later remove promotion. The record reports what Android did in
 `promotionRequested` and `promotionState`.
+
+`live.open_promotion_settings()` opens the system's screen where the person allows or stops the
+application's Live Updates (Android 16 and later), or its notification settings before that: for an application
+whose `permissions().promotion` is `denied` (liveupdate 0.9.0). Android starts it only while the application is
+in the foreground and drops it otherwise without a word, so call it from a person's tap: `Ok` says that it was
+asked. An AAR before 0.9.0 and a device without such a screen answer `UNSUPPORTED_FEATURE`, and so does a backend
+of the host's own that does not forward the call.
+
+### The names of the channels
+
+The AAR posts on two channels, which the system's settings list by name: one for activities, one for the
+revisions that alert. Name them in the application's words and languages by defining these strings in
+`res/values/strings.xml`, and in `res/values-<language>/strings.xml` for each translation (liveupdate 0.9.0).
+They take the place of the AAR's English names, also for a channel that exists.
+
+```xml
+<resources>
+    <string name="liveupdate_channel_name">Deliveries</string>
+    <string name="liveupdate_channel_description">Deliveries in progress</string>
+    <string name="liveupdate_alert_channel_name">Delivery alerts</string>
+    <string name="liveupdate_alert_channel_description">Deliveries that ask for your attention</string>
+</resources>
+```
 
 ## 6. Deliver taps and states
 
@@ -705,10 +735,11 @@ are not always of one version. They are tested as a pair of one version. Apart, 
 | --- | --- | --- |
 | Later | 0.7.0 or later | The activity is posted. A member that the AAR does not know is not shown, and its capability reads `false` |
 | Later | Up to 0.6.0 | A request with a member that the AAR does not know is `INVALID_INPUT`: `wearOngoingActivity`, with an AAR before 0.6.0. One without it works |
+| Later | Before 0.9.0 | `local_only` reads `false` and an activity kept off the watch is `UNSUPPORTED_FEATURE`; `open_promotion_settings` is `UNSUPPORTED_FEATURE`; the channels keep the AAR's English names |
 | Earlier | Later | It works: liveupdate reads what it knows of a reply. An event of a kind it does not know reaches the sink as `Event::Unknown`; before liveupdate 0.7.0 the events taken with it were lost |
 
-A member that an activity depends on, a start time or the foreground placement, is never left out
-silently: where the AAR does not report its capability the request is `UNSUPPORTED_FEATURE`. A crate
+A member that an activity depends on, a start time, the foreground placement, an action's target or an
+activity kept off the watch, is never left out silently: where the AAR does not report its capability the request is `UNSUPPORTED_FEATURE`. A crate
 that is earlier than the one that stored the receipts does not read a receipt with a member of the later
 one, and answers `NATIVE_ERROR` until the application's data is cleared: do not go back to an earlier
 crate over the data of a later one.

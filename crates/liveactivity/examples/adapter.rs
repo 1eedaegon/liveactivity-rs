@@ -140,6 +140,10 @@ impl<B: LiveActivityBackend, D: Dialog> LiveActivityBackend for WithPermissionDi
     fn sync_events(&self) -> BackendFuture<'_, ()> {
         self.inner.sync_events()
     }
+
+    fn open_promotion_settings(&self) -> BackendFuture<'_, ()> {
+        self.inner.open_promotion_settings()
+    }
 }
 
 /// The payload of `request_permissions`.

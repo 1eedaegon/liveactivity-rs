@@ -273,6 +273,40 @@ fn req_i_016_the_engines_iphones_begin_with_ios_16_1() {
 }
 
 #[test]
+fn req_a_034_the_setup_names_the_strings_of_the_aars_channels() {
+    // REQ-A-034
+    // Since liveupdate 0.9.0 the AAR names its two channels with string resources that an application overrides.
+    let strings = package("liveupdate")
+        .0
+        .join("android/src/main/res/values/strings.xml");
+    let strings =
+        fs::read_to_string(strings).expect("liveupdate ships the strings of its channels");
+    let names: Vec<&str> = strings
+        .split("<string name=\"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "liveupdate_channel_name",
+            "liveupdate_channel_description",
+            "liveupdate_alert_channel_name",
+            "liveupdate_alert_channel_description",
+        ],
+        "the AAR names its channels by these strings"
+    );
+    let setup = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/android-setup.md");
+    let setup = fs::read_to_string(setup).unwrap();
+    for name in names {
+        assert!(
+            setup.contains(&format!("<string name=\"{name}\">")),
+            "the setup shows how to override {name}"
+        );
+    }
+}
+
+#[test]
 fn req_a_031_the_aar_has_what_the_setup_names() {
     // REQ-A-031
     let kotlin = package("liveupdate")

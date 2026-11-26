@@ -30,6 +30,7 @@ its own commands, and neither sees the other's activities.
 | `write_image` | `live.write_image(name, png)` | `ImageInput` | nothing |
 | `push_tokens` | `live.push_tokens()` | none | `PushTokens` |
 | `sync_events` | `live.sync_events()` | none | nothing |
+| `open_promotion_settings` | `live.open_promotion_settings()` | none | nothing |
 
 Every call is a future and answers `liveactivity::Result<T>`. `LiveActivity` checks `start`,
 `update`, `end`, the three layout requests and `write_image` before the backend sees them, so an
@@ -275,6 +276,7 @@ The layout and the styles are fixed at start. An update sends values only.
   "publicVersion": { "title": "Delivery", "status": "On the way" },
   "placement": "foreground",
   "wearOngoingActivity": false,
+  "localOnly": true,
   "targets": { "record": { "kind": "foregroundService", "component": "com.example.RecorderService",
                            "action": "com.example.RECORD" } }
 }
@@ -286,11 +288,12 @@ The layout and the styles are fixed at start. An update sends values only.
 | `publicVersion` | Optional. `{ "title", "status" }`, 1 to 120 and 1 to 240 code points: what a secure lock screen shows in place of the content. Only with `visibility` `private`; otherwise `INVALID_INPUT`, on every platform. It goes with every snapshot that has no public version of its own. On a device that does not offer `publicVersion` the snapshot is shown without it and the record names `publicVersion` |
 | `placement` | Optional. `tagged`, which it is when absent, or `foreground`: the notification is the one that a foreground service of the application holds, so that the service shows no second one. One running activity has it at a time; a second is `SYSTEM_LIMIT`. On a device that does not offer `foregroundPlacement` the start is `UNSUPPORTED_FEATURE`. The placement is part of the request: another one under a running key is `CONFLICT`. The service is the application's ([Android setup](android-setup.md#a-foreground-service)) |
 | `wearOngoingActivity` | Optional. `false`: the activity does not carry [a watch's Ongoing Activity](#a-watchs-ongoing-activity), in any of its snapshots. Absent or `true`, it carries one where the device offers it (`wearOngoingActivity` in the capabilities). Anything but a boolean is `INVALID_INPUT`, on every platform |
+| `localOnly` | Optional. `true`: every snapshot of the activity, the projected ones and an Android content, stays on the device it is posted on, so that a paired watch does not get it (liveupdate 0.9.0); a copy that a watch already has stays there. Absent or `false`, it goes where Android sends it. A device that does not offer it (`localOnly` in the capabilities) answers `UNSUPPORTED_FEATURE` and posts nothing. Anything but a boolean is `INVALID_INPUT`, on every platform. iOS ignores it |
 
 | `targets` | Optional. An object of action ids to targets: what runs the tap of that button or toggle of the lock screen tree, a service, a foreground service or a receiver of the application, at once and with no screen (liveupdate 0.8.0). A target is `{ "kind": "service" \| "foregroundService" \| "broadcast", "component", "action"? }`: `component` a class of the application's package, two or more Java identifiers joined by dots and at most 256 characters, and `action` an intent action of printable ASCII without spaces, at most 256. A key that names no button or toggle of the lock screen tree, and a target that liveupdate does not take, are `INVALID_INPUT` on every platform; a component that Android does not resolve in the application is `INVALID_INPUT` from the device, also in an update after an update of the application removed it. The projection puts each target on its action, a link's excepted; an Android content names the targets of its own actions. A device that does not deliver targets (`androidPresentation.actionTargets`) answers `UNSUPPORTED_FEATURE`. iOS ignores it |
 
 In Rust: `AndroidOptions::new(visibility)`, then set `public_version` or `placement`, or call
-`with_wear_ongoing_activity(false)` and `with_target(action_id, target)`. The tap that a target's
+`with_wear_ongoing_activity(false)`, `with_local_only(true)` and `with_target(action_id, target)`. The tap that a target's
 component took reaches the sink as `Event::Handled` ([A tap that runs the application's own
 code](android-setup.md#a-tap-that-runs-your-own-code)).
 
@@ -484,6 +487,7 @@ shows the content as it is.
 | Member | Value |
 | --- | --- |
 | `wearOngoingActivity` | `false`: this snapshot's notification carries no [Ongoing Activity of a watch](#a-watchs-ongoing-activity). `true`, as when it is absent: it carries one where the device offers it and the start did not turn it off. An AAR of liveupdate before 0.6.0 refuses a content that says `false`; `true` is never sent to it |
+| `localOnly` | `true`: this snapshot stays off a paired watch, where the device offers `localOnly`, else the update is `UNSUPPORTED_FEATURE`. `false`, as when it is absent: it goes where the start says. A start's `localOnly` holds whatever a content says |
 
 A `progress` style says with `styledByProgress` whether Android shows what is ahead of the progress fainter.
 Without it every segment is shown in full, and a bar without a tracker icon looks the same at 0 and at 100. In
@@ -612,7 +616,8 @@ and for the rules that follow a device:
   "actions": true, "images": true, "events": true, "samsungNowBar": false,
   "chronometer": true, "links": true, "styleChange": true, "delayedEnd": true,
   "foregroundPlacement": true, "alert": true, "publicVersion": true, "branding": true,
-  "scheduledStart": true, "exactStart": false, "wearOngoingActivity": false, "actionTargets": true
+  "scheduledStart": true, "exactStart": false, "wearOngoingActivity": false, "actionTargets": true,
+  "localOnly": true
 }
 ```
 
@@ -622,7 +627,8 @@ alerts, and `foregroundPlacement` the `placement` of a start. `scheduledStart` i
 [a scheduled start](#a-scheduled-start), and `exactStart` says whether it begins at its time or
 when Android chooses. `actionTargets` says whether an action may run a component of the application (a start's
 `targets`, an action's `target`). `wearOngoingActivity` says whether a notification carries
-[a watch's Ongoing Activity](#a-watchs-ongoing-activity). `links` and `chronometer` also decide what
+[a watch's Ongoing Activity](#a-watchs-ongoing-activity), and `localOnly` whether an activity can stay off a
+paired watch (a start's `localOnly`). `links` and `chronometer` also decide what
 [a layout shows](#what-android-shows). A member that the Android side does not report is false.
 Elsewhere `androidPresentation` is absent.
 

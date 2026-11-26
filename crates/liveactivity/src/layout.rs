@@ -88,6 +88,12 @@ pub struct AndroidOptions {
     /// the activity, the projected ones and an Android content, whatever that says of it.
     #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
     pub wear_ongoing_activity: Option<bool>,
+    /// Whether the activity stays on the device it is posted on, so that a paired watch does not get it, where the
+    /// device offers that (`local_only` in the capabilities): `true` goes with every snapshot of the activity, the
+    /// projected ones and an Android content, whatever that says of it. Sent to the watch when absent. A device
+    /// that does not offer it answers `UNSUPPORTED_FEATURE`.
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
+    pub local_only: Option<bool>,
     /// What runs the tap of a button or a toggle of the lock screen tree, by its action id: a service, a foreground
     /// service or a receiver of the application, at once and with no screen. The projection puts each target on
     /// its action; a device without `action_targets` answers `UNSUPPORTED_FEATURE`. An Android content names the
@@ -104,6 +110,7 @@ impl AndroidOptions {
             public_version: None,
             placement: None,
             wear_ongoing_activity: None,
+            local_only: None,
             targets: BTreeMap::new(),
         }
     }
@@ -120,6 +127,15 @@ impl AndroidOptions {
     pub fn with_wear_ongoing_activity(self, carried: bool) -> Self {
         Self {
             wear_ongoing_activity: Some(carried),
+            ..self
+        }
+    }
+
+    /// The options of an activity that stays off a paired watch, or does not.
+    #[must_use]
+    pub fn with_local_only(self, local: bool) -> Self {
+        Self {
+            local_only: Some(local),
             ..self
         }
     }

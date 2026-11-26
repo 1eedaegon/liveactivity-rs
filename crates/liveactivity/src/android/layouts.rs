@@ -514,8 +514,14 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
             .as_ref()
             .and_then(|android| android.wear_ongoing_activity)
             .unwrap_or(true);
+        // And on keeping it off a paired watch.
+        let local = input
+            .android
+            .as_ref()
+            .and_then(|android| android.local_only)
+            .unwrap_or(false);
         Ok(android_layout::Projection {
-            snapshot: marked(shown.snapshot, alerts, public_version, carried),
+            snapshot: marked(shown.snapshot, alerts, public_version, carried, local),
             degraded: shown
                 .degraded
                 .into_iter()
@@ -680,6 +686,7 @@ fn marked(
     alerts: bool,
     public_version: Option<liveupdate::PublicVersion>,
     carried: bool,
+    local: bool,
 ) -> liveupdate::Snapshot {
     liveupdate::Snapshot {
         presentation: snapshot
@@ -689,6 +696,8 @@ fn marked(
                 public_version: presentation.public_version.or(public_version),
                 // Carried where neither the start nor the content of the snapshot turns it off.
                 wear_ongoing_activity: carried && presentation.wear_ongoing_activity,
+                // Kept off a paired watch where the start or the content of the snapshot says so.
+                local_only: local || presentation.local_only,
                 ..presentation
             }),
         ..snapshot
@@ -722,6 +731,7 @@ fn by_default(options: AndroidOptions) -> AndroidOptions {
             .placement
             .filter(|placement| *placement != AndroidPlacement::Tagged),
         wear_ongoing_activity: options.wear_ongoing_activity.filter(|carried| !carried),
+        local_only: options.local_only.filter(|local| *local),
         ..options
     }
 }

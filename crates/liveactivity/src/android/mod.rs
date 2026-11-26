@@ -456,4 +456,12 @@ impl<D: Driver + 'static> LiveActivityBackend for LiveUpdateBackend<D> {
     fn sync_events(&self) -> BackendFuture<'_, ()> {
         Box::pin(async move { self.pump_events().map(|_| ()) })
     }
+
+    fn open_promotion_settings(&self) -> BackendFuture<'_, ()> {
+        Box::pin(async move {
+            self.engine
+                .open_promotion_settings()
+                .map_err(convert::error)
+        })
+    }
 }

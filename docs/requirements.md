@@ -774,7 +774,7 @@ Evidence: `exchange::req_a_026_a_start_without_room_in_the_store_is_a_system_lim
 
 ## REQ-A-027 The AAR this crate is built with
 
-The crate is built and tested with liveupdate 0.8.3, whose AAR is `liveupdate-android-0.8.3.aar`. The setup
+The crate is built and tested with liveupdate 0.9.0, whose AAR is `liveupdate-android-0.9.0.aar`. The setup
 document names it, what a watch application adds, and what a crate and an AAR of two versions do together: an
 AAR from 0.7.0 posts a record with a member it does not know without it, and an earlier one refuses such a
 request with `INVALID_INPUT`.
@@ -830,6 +830,45 @@ its own notification until an activity holds the placement; and `res/raw/keep.xm
 request names. The AAR of the lock has each of those methods.
 
 Evidence: `engine_fixtures::req_a_031_the_aar_has_what_the_setup_names`.
+
+## REQ-A-032 An activity off a paired watch
+
+A layout's start takes `android.localOnly` (`AndroidOptions::local_only`, `with_local_only`), false when absent, as
+liveupdate offers it since 0.9.0: every snapshot of the activity, the projected ones and an Android content, stays on
+the device it is posted on, so a paired watch does not get the phone's notification. An Android content's
+`presentation.localOnly` keeps its own snapshot off; nothing turns the start's word off. Set by an update, it does not
+take back a copy that a watch has. `capabilities().android_presentation.local_only` says whether the device's adapter
+keeps a notification local; a start or an update that asks for it where it does not answers `UNSUPPORTED_FEATURE`
+and posts nothing, since an earlier adapter would send the activity to the watch. iOS ignores the option, and a
+template's start has none.
+
+Evidence: `exchange::req_a_032_a_start_keeps_every_snapshot_of_its_activity_off_a_paired_watch`,
+`exchange::req_a_032_an_activity_kept_off_the_watch_needs_the_devices_capability` and
+`api::req_a_032_the_options_of_a_start_kept_off_the_watch`.
+
+## REQ-A-033 The settings of promotion
+
+`LiveActivity::open_promotion_settings()` asks the system for the screen where a person allows or stops the
+application's Live Updates (Android 16 and later), or its notification settings before that, as liveupdate offers it
+since 0.9.0: for an application whose `permissions().promotion` is `denied`. Android starts it only while the
+application is in the foreground and drops it otherwise without a word: `Ok` says that it was asked, not that it
+shows. A backend has a method of its own for it, whose default answers `UNSUPPORTED_FEATURE`, so that a backend of an
+application's own compiles as before and a backend that wraps another forwards it; iOS answers
+`UNSUPPORTED_FEATURE`, the default backend of a platform without Live Activities `UNSUPPORTED_PLATFORM`, and so do an
+adapter of an earlier version and a device with no such screen.
+
+Evidence: `exchange::req_a_033_the_settings_of_promotion_open_through_the_android_backend`,
+`exchange::req_x_005_a_host_backend_composes_a_default_one_and_stays_exchangeable` and
+`ios::backend::tests::req_a_033_ios_has_no_settings_of_promotion`.
+
+## REQ-A-034 Channels in the application's words
+
+The setup says that the AAR posts on two channels named by its string resources `liveupdate_channel_name`,
+`liveupdate_channel_description`, `liveupdate_alert_channel_name` and `liveupdate_alert_channel_description`, as
+liveupdate has them since 0.9.0, and that an application overrides them in its own `res/values*/strings.xml`, in each
+language it has, also for a channel that exists. The AAR of the lock has those four strings.
+
+Evidence: `engine_fixtures::req_a_034_the_setup_names_the_strings_of_the_aars_channels`.
 
 ## REQ-N-001 No framework in the crate
 

@@ -799,7 +799,7 @@ Evidence: `exchange::req_a_026_a_start_without_room_in_the_store_is_a_system_lim
 
 ## REQ-A-027 The AAR this crate is built with
 
-The crate is built and tested with liveupdate 0.10.0, whose AAR is `liveupdate-android-0.10.0.aar`. The setup
+The crate is built and tested with liveupdate 0.11.0, whose AAR is `liveupdate-android-0.11.0.aar`. The setup
 document names it, what a watch application adds, and what a crate and an AAR of two versions do together: an
 AAR from 0.7.0 posts a record with a member it does not know without it, and an earlier one refuses such a
 request with `INVALID_INPUT`.
@@ -888,12 +888,28 @@ Evidence: `exchange::req_a_033_the_settings_of_promotion_open_through_the_androi
 
 ## REQ-A-034 Channels in the application's words
 
-The setup says that the AAR posts on two channels named by its string resources `liveupdate_channel_name`,
+The setup says that the AAR posts on channels named by its string resources `liveupdate_channel_name`,
 `liveupdate_channel_description`, `liveupdate_alert_channel_name` and `liveupdate_alert_channel_description`, as
-liveupdate has them since 0.9.0, and that an application overrides them in its own `res/values*/strings.xml`, in each
-language it has, also for a channel that exists. The AAR of the lock has those four strings.
+liveupdate has them since 0.9.0, and `liveupdate_watch_channel_name` and `liveupdate_watch_channel_description` for
+the mirror's channel since 0.11.0, and that an application overrides them in its own `res/values*/strings.xml`, in
+each language it has, also for a channel that exists. The AAR of the lock has those six strings.
 
 Evidence: `engine_fixtures::req_a_034_the_setup_names_the_strings_of_the_aars_channels`.
+
+## REQ-A-040 An activity mirrored to a paired watch
+
+`AndroidOptions::watch_mirror` (JSON `android.watchMirror`, false when absent) mirrors every snapshot of the
+activity to a paired watch, the projected ones and an Android content, as liveupdate offers since 0.11.0: the
+activity's own notification stays on the phone, and a second one, which is not ongoing and so passes a watch's
+bridge, carries the same content to the watch. An Android content's `watchMirror` mirrors its own snapshot. Nothing
+turns the start's word off. `capabilities().android_presentation.watch_mirror` says whether the device can; where it
+cannot, a phone with an earlier AAR or a watch, such a start or update is `UNSUPPORTED_FEATURE` and posts nothing.
+A start with both `localOnly` and `watchMirror` true is `INVALID_INPUT` on every platform, and so is a snapshot that
+asks for one where its start asks for the other. Anything but a Boolean is `INVALID_INPUT`. iOS ignores it.
+
+Evidence: `api::req_a_040_the_options_of_a_mirrored_start`,
+`exchange::req_a_040_a_start_mirrors_every_snapshot_of_its_activity` and
+`exchange::req_a_040_a_mirror_needs_the_devices_capability`.
 
 ## REQ-A-035 liveupdate's push path is reachable
 

@@ -527,14 +527,20 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
             .as_ref()
             .and_then(|android| android.wear_ongoing_activity)
             .unwrap_or(true);
-        // And on keeping it off a paired watch.
+        // And on keeping it off a paired watch, or on mirroring it there.
         let local = input
             .android
             .as_ref()
             .and_then(|android| android.local_only)
             .unwrap_or(false);
+        let mirrored = input
+            .android
+            .as_ref()
+            .and_then(|android| android.watch_mirror)
+            .unwrap_or(false);
+        let watch = Watch { local, mirrored };
         Ok(android_layout::Projection {
-            snapshot: marked(shown.snapshot, alerts, public_version, carried, local),
+            snapshot: marked(shown.snapshot, alerts, public_version, carried, watch),
             degraded: shown
                 .degraded
                 .into_iter()
@@ -699,7 +705,7 @@ fn marked(
     alerts: bool,
     public_version: Option<liveupdate::PublicVersion>,
     carried: bool,
-    local: bool,
+    watch: Watch,
 ) -> liveupdate::Snapshot {
     liveupdate::Snapshot {
         presentation: snapshot
@@ -709,8 +715,10 @@ fn marked(
                 public_version: presentation.public_version.or(public_version),
                 // Carried where neither the start nor the content of the snapshot turns it off.
                 wear_ongoing_activity: carried && presentation.wear_ongoing_activity,
-                // Kept off a paired watch where the start or the content of the snapshot says so.
-                local_only: local || presentation.local_only,
+                // Kept off a paired watch, or mirrored there, where the start or the content of the snapshot says
+                // so. A snapshot that asks for both is liveupdate's to refuse.
+                local_only: watch.local || presentation.local_only,
+                watch_mirror: watch.mirrored || presentation.watch_mirror,
                 ..presentation
             }),
         ..snapshot
@@ -737,6 +745,15 @@ fn refuses_links(error: &liveupdate::Error) -> bool {
     )
 }
 
+/// The start's word on a paired watch, for every snapshot of the activity.
+#[derive(Debug, Clone, Copy)]
+struct Watch {
+    /// Kept off it.
+    local: bool,
+    /// Mirrored to it.
+    mirrored: bool,
+}
+
 /// The options as they are kept and compared: a member that names the default is the default.
 fn by_default(options: AndroidOptions) -> AndroidOptions {
     AndroidOptions {
@@ -745,6 +762,7 @@ fn by_default(options: AndroidOptions) -> AndroidOptions {
             .filter(|placement| *placement != AndroidPlacement::Tagged),
         wear_ongoing_activity: options.wear_ongoing_activity.filter(|carried| !carried),
         local_only: options.local_only.filter(|local| *local),
+        watch_mirror: options.watch_mirror.filter(|mirrored| *mirrored),
         ..options
     }
 }

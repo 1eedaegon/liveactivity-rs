@@ -84,7 +84,7 @@ cargo run -p liveactivity --example features --features testkit
 | [Staleness](#toggles-and-staleness) | `when_stale()` and `unless_stale()` on a node | ✓ drawn by the system when the time has passed | drawn as while fresh, reported as `layout.ifStale`; the sink is told `stale` |
 | [StandBy](#standby) | `when_fullscreen()` and `unless_fullscreen()` on a node | ✓ iOS 17, while the Lock Screen fills the screen of a charging iPhone on its side | never full screen: a node of StandBy is left out, its counterpart shown |
 | [A tap that runs your own code](#android-options) | `AndroidOptions::with_target`, `NotificationAction.target`, `Event::Handled` | ignored | ✓ a service or a receiver of the application, where the device offers `action_targets` |
-| [A watch](docs/contract.md#a-watchs-ongoing-activity) | `Layout.small`; `AndroidOptions::with_wear_ongoing_activity`, `AndroidPresentation.wear_ongoing_activity`, `AndroidOptions::with_local_only` | ✓ a paired Apple Watch, in its Smart Stack from iOS 18: `small` where the widget extension sets `ActivityKitSmallFamily`, else the compact parts, reported as `layout.small`. The Ongoing Activity is ignored | ✓ an application on the watch, Wear OS 3 to 6, with `androidx.wear:wear-ongoing`: the activity's icon on the watch face, its Ongoing Activity, which one activity can do without. A phone's ongoing notification is not bridged to a paired watch, and a Live Update only to some; `with_local_only(true)` keeps one off it. `small` is not drawn, reported as `layout.small` |
+| [A watch](docs/contract.md#a-watchs-ongoing-activity) | `Layout.small`; `AndroidOptions::with_wear_ongoing_activity`, `AndroidPresentation.wear_ongoing_activity`, `AndroidOptions::with_local_only`, `AndroidOptions::with_watch_mirror` | ✓ a paired Apple Watch, in its Smart Stack from iOS 18: `small` where the widget extension sets `ActivityKitSmallFamily`, else the compact parts, reported as `layout.small`. The Ongoing Activity is ignored | ✓ an application on the watch, Wear OS 3 to 6, with `androidx.wear:wear-ongoing`: the activity's icon on the watch face, its Ongoing Activity, which one activity can do without. A phone's ongoing notification is not bridged to a paired watch, and a Live Update only to some; `with_local_only(true)` keeps one off it, and `with_watch_mirror(true)` sends it there as a mirror. `small` is not drawn, reported as `layout.small` |
 | [A car](docs/contract.md#layout) | `Layout.small` | ✓ CarPlay, from iOS 26: `small` as on a watch, else the compact parts | none: Android Auto shows the notifications of messaging applications built for it, and Android's documents name no place there for a Live Update. `small` is reported as `layout.small` |
 | [Links](#links-accessibility-and-motion) | a `link` node, `Layout.url` | ✓ | ✓ the notification and its actions open them, where the device opens URLs |
 | [Accessibility, motion, privacy](#links-accessibility-and-motion) | members of a node and of a style | ✓ | a label is the text of what a notification cannot draw; motion and privacy are named as left out |
@@ -466,6 +466,13 @@ A phone's activity can stay off a paired watch, where the device says
 
 ```rust
 start.android = Some(AndroidOptions::new(AndroidVisibility::Private).with_local_only(true));
+```
+
+Or reach one through a mirror, a second notification that a watch's bridge
+takes, where the device says `android_presentation.watch_mirror`:
+
+```rust
+start.android = Some(AndroidOptions::new(AndroidVisibility::Private).with_watch_mirror(true));
 ```
 
 A button can run the application's own service or receiver at once, with no

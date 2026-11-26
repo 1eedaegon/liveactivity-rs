@@ -4,6 +4,18 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.11.0, with its AAR `liveupdate-android-0.11.0.aar`.
+
+- **An activity mirrored to a paired watch** (Android): `AndroidOptions::with_watch_mirror(true)`, JSON
+  `android.watchMirror`, mirrors every snapshot of a layout's activity to a paired watch, and an Android content's
+  `watchMirror` its own snapshot: the activity's own notification stays on the phone, and a second one, not ongoing,
+  passes the watch's bridge. `capabilities().android_presentation.watch_mirror` says whether the device can; where
+  it cannot such a start or update is `UNSUPPORTED_FEATURE`. Beside `localOnly` it is `INVALID_INPUT`.
+- **The mirror's channel in the application's words**: `liveupdate_watch_channel_name` and
+  `liveupdate_watch_channel_description`.
+
+When updating: take `liveupdate-android-0.11.0.aar`.
+
 ## 0.14.0 - 2026-11-26
 
 - feat: liveupdate 0.10.0's push path reachable with the feature android-push, and what a push did as Event::Pushed (#43) (`855cdcf`)

@@ -94,6 +94,13 @@ pub struct AndroidOptions {
     /// that does not offer it answers `UNSUPPORTED_FEATURE`.
     #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
     pub local_only: Option<bool>,
+    /// Whether a second notification of the activity, the mirror, carries it to a paired watch, where the device
+    /// offers that (`watch_mirror` in the capabilities): a watch's bridge leaves the activity's own ongoing
+    /// notification out. `true` goes with every snapshot of the activity, the projected ones and an Android
+    /// content, whatever that says of it; not beside `local_only`. A device that does not offer it answers
+    /// `UNSUPPORTED_FEATURE`.
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "none")]
+    pub watch_mirror: Option<bool>,
     /// What runs the tap of a button or a toggle of the lock screen tree, by its action id: a service, a foreground
     /// service or a receiver of the application, at once and with no screen. The projection puts each target on
     /// its action; a device without `action_targets` answers `UNSUPPORTED_FEATURE`. An Android content names the
@@ -111,6 +118,7 @@ impl AndroidOptions {
             placement: None,
             wear_ongoing_activity: None,
             local_only: None,
+            watch_mirror: None,
             targets: BTreeMap::new(),
         }
     }
@@ -138,6 +146,20 @@ impl AndroidOptions {
             local_only: Some(local),
             ..self
         }
+    }
+
+    /// The options of an activity mirrored to a paired watch, or not.
+    #[must_use]
+    pub fn with_watch_mirror(self, mirrored: bool) -> Self {
+        Self {
+            watch_mirror: Some(mirrored),
+            ..self
+        }
+    }
+
+    /// Whether the options ask to keep the activity off a paired watch and to send it there at once.
+    fn contradicts_itself(&self) -> bool {
+        self.local_only == Some(true) && self.watch_mirror == Some(true)
     }
 }
 
@@ -756,6 +778,12 @@ impl Validate for LayoutStartInput {
         require(self.takes_public_version_of(&self.snapshot))?;
         require(self.public_version_of_the_start_fits())?;
         require(self.targets_fit())?;
+        require(
+            !self
+                .android
+                .as_ref()
+                .is_some_and(AndroidOptions::contradicts_itself),
+        )?;
         self.scheduled.as_ref().map_or(Ok(()), Validate::validate)?;
         unmarked(&self.snapshot)
     }

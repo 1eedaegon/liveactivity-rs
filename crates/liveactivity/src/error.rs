@@ -55,6 +55,7 @@ impl Error {
     }
 
     /// A backend takes one event sink: a second connection would share, and so split, the platform's events.
+    #[cfg(feature = "app")]
     pub(crate) fn already_connected() -> Self {
         Self::new(
             "CONFLICT",

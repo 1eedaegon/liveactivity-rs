@@ -30,7 +30,7 @@ it.
 | --- | --- | --- |
 | `app` (default) | `LiveActivity`, the backends, the events: all of the crate today | nothing new |
 | always | `liveactivity::push`: `Message`, `Target`, the requests of each platform, their checks | nothing: serde and the two engines, as today |
-| `server` | `liveactivity::push::Sender`: sign-in, HTTP/2, the answers | `tokio`, `reqwest` (HTTP/2, rustls), `jsonwebtoken`, all optional |
+| `server` | `liveactivity::push::Sender`: sign-in, HTTP/2, the answers | `reqwest` (HTTP/2, rustls) and `jsonwebtoken` (aws-lc-rs), both optional; no runtime of its own, it runs on the one `reqwest` brings |
 
 ```toml
 liveactivity = "0.13"                                                                  # an application
@@ -39,12 +39,12 @@ liveactivity = { version = "0.13", default-features = false }                   
 ```
 
 `server` holds the sender only. A web handler (registration of targets, authentication, storage) is the
-service's, and `examples/push-server` shows one with axum.
+service's, and the example `push_server` shows one with axum.
 
 ## The interface
 
 ```rust
-use liveactivity::push::{Message, Priority, Sender, SendError, Target, Apns, ApnsKey, Fcm, FcmAccount};
+use liveactivity::push::{Application, Apns, ApnsKey, Message, Priority, SendError, Sender, Target};
 
 // Shared by both platforms: the contract's own snapshot, named by the activity's key.
 let message = Message::update("delivery:7", LayoutSnapshot::new(revision, values))
@@ -52,16 +52,15 @@ let message = Message::update("delivery:7", LayoutSnapshot::new(revision, values
     .priority(Priority::Now);
 
 // What the device reported, and the application sent to its server (serde, the registration's body).
-let target: Target = serde_json::from_slice(&body)?;   // {"platform":"ios","token":"0a1b…"} or {"platform":"android","fcmToken":"…"}
+let target: Target = serde_json::from_slice(&body)?;   // {"type":"apnsActivity","token":"0a1b…"}, "apnsPushToStart", "apnsChannel", "fcm"
 
 // Without `server`: the request alone, for a server that sends with its own client.
-let request = message.request(&target)?;   // method, path, headers, body; 4096 bytes checked
+let request = message.request(&target, &Application::new().bundle_id(bundle_id))?;   // path, headers, body; 4096 bytes checked
 
 // With `server`: one sender for both, each platform chosen by the builder.
 let sender = Sender::builder()
     .apns(Apns::new(ApnsKey::from_pem(&p8, key_id, team_id)?, bundle_id)) // .sandbox() for development builds
-    .fcm(Fcm::new(FcmAccount::from_json(&service_account)?))
-    .build()?;                       // at least one platform
+    .build()?;                       // at least one platform; FCM joins with liveupdate's push path
 match sender.send(&message, &target).await {
     Ok(delivery) => { /* delivery.id(): apns-id or the FCM message's name */ }
     Err(SendError::Unregistered) => { /* delete the target */ }
@@ -72,7 +71,7 @@ match sender.send(&message, &target).await {
 
 | Message | iOS | Android |
 | --- | --- | --- |
-| `Message::start(LayoutStartInput)` with `.alert(..)` | to the push-to-start token (iOS 17.2); the alert is required, as activitykit says | to the FCM token; the activity is started by liveupdate's push path |
+| `Message::start(id, LayoutStartInput)` with `.alert(..)` | to the push-to-start token (iOS 17.2); the alert is required, as activitykit says | to the FCM token; the activity is started by liveupdate's push path |
 | `Message::update(key, LayoutSnapshot)` | to the activity's token or channel | to the FCM token with the key |
 | `Message::end(key)`, `.snapshot(..)`, `.policy(EndPolicy)` | `dismiss_at` from the policy | the policy as it is |
 | `.priority(Priority::Now \| Priority::Low)` | `apns-priority` 10 or 5 | FCM `high` or `normal` |
@@ -83,7 +82,7 @@ match sender.send(&message, &target).await {
 
 | Id | Requirement |
 | --- | --- |
-| REQ-P-001 | The feature `app` is the default and holds all of today's API; `liveactivity::push` is there with any features; `server` adds the sender and its three dependencies, which no build without it resolves. |
+| REQ-P-001 | The feature `app` is the default and holds all of today's API; `liveactivity::push` is there with any features; `server` adds the sender and its two dependencies, which no build without it resolves. |
 | REQ-P-002 | `Message` is built from the contract's types, named by the activity key, and checked by `request` as the backend checks the call it stands for: what the device would refuse is `INVALID_INPUT` on the server, and a request of more than 4096 bytes is refused before it is sent. |
 | REQ-P-003 | `Target` is the JSON that an application sends to its server, serde both ways, `#[non_exhaustive]`: an activity's APNs token, the push-to-start token, a broadcast channel, an FCM token. A message that a target cannot take (a start to an activity's token, an update to the push-to-start token) is `INVALID_INPUT`. |
 | REQ-P-004 | The APNs request: `POST /3/device/<token>`, or APNs's broadcast request with the channel's `apns-channel-id`; `apns-push-type: liveactivity`, `apns-topic: <bundle>.push-type.liveactivity`, `apns-priority`, the body by activitykit's `Payload`. |
@@ -102,16 +101,23 @@ match sender.send(&message, &target).await {
   and drops the rest, on both platforms, so an application that also updates the activity itself takes its
   revisions from the server.
 - **A builder for the sender, each platform optional.** A service that has only iOS users gives only the APNs key.
-  Both platforms need the same three dependencies, so there is no feature per platform: what a server does not use
+  Both platforms need the same two dependencies, so there is no feature per platform: what a server does not use
   it does not configure, and pays one HTTP client for it.
-- **The request without the sender.** `Message::request` answers method, path, headers and body, so that a server
+- **The request without the sender.** `Message::request` answers the path, the headers and the body, `POST`, so that a server
   with its own client, a queue worker or another runtime sends it; the sender is one way to send it.
 - **The sender takes a client.** `.client(reqwest::Client)` uses the service's own; otherwise the builder makes one
   with HTTP/2. `.apns_host` and `.fcm_host` point it at a test server.
 - **`app` as a default feature.** Today's API moves under it, unchanged for a caller with default features. A caller
   that wrote `default-features = false` loses it: the change is a minor version with its line in the changelog.
   REQ-N-001 then says that the crate's own dependencies are the engines, serialization and errors, and `server`
-  adds three.
+  adds two.
+
+- **No runtime of its own.** The sender's lock is the standard library's and it waits for nothing but its HTTP
+  client; tokio comes with `reqwest`. The tests and the example use it as dev-dependencies.
+- **One crypto provider.** jsonwebtoken and rustls both sign with aws-lc-rs. jsonwebtoken panics where a process has
+  no provider of its own and both of its providers are on, as when a service's own jsonwebtoken turns on the other:
+  the sender installs aws-lc-rs where none is installed, and takes the service's where one is. Pure Rust RSA, which
+  FCM's sign-in would need, has an open timing advisory; aws-lc-rs has none.
 
 ## Order
 

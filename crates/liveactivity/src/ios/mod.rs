@@ -23,7 +23,7 @@ use crate::{
         LayoutStartInput, LayoutUpdateInput, ScheduledStart,
     },
     models::*,
-    pushes::{PushTokenEvent, UpdatedEvent},
+    tokens::{PushTokenEvent, UpdatedEvent},
     validation::Validate,
 };
 use activitykit::{State, Values};
@@ -318,29 +318,9 @@ fn template_record<H: Handle>(handle: &H) -> Option<ActivityRecord> {
 
 /// The start that a layout request asks for.
 pub(crate) fn start_spec(request: LayoutStartInput) -> StartSpec {
-    let regions = request.layout;
-    let mut layout = activitykit::Layout::new(regions.lock_screen);
-    if let Some(island) = regions.island {
-        layout = layout.island(island);
-    }
-    if let Some(background) = regions.background {
-        layout = layout.background(background);
-    }
-    if let Some(keyline) = regions.keyline {
-        layout = layout.keyline(keyline);
-    }
-    if let Some(url) = regions.url {
-        layout = layout.url(url);
-    }
-    if let Some(small) = regions.small {
-        layout = layout.small(small);
-    }
-    for (token, style) in request.styles.unwrap_or_default() {
-        layout = layout.style(token, style);
-    }
     StartSpec {
         key: request.activity_key,
-        layout,
+        layout: crate::layout::kit_layout(request.layout, request.styles),
         values: request.snapshot.values.into(),
         revision: request.snapshot.revision,
         stale_at: request.snapshot.stale_at,

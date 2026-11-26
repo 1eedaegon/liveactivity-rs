@@ -20,7 +20,10 @@ live.end(EndInput::new(&order.id)).await?;
 
 ```toml
 [dependencies]
-liveactivity = "0.12"
+liveactivity = "0.13"
+
+# A server that sends pushes: the sender, without the application's side.
+liveactivity = { version = "0.13", default-features = false, features = ["server"] }
 ```
 
 The crate uses [activitykit](https://github.com/1eedaegon/activitykit-rs) for
@@ -35,6 +38,7 @@ other call answers `UNSUPPORTED_PLATFORM`.
 | [docs/ios-setup.md](docs/ios-setup.md) | the widget extension, the App Group and pushes of an iOS app |
 | [docs/android-setup.md](docs/android-setup.md) | the AAR, the permissions and the files of an Android app |
 | [docs/framework-integration.md](docs/framework-integration.md) | writing a framework plugin: commands, events, lifecycle, threads |
+| [docs/server-push.md](docs/server-push.md) | a server's pushes: the key, the targets, the messages and what came back |
 | [docs/design/engine-compatibility](docs/design/engine-compatibility/PRD.md) | a watch's Ongoing Activity, an event of an unknown kind, constructors and enums that may grow, on liveupdate 0.7 |
 | [docs/design/engine-small-family](docs/design/engine-small-family/PRD.md) | the small region of a layout, for a paired Apple Watch and CarPlay on iOS, on activitykit 0.6 |
 | [docs/design/engine-interaction](docs/design/engine-interaction/PRD.md) | toggles, staleness, scheduled and transient starts and alert sounds, on activitykit 0.5 |
@@ -92,6 +96,7 @@ cargo run -p liveactivity --example features --features testkit
 | [A lock screen version, a foreground service](#android-options) | `LayoutStartInput.android` | ignored | ✓ where the device offers them |
 | [Images](#images) | `write_image`, an `image` node | ✓ needs an App Group | ✓ as the large icon |
 | [Pushes](#pushes) | `LayoutStartInput.push`, `push_tokens` | ✓ | none |
+| [Pushes from a server](#pushes-from-a-server) | `push::Message`, `push::Target`, `push::Sender` (feature `server`) | ✓ APNs | not yet: waits for liveupdate's push path |
 | [Events](#events) | the event sink, `sync_events` | ✓ as they come | ✓ on `sync_events` |
 | [Capabilities and permissions](#capabilities-and-permissions) | `capabilities`, `permissions`, `request_permissions`, `open_promotion_settings` | ✓; no settings of promotion | ✓ the dialog is the host's; the settings of Live Updates open from a tap |
 | [Blocking calls](#blocking-calls) | `wait` | ✓ off the main thread | ✓ |
@@ -518,10 +523,45 @@ for held in live.push_tokens().await?.activities {
 }
 ```
 
-The server builds its payloads with `activitykit::push::Payload`. Content that
-a push delivered comes back as `Event::Updated`, and an activity that a push
-started as `Event::Started`. The steps are in
+The server builds its pushes with [`liveactivity::push`](#pushes-from-a-server).
+Content that a push delivered comes back as `Event::Updated`, and an activity
+that a push started as `Event::Started`. The steps are in
 [docs/ios-setup.md](docs/ios-setup.md#7-pushes).
+
+### Pushes from a server
+
+The application sends its server what the device reported, as a `Target`:
+
+```json
+{ "activityKey": "delivery:7", "target": { "type": "apnsActivity", "token": "0a1b…" } }
+```
+
+The server makes one `Message` from the contract's own types and sends it with
+the feature `server`. The key comes in as text; the crate reads no environment.
+
+```rust
+use liveactivity::push::{Apns, ApnsKey, Message, SendError, Sender};
+
+let key = ApnsKey::from_pem(std::fs::read(path)?, "ABC123DEFG", "TEAM456789")?;
+let sender = Sender::builder()
+    .apns(Apns::new(key, "dev.example.app").sandbox())
+    .build()?;
+
+let message = Message::update("delivery:7", LayoutSnapshot::new(revision, values))
+    .alert(Alert::new("Delivery", "2 minutes"));
+match sender.send(&message, &target).await {
+    Ok(delivery) => println!("sent {:?}", delivery.id),
+    Err(SendError::Unregistered) => { /* forget the target */ }
+    Err(error) => eprintln!("{error}"),
+}
+```
+
+`Message::start` goes to the push-to-start token, `update` and `end` to an
+activity's token or a channel. Without `server`, `message.request(&target,
+&application)` gives the path, the headers and the body for another HTTP
+client. Android's pushes wait for liveupdate. The steps, from the key to what
+came back, are in [docs/server-push.md](docs/server-push.md); the example
+`push_server` is a server with axum.
 
 ### Events
 

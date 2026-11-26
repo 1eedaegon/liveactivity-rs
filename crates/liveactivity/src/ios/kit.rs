@@ -90,11 +90,7 @@ pub(crate) fn update_of(spec: UpdateSpec) -> Update {
 
 /// activitykit's alert, with its sound when it names one.
 fn alert_of(alert: Alert) -> activitykit::Alert {
-    let shown = activitykit::Alert::new(alert.title, alert.body);
-    match alert.sound {
-        Some(name) => shown.sound(name),
-        None => shown,
-    }
+    alert.kit()
 }
 
 pub(crate) fn end_of(spec: EndSpec) -> End {

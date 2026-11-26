@@ -4,6 +4,18 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+- **Pushes from a server** (`liveactivity::push`): one `Message` (`start`, `update`, `end`) of the contract's own
+  types, named by the activity's key, for every `Target` that an application sends its server
+  (`{"type":"apnsActivity","token":…}`, `apnsPushToStart`, `apnsChannel`, `fcm`). `message.request(&target,
+  &application)` makes APNs's request, checked as the device checks the call; with the feature `server`,
+  `push::Sender` signs in with the team's key and sends it, and `SendError` says what came back. Android's waits
+  for liveupdate's push path. The example `push_server` is a server with axum; [docs/server-push.md](docs/server-push.md)
+  has the steps.
+- **The feature `app`**, on by default, holds the application's side: `LiveActivity`, the backends and the events.
+  A server turns it off with `default-features = false`.
+
+When updating: a caller that set `default-features = false` turns on `app` to keep `LiveActivity`.
+
 ## 0.12.1 - 2026-11-26
 
 - fix: the app learns its push-to-start token, with activitykit 0.9.1 (#40) (`25c1497`)

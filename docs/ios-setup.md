@@ -182,8 +182,10 @@ An app that writes no images needs no App Group.
 
 ## 7. Pushes
 
-A server can update an activity, end it or start one through APNs. This crate asks ActivityKit for
-what the server needs and reports it. It holds no key and sends nothing.
+A server can update an activity, end it or start one through APNs. On the device this crate asks
+ActivityKit for what the server needs and reports it; on the server `liveactivity::push` builds the
+request, and the feature `server` sends it ([docs/server-push.md](server-push.md)). The application
+holds no key.
 
 ### In Xcode
 
@@ -241,11 +243,10 @@ that a push starts is in `list_layout()`.
 
 ### On the server
 
-The server sends the activity's token to APNs, with a payload for an update, an end or a start.
-activitykit builds the payloads (`activitykit::push::Payload`) and has the header values
-(`PUSH_TYPE`, `topic(bundle_id)`, `PRIORITY_NOW`); its
-[usage guide](https://github.com/1eedaegon/activitykit-rs/blob/main/docs/usage.md#pushes) shows
-them. Two rules matter for the application:
+The server sends to the activity's token, a channel or the push-to-start token, with a payload for
+an update, an end or a start. `liveactivity::push::Message` is built from this crate's own types and
+makes APNs's request: path, headers and activitykit's payload, checked as the device checks the call
+([docs/server-push.md](server-push.md)). These rules matter for the application:
 
 - A push carries a revision. Content a push delivers is reported as `Event::Updated` when its
   revision is above every revision the app sent or accepted for the activity. Number the server's

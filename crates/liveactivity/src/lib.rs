@@ -26,12 +26,17 @@
 
 // The one exception is the main-thread check of `wait`.
 #![deny(unsafe_code)]
+// docs.rs builds every feature and marks the items of `server`.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 // REQ-N-002: a value that is not there is an error to answer, and no reason to end the host's process. Tests may
 // unwrap: a test that panics has failed.
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
+#[cfg(feature = "app")]
 pub mod android;
+#[cfg(feature = "app")]
 mod backend;
+#[cfg(feature = "app")]
 mod blocking;
 
 /// The contract alone: the requests, records, layout types, errors and checks, without the service. A framework
@@ -44,7 +49,7 @@ pub mod contract {
     };
     pub use crate::layout::*;
     pub use crate::models::*;
-    pub use crate::pushes::{
+    pub use crate::tokens::{
         PushToStartTokenEvent, PushTokenEvent, PushTokens, TOKENS_KEPT, UpdatedEvent,
     };
     pub use crate::validation::{Validate, parse_request, validate_request};
@@ -53,14 +58,18 @@ pub mod contract {
 mod error;
 mod event;
 mod image;
+#[cfg(feature = "app")]
 pub mod ios;
 mod layout;
 mod models;
+#[cfg(feature = "app")]
 mod native;
-mod pushes;
+pub mod push;
+#[cfg(feature = "app")]
 mod service;
 #[cfg(feature = "testkit")]
 pub mod testkit;
+mod tokens;
 mod validation;
 
 /// The iOS engine crate, so a caller builds its kit with the same version.
@@ -69,7 +78,9 @@ pub use ::activitykit;
 /// The Android engine crate, so a caller implements its bridge against the same version.
 #[doc(no_inline)]
 pub use ::liveupdate;
+#[cfg(feature = "app")]
 pub use backend::{BackendFuture, LiveActivityBackend};
+#[cfg(feature = "app")]
 pub use blocking::{block_on, wait};
 pub use error::{ERROR_CODES, Error, Result};
 pub use event::{
@@ -81,7 +92,9 @@ pub use image::{
 };
 pub use layout::*;
 pub use models::*;
+#[cfg(feature = "app")]
 pub use native::{UnsupportedBackend, connect_native};
-pub use pushes::{PushToStartTokenEvent, PushTokenEvent, PushTokens, TOKENS_KEPT, UpdatedEvent};
+#[cfg(feature = "app")]
 pub use service::{Builder, LiveActivity};
+pub use tokens::{PushToStartTokenEvent, PushTokenEvent, PushTokens, TOKENS_KEPT, UpdatedEvent};
 pub use validation::{Validate, parse_request, validate_request};

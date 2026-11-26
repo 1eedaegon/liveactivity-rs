@@ -12,9 +12,18 @@ description = "Framework-neutral Live Activities: one interface over ActivityKit
 keywords = ["live-activity", "activitykit", "dynamic-island", "android", "ios"]
 categories = ["api-bindings", "os"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
+default = ["app"]
+# The application's side: `LiveActivity`, the backends and the events.
+app = []
+# The sender of pushes to APNs, for a server; `liveactivity::push` is there without it.
+server = ["dep:jsonwebtoken", "dep:reqwest"]
 # The conformance suite and a backend without a platform, for tests.
-testkit = []
+testkit = ["app"]
 
 [[example]]
 name = "usage"
@@ -28,16 +37,28 @@ required-features = ["testkit"]
 name = "features"
 required-features = ["testkit"]
 
+[[example]]
+name = "push_server"
+required-features = ["server"]
+
 [dependencies]
 activitykit.workspace = true
 liveupdate = { workspace = true, features = ["android"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+jsonwebtoken = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
 
 [dev-dependencies]
+aws-lc-rs.workspace = true
+axum.workspace = true
+base64.workspace = true
 futures-executor.workspace = true
+jsonwebtoken.workspace = true
 liveactivity = { path = ".", default-features = false, features = ["testkit"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+wiremock.workspace = true
 
 [lints]
 workspace = true

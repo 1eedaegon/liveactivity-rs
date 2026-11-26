@@ -895,6 +895,73 @@ language it has, also for a channel that exists. The AAR of the lock has those f
 
 Evidence: `engine_fixtures::req_a_034_the_setup_names_the_strings_of_the_aars_channels`.
 
+## REQ-P-001 An application without the server
+
+The feature `app` is the default and holds the API that the crate had before it: `LiveActivity`, the backends and
+the events. `liveactivity::push` is there with any features. The feature `server` adds the sender and its
+dependencies (`tokio`, `reqwest`, `jsonwebtoken`), which a build without it does not resolve.
+
+Evidence: `push::req_p_001_no_build_without_server_resolves_its_dependencies`, and CI's builds of each feature.
+
+## REQ-P-002 One message for both platforms
+
+`push::Message` is a start, an update or an end built from the contract's types (`LayoutStartInput`,
+`LayoutSnapshot`, `EndPolicy`), named by the activity's key, with an alert and a priority. `Message::request`
+checks it as the backend checks the call it stands for, so that what a device would refuse is `INVALID_INPUT` on
+the server, and refuses a request of more than 4096 bytes before it is sent.
+
+Evidence: `push::req_p_002_a_message_is_checked_as_its_call`.
+
+## REQ-P-003 The targets of an activity
+
+`push::Target` is the JSON that an application sends to its server, read and written by serde, and
+`#[non_exhaustive]`: an activity's APNs token, the app's push-to-start token, a broadcast channel, an FCM token. A
+message that a target cannot take, a start to an activity's token or an update to the push-to-start token, is
+`INVALID_INPUT`.
+
+Evidence: `push::req_p_003_a_target_is_the_json_an_application_sends`.
+
+## REQ-P-004 The APNs request
+
+A message to an APNs target is `POST /3/device/<token>`, or APNs's broadcast request with the channel's
+`apns-channel-id` (its path from Apple's documentation when it is built), with
+`apns-push-type: liveactivity`, `apns-topic: <bundle>.push-type.liveactivity` and `apns-priority` 10 or 5, and the
+body that activitykit's `Payload` writes for it.
+
+Evidence: `push::req_p_004_the_apns_request`.
+
+## REQ-P-005 The FCM request
+
+A message to an FCM target is FCM HTTP v1's message with the token, `android.priority` `high` or `normal`, and the
+data member that liveupdate's push path reads. Until liveupdate publishes that path, it is `UNSUPPORTED_FEATURE`.
+
+Evidence: `push::req_p_005_an_fcm_target_waits_for_the_engine`.
+
+## REQ-P-006 A sender for the platforms it is given
+
+With `server`, `Sender::builder()` takes APNs (a `.p8` key, its id, the team, the bundle; the sandbox on request)
+and FCM (a service account) each optionally, and does not build with neither. A target of a platform that it was not
+given is `UNSUPPORTED_FEATURE`. It signs in once and again before the sign-in runs out (APNs between 20 and 60
+minutes, FCM before its hour), shared by its clones; it takes the service's own HTTP client and hosts for tests.
+
+Evidence: `push::send::req_p_006_a_sender_signs_in_for_what_it_is_given`, against a test server.
+
+## REQ-P-007 What came back, in one vocabulary
+
+`Sender::send` answers a delivery with the platform's id, or `Unregistered` (APNs 410, FCM `UNREGISTERED`),
+`BadTarget`, `TooManyRequests { retry_after }`, `Rejected { status, reason }`, `Unavailable`, or `Invalid` with the
+message's own error. A key never appears in `Debug`, `Display` or an error.
+
+Evidence: `push::send::req_p_007_each_answer_of_each_platform`.
+
+## REQ-P-008 No web handler, no environment
+
+The crate has no web handler and reads no environment variable: keys come in as text or bytes, and the
+registration of targets, authentication and storage are the service's. `examples/push-server` registers targets and
+sends with axum, keys from the environment.
+
+Evidence: `push::req_p_008_the_crate_reads_no_environment`, and the example's build in CI.
+
 ## REQ-N-001 No framework in the crate
 
 The crate depends on its two engines, serialization and errors only.

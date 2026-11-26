@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.12.1 - 2026-11-26
+
+- fix: the app learns its push-to-start token, with activitykit 0.9.1 (#40) (`25c1497`)
+
 Built on activitykit 0.9.1.
 
 - **The app learns its push-to-start token** (iOS): with `push_to_start(true)`, `Event::PushToStartToken` brings the

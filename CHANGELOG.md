@@ -4,6 +4,9 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.8.3, with its AAR `liveupdate-android-0.8.3.aar`: a release of liveupdate's documents and
+crate metadata, whose Rust code, JSON and Android sources are 0.8.2's. Nothing of this crate changes.
+
 ## 0.11.0 - 2026-11-20
 
 - feat: Live Activities from iOS 16.1 and layouts on activitykit's constructors, with activitykit 0.8.1 (#37) (`1c66f8b`)

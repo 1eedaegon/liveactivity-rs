@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.16.0 - 2026-11-26
+
+- feat: a layout activity pushed on Android through liveupdate 0.12.0's layer, and a sender for FCM (#45) (`41ce53a`)
+
 Built on liveupdate 0.12.0, with its AAR `liveupdate-android-0.12.0.aar`.
 
 - **A layout activity pushed on Android.** A server sends the same `push::Message` to an FCM target as to APNs.

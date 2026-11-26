@@ -2749,7 +2749,11 @@ fn req_a_024_the_capabilities_say_whether_a_watch_shows_an_ongoing_activity() {
 #[test]
 fn req_a_032_a_start_keeps_every_snapshot_of_its_activity_off_a_paired_watch() {
     // REQ-A-032
-    let local_device = MemoryDriver::offering(|offered| offered.local_only = true);
+    // A device that keeps an activity off a paired watch, and the last content of an end.
+    let local_device = MemoryDriver::offering(|offered| {
+        offered.local_only = true;
+        offered.delayed_end = true;
+    });
     let (live, _events, driver) = android_on(local_device, "local-only");
     let with_option = |key: &str, local: Option<bool>| {
         let mut request = serde_json::to_value(ride(key, None)).unwrap();
@@ -2784,11 +2788,42 @@ fn req_a_032_a_start_keeps_every_snapshot_of_its_activity_off_a_paired_watch() {
     sent["presentation"]["localOnly"] = serde_json::json!(false);
     block_on(live.update_layout(layout_update(ride_update(&off.id, 2, Some(sent))))).unwrap();
     assert!(local(&off.id));
-    // The same start again is the same activity, and the start of the same key that sends it is another one.
+    // The same start again is the same activity, and the start of the same key that sends it is another one,
+    // which posts nothing.
     let again = block_on(live.start_layout(with_option("ride:2", Some(true)))).unwrap();
     assert_eq!(again.id, off.id);
+    let posts = driver.lock().posts;
     let other = block_on(live.start_layout(with_option("ride:2", None)));
     assert_eq!(other.unwrap_err().code, "CONFLICT");
+    assert_eq!(driver.lock().posts, posts);
+    // The last content of an end stays local too.
+    let mut end = serde_json::json!({ "id": off.id, "policy": { "kind": "after", "at": 500_000 },
+        "snapshot": { "revision": 3, "values": { "eta": "here", "done": 1.0 } } });
+    end["snapshot"]["android"] = driving(100, "here");
+    let end =
+        liveactivity::parse_request::<liveactivity::LayoutEndInput>("end_layout", end).unwrap();
+    block_on(live.end_layout(end)).unwrap();
+    let last = driver.lock().finals[&off.id].snapshot.clone();
+    assert!(last.presentation.unwrap().local_only);
+
+    // A member that is no Boolean is refused on every platform, in the options and in a content.
+    for wrong in [
+        serde_json::json!(null),
+        serde_json::json!("yes"),
+        serde_json::json!(1),
+    ] {
+        let mut request = serde_json::to_value(ride("ride:5", None)).unwrap();
+        request["android"] = serde_json::json!({ "visibility": "private", "localOnly": wrong });
+        let read =
+            liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", request);
+        assert_eq!(read.unwrap_err().code, "INVALID_INPUT", "{wrong}");
+        let mut content = driving(70, "2 min");
+        content["presentation"]["localOnly"] = wrong.clone();
+        let update = ride_update(&plain.id, 9, Some(content));
+        let read =
+            liveactivity::parse_request::<liveactivity::LayoutUpdateInput>("update_layout", update);
+        assert_eq!(read.unwrap_err().code, "INVALID_INPUT", "{wrong}");
+    }
 }
 
 #[test]

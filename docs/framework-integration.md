@@ -235,14 +235,19 @@ impl<B: LiveActivityBackend, D: Dialog> LiveActivityBackend for WithPermissionDi
     fn sync_events(&self) -> BackendFuture<'_, ()> {
         self.inner.sync_events()
     }
+
+    fn open_promotion_settings(&self) -> BackendFuture<'_, ()> {
+        self.inner.open_promotion_settings()
+    }
 }
 ```
 
 ### Rules of composing
 
 - **Delegate every method.** The trait has defaults for `attach`, `request_permissions`, the four
-  layout methods, `write_image`, `push_tokens` and `sync_events`. A wrapper that leaves one out gets
-  the default, not the inner backend's answer: layouts become `UNSUPPORTED_FEATURE`, and without
+  layout methods, `write_image`, `push_tokens`, `sync_events` and `open_promotion_settings`. A
+  wrapper that leaves one out gets the default, not the inner backend's answer: layouts become
+  `UNSUPPORTED_FEATURE`, so does opening the settings of promotion on Android, and without
   `attach` the inner backend never gets the sink and no tap arrives.
 - **`attach` runs once**, in `build()`, before any command. Hand the `BackendContext` to the inner
   backend, or keep it and call `events.emit(..)` when the framework's own native side reports a

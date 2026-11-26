@@ -320,6 +320,8 @@ fn req_a_034_the_setup_names_the_strings_of_the_aars_channels() {
             "liveupdate_channel_description",
             "liveupdate_alert_channel_name",
             "liveupdate_alert_channel_description",
+            "liveupdate_watch_channel_name",
+            "liveupdate_watch_channel_description",
         ],
         "the AAR names its channels by these strings"
     );

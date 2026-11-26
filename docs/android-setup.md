@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.10.0.aar` from liveupdate's
+Put `liveupdate-android-0.11.0.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too, and in a watch application the library of [its Ongoing Activity](#a-watch):
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.10.0.aar"))
+    implementation(files("libs/liveupdate-android-0.11.0.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
     implementation("androidx.wear:wear-ongoing:1.1.0") // a watch application only
 }
@@ -524,6 +524,16 @@ take back a copy that a watch has already got. `capabilities().android_presentat
 AAR does it; where it does not, such a start or update is `UNSUPPORTED_FEATURE` and posts nothing, since an
 earlier AAR would send the activity to the watch.
 
+Or the other way: a phone's activity reaches a paired watch through a mirror (liveupdate 0.11.0).
+`AndroidOptions::new(visibility).with_watch_mirror(true)` for a layout mirrors every snapshot, and
+`watch_mirror: true` in the presentation of an Android content mirrors that snapshot. The activity's own
+notification then stays on the phone, and a second one, not ongoing, so that a watch's bridge takes it, carries the
+same content to the watch; the phone lists it too, quietly. A revision that alerts alerts through the mirror only.
+A person who removes the mirror stops it for that activity, and the activity's end or dismissal removes it.
+`capabilities().android_presentation.watch_mirror` is true on a phone with this AAR and false on a watch and with an
+earlier AAR, where such a start or update is `UNSUPPORTED_FEATURE`. Kept local and mirrored at once is
+`INVALID_INPUT`.
+
 ## 5. Permissions
 
 `live.permissions()` reports what Android allows:
@@ -589,10 +599,11 @@ of the host's own that does not forward the call.
 
 ### The names of the channels
 
-The AAR posts on two channels, which the system's settings list by name: one for activities, one for the
-revisions that alert. Name them in the application's words and languages by defining these strings in
-`res/values/strings.xml`, and in `res/values-<language>/strings.xml` for each translation (liveupdate 0.9.0).
-They take the place of the AAR's English names, also for a channel that exists.
+The AAR posts on channels that the system's settings list by name: one for activities, one for the
+revisions that alert (liveupdate 0.9.0), and one for the mirrors of activities on a paired watch
+(liveupdate 0.11.0). Name them in the application's words and languages by defining these strings in
+`res/values/strings.xml`, and in `res/values-<language>/strings.xml` for each translation. They take the
+place of the AAR's English names, also for a channel that exists.
 
 ```xml
 <resources>
@@ -600,6 +611,8 @@ They take the place of the AAR's English names, also for a channel that exists.
     <string name="liveupdate_channel_description">Deliveries in progress</string>
     <string name="liveupdate_alert_channel_name">Delivery alerts</string>
     <string name="liveupdate_alert_channel_description">Deliveries that ask for your attention</string>
+    <string name="liveupdate_watch_channel_name">Deliveries on a watch</string>
+    <string name="liveupdate_watch_channel_description">Deliveries in progress, on a paired watch</string>
 </resources>
 ```
 
@@ -785,6 +798,7 @@ are not always of one version. They are tested as a pair of one version. Apart, 
 | Later | Up to 0.6.0 | A request with a member that the AAR does not know is `INVALID_INPUT`: `wearOngoingActivity`, with an AAR before 0.6.0. One without it works |
 | Later | Before 0.9.0 | `local_only` reads `false` and an activity kept off the watch is `UNSUPPORTED_FEATURE`; `open_promotion_settings` is `UNSUPPORTED_FEATURE`; the channels keep the AAR's English names |
 | Later | Before 0.10.0 | `push` reads `false`: the AAR has no `LiveUpdatePush`, so a messaging service has nothing to hand a message to |
+| Later | Before 0.11.0 | `watch_mirror` reads `false`, and a mirrored activity is `UNSUPPORTED_FEATURE` |
 | Earlier | Later | It works: liveupdate reads what it knows of a reply. An event of a kind it does not know reaches the sink as `Event::Unknown`; before liveupdate 0.7.0 the events taken with it were lost |
 
 A member that an activity depends on, a start time, the foreground placement, an action's target or an

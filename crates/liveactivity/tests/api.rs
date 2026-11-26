@@ -152,6 +152,38 @@ fn req_c_012_a_constructor_builds_what_the_literal_was() {
 }
 
 #[test]
+fn req_a_040_the_options_of_a_mirrored_start() {
+    // REQ-A-040
+    let mirrored = AndroidOptions::new(AndroidVisibility::Private).with_watch_mirror(true);
+    assert_eq!(mirrored.watch_mirror, Some(true));
+    assert_eq!(
+        serde_json::to_value(&mirrored).unwrap(),
+        json!({"visibility":"private","watchMirror":true})
+    );
+    let plain = AndroidOptions::new(AndroidVisibility::Private);
+    assert_eq!(plain.watch_mirror, None);
+    assert_eq!(
+        serde_json::to_value(&plain).unwrap(),
+        json!({"visibility":"private"})
+    );
+    // An Android content mirrors its own snapshot: liveupdate's member, left out when false.
+    let presentation = AndroidPresentation {
+        watch_mirror: true,
+        ..AndroidPresentation::new(PresentationStyle::Standard)
+    };
+    assert_eq!(
+        serde_json::to_value(&presentation).unwrap()["watchMirror"],
+        true
+    );
+    assert!(
+        serde_json::to_value(AndroidPresentation::new(PresentationStyle::Standard))
+            .unwrap()
+            .get("watchMirror")
+            .is_none()
+    );
+}
+
+#[test]
 fn req_a_032_the_options_of_a_start_kept_off_the_watch() {
     // REQ-A-032
     let kept = AndroidOptions::new(AndroidVisibility::Private).with_local_only(true);

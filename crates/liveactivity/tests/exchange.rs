@@ -3223,3 +3223,139 @@ fn req_a_035_the_capabilities_say_whether_the_aar_takes_a_push() {
     // The capability is liveupdate's, of the AAR; a layout activity is not pushed by liveupdate's payload.
     assert_eq!(wire["push"], "unsupported");
 }
+
+/// A ride's start with the Android options `options` beside its visibility.
+fn ride_with(key: &str, options: serde_json::Value) -> liveactivity::LayoutStartInput {
+    let mut request = serde_json::to_value(ride(key, None)).unwrap();
+    request["android"] = serde_json::json!({ "visibility": "private" });
+    for (name, value) in options.as_object().unwrap() {
+        request["android"][name] = value.clone();
+    }
+    liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", request).unwrap()
+}
+
+#[test]
+fn req_a_040_a_start_mirrors_every_snapshot_of_its_activity() {
+    // REQ-A-040
+    let phone = MemoryDriver::offering(|offered| {
+        offered.watch_mirror = true;
+        offered.local_only = true;
+        offered.delayed_end = true;
+    });
+    let (live, _events, driver) = android_on(phone, "watch-mirror");
+    let mirrored = |id: &str| driver.posted(id).presentation.unwrap().watch_mirror;
+
+    // A start that says nothing mirrors nothing; a content mirrors its own snapshot.
+    let plain = block_on(live.start_layout(ride_with("ride:1", serde_json::json!({})))).unwrap();
+    assert!(!mirrored(&plain.id));
+    let mut shown = driving(70, "2 min");
+    shown["presentation"]["watchMirror"] = serde_json::json!(true);
+    block_on(live.update_layout(layout_update(ride_update(&plain.id, 1, Some(shown))))).unwrap();
+    assert!(mirrored(&plain.id));
+    block_on(live.update_layout(layout_update(ride_update(&plain.id, 2, None)))).unwrap();
+    assert!(!mirrored(&plain.id));
+    // `false` is the same activity as nothing.
+    let again = block_on(live.start_layout(ride_with(
+        "ride:1",
+        serde_json::json!({ "watchMirror": false }),
+    )))
+    .unwrap();
+    assert_eq!(again.id, plain.id);
+
+    // A mirrored start mirrors every snapshot, a content's too, whatever it says, and the last content of an end.
+    let start = ride_with("ride:2", serde_json::json!({ "watchMirror": true }));
+    let on = block_on(live.start_layout(start.clone())).unwrap();
+    assert!(mirrored(&on.id));
+    block_on(live.update_layout(layout_update(ride_update(&on.id, 1, None)))).unwrap();
+    assert!(mirrored(&on.id));
+    let mut sent = driving(80, "1 min");
+    sent["presentation"]["watchMirror"] = serde_json::json!(false);
+    block_on(live.update_layout(layout_update(ride_update(&on.id, 2, Some(sent))))).unwrap();
+    assert!(mirrored(&on.id));
+    assert_eq!(block_on(live.start_layout(start)).unwrap().id, on.id);
+    let mut end = serde_json::json!({ "id": on.id, "policy": { "kind": "after", "at": 500_000 },
+        "snapshot": { "revision": 3, "values": { "eta": "here", "done": 1.0 } } });
+    end["snapshot"]["android"] = driving(100, "here");
+    let end =
+        liveactivity::parse_request::<liveactivity::LayoutEndInput>("end_layout", end).unwrap();
+    block_on(live.end_layout(end)).unwrap();
+    assert!(
+        driver.lock().finals[&on.id]
+            .snapshot
+            .clone()
+            .presentation
+            .unwrap()
+            .watch_mirror
+    );
+
+    // Kept off the watch and sent to it at once is no request, on every platform.
+    let mut both = serde_json::to_value(ride("ride:3", None)).unwrap();
+    both["android"] =
+        serde_json::json!({ "visibility": "private", "localOnly": true, "watchMirror": true });
+    let read = liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", both);
+    assert_eq!(read.unwrap_err().code, "INVALID_INPUT");
+    let mut content = driving(70, "2 min");
+    content["presentation"]["localOnly"] = serde_json::json!(true);
+    content["presentation"]["watchMirror"] = serde_json::json!(true);
+    let read = liveactivity::parse_request::<liveactivity::LayoutUpdateInput>(
+        "update_layout",
+        ride_update(&plain.id, 9, Some(content)),
+    );
+    assert_eq!(read.unwrap_err().code, "INVALID_INPUT");
+    // A content that mirrors under a start kept local, and the other way round, is refused and shows nothing new.
+    let local = block_on(live.start_layout(ride_with(
+        "ride:4",
+        serde_json::json!({ "localOnly": true }),
+    )))
+    .unwrap();
+    let mut asks = driving(70, "2 min");
+    asks["presentation"]["watchMirror"] = serde_json::json!(true);
+    let posts = driver.lock().posts;
+    let refused =
+        block_on(live.update_layout(layout_update(ride_update(&local.id, 1, Some(asks)))));
+    assert_eq!(refused.unwrap_err().code, "INVALID_INPUT");
+    assert_eq!(driver.lock().posts, posts);
+
+    // Anything but a Boolean is refused.
+    for wrong in [
+        serde_json::json!(null),
+        serde_json::json!("yes"),
+        serde_json::json!(1),
+    ] {
+        let mut request = serde_json::to_value(ride("ride:5", None)).unwrap();
+        request["android"] = serde_json::json!({ "visibility": "private", "watchMirror": wrong });
+        let read =
+            liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", request);
+        assert_eq!(read.unwrap_err().code, "INVALID_INPUT", "{wrong}");
+    }
+}
+
+#[test]
+fn req_a_040_a_mirror_needs_the_devices_capability() {
+    // REQ-A-040
+    let phone = MemoryDriver::offering(|offered| offered.watch_mirror = true);
+    let (live, _events, _driver) = android_on(phone, "watch-mirror-capability");
+    let offered = block_on(live.capabilities()).unwrap();
+    assert!(offered.android_presentation.unwrap().watch_mirror);
+    assert_eq!(
+        serde_json::to_value(&offered).unwrap()["androidPresentation"]["watchMirror"],
+        true
+    );
+    // An earlier AAR, or a watch: refused, nothing posted.
+    let (earlier, _events, driver) = android_with_files("watch-mirror-earlier");
+    assert!(
+        !block_on(earlier.capabilities())
+            .unwrap()
+            .android_presentation
+            .unwrap()
+            .watch_mirror
+    );
+    let posts = driver.lock().posts;
+    let refused = block_on(earlier.start_layout(ride_with(
+        "ride:6",
+        serde_json::json!({ "watchMirror": true }),
+    )))
+    .unwrap_err();
+    assert_eq!(refused.code, "UNSUPPORTED_FEATURE");
+    assert_eq!(driver.lock().posts, posts);
+}

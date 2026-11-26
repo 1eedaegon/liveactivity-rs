@@ -20,11 +20,12 @@ live.end(EndInput::new(&order.id)).await?;
 
 ```toml
 [dependencies]
-liveactivity = "0.13"
-
-# A server that sends pushes: the sender, without the application's side.
-liveactivity = { version = "0.13", default-features = false, features = ["server"] }
+liveactivity = "0.12"
 ```
+
+A server that sends pushes takes the same version with `default-features = false`
+and `features = ["server"]`: the sender, without the application's side
+([Pushes from a server](#pushes-from-a-server)).
 
 The crate uses [activitykit](https://github.com/1eedaegon/activitykit-rs) for
 iOS and [liveupdate](https://github.com/1eedaegon/liveupdate-rs) for Android as

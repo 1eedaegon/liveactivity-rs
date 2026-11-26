@@ -69,6 +69,8 @@ let start = Message::start(uuid, LayoutStartInput::new("delivery:7", layout, Lay
 - **The message is checked as the device checks the call**: what the device would refuse is `INVALID_INPUT` on the
   server, more than 4096 bytes is `PAYLOAD_TOO_LARGE`, and a message to a target that does not take it is
   `INVALID_INPUT`.
+- **An end is the activity's state.** The application learns it as `Event::State` with `ended`. The last content
+  of an end may also come as `Event::Updated` or may not: on one iPhone it came in one run and not in the next.
 - **`Priority::Now`**, the default, shows the push at once and counts toward the application's budget of pushes;
   `Priority::Low` may wait.
 

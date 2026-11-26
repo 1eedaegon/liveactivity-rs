@@ -239,9 +239,47 @@ impl Alert {
     }
 }
 
+impl Alert {
+    /// activitykit's alert, with its sound when it names one: what the iOS backend shows and a push carries.
+    pub(crate) fn kit(&self) -> activitykit::Alert {
+        let shown = activitykit::Alert::new(self.title.clone(), self.body.clone());
+        match &self.sound {
+            Some(name) => shown.sound(name.clone()),
+            None => shown,
+        }
+    }
+}
+
 /// The member `layout` of a start: one tree per region, the two tints and the URL a tap opens. The layout is fixed
 /// when the activity starts; only a bound `background`, `keyline` or `url` follows the values.
 pub type Layout = wire::LayoutRegions;
+
+/// activitykit's layout of a start's regions and styles: what the iOS backend starts and a push-to-start carries.
+pub(crate) fn kit_layout(
+    regions: Layout,
+    styles: Option<BTreeMap<String, Style>>,
+) -> activitykit::Layout {
+    let mut layout = activitykit::Layout::new(regions.lock_screen);
+    if let Some(island) = regions.island {
+        layout = layout.island(island);
+    }
+    if let Some(background) = regions.background {
+        layout = layout.background(background);
+    }
+    if let Some(keyline) = regions.keyline {
+        layout = layout.keyline(keyline);
+    }
+    if let Some(url) = regions.url {
+        layout = layout.url(url);
+    }
+    if let Some(small) = regions.small {
+        layout = layout.small(small);
+    }
+    for (token, style) in styles.unwrap_or_default() {
+        layout = layout.style(token, style);
+    }
+    layout
+}
 
 /// Reads a member that may be absent but never `null`.
 fn non_null<'de, D: Deserializer<'de>, T: Deserialize<'de>>(

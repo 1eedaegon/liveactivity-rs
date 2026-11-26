@@ -36,6 +36,9 @@ jobs:
       - run: rustup target add aarch64-linux-android
       # REQ-A-030: the backend built from raw JNI pointers exists on Android only, and builds here.
       - run: cargo check --locked -p liveactivity --target aarch64-linux-android
+      # REQ-P-001: a server without the application's side, and shared types without the sender.
+      - run: cargo clippy --locked -p liveactivity --no-default-features --features server -- -D warnings
+      - run: cargo clippy --locked -p liveactivity --no-default-features -- -D warnings
 
   msrv:
     name: Rust 1.90
@@ -46,3 +49,4 @@ jobs:
           persist-credentials: false
       - run: rustup toolchain install 1.90.0 --profile minimal
       - run: cargo +1.90.0 check --locked --workspace --all-targets
+      - run: cargo +1.90.0 check --locked --workspace --all-targets --all-features

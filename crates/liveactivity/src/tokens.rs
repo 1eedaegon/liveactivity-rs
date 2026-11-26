@@ -4,6 +4,7 @@
 
 use crate::layout::LayoutActivityRecord;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "app")]
 use std::sync::{Arc, Mutex, PoisonError};
 
 /// How many activities' tokens a backend keeps, the newest.
@@ -50,9 +51,11 @@ pub struct PushTokens {
 }
 
 /// A backend's record of the tokens, written before each event goes out; clones share it.
+#[cfg(feature = "app")]
 #[derive(Clone, Default)]
 pub(crate) struct TokenBook(Arc<Mutex<PushTokens>>);
 
+#[cfg(feature = "app")]
 impl TokenBook {
     /// A token replaces the activity's; the oldest activity gives way to a new one past [`TOKENS_KEPT`].
     pub(crate) fn note_token(&self, token: &PushTokenEvent) {

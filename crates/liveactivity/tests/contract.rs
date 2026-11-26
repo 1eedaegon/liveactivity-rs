@@ -200,9 +200,19 @@ fn req_n_001_the_crate_declares_only_its_engines_and_serde() {
             "liveupdate",
             "serde",
             "serde_json",
-            "thiserror"
+            "thiserror",
+            "jsonwebtoken",
+            "reqwest"
         ]
     );
+    // The sender's two are the feature `server`'s alone.
+    for name in ["jsonwebtoken", "reqwest"] {
+        let line = dependencies
+            .lines()
+            .find(|line| line.starts_with(name))
+            .unwrap();
+        assert!(line.contains("optional = true"), "{line}");
+    }
 }
 
 #[test]

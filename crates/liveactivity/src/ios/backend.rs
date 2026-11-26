@@ -6,7 +6,7 @@ use crate::{
     ActivityRecord, BackendContext, BackendFuture, Capabilities, EndInput, Error, Event,
     LayoutActivityRecord, LayoutEndInput, LayoutStartInput, LayoutUpdateInput, LiveActivityBackend,
     PermissionKind, Permissions, PushToStartTokenEvent, PushTokens, Result, StartInput,
-    UpdateInput, pushes::TokenBook,
+    UpdateInput, tokens::TokenBook,
 };
 use activitykit::ActivityKit;
 use std::{sync::OnceLock, thread};

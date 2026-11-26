@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.8.2.aar` from liveupdate's
+Put `liveupdate-android-0.8.3.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too, and in a watch application the library of [its Ongoing Activity](#a-watch):
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.8.2.aar"))
+    implementation(files("libs/liveupdate-android-0.8.3.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
     implementation("androidx.wear:wear-ongoing:1.1.0") // a watch application only
 }

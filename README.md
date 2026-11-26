@@ -97,7 +97,7 @@ cargo run -p liveactivity --example features --features testkit
 | [A lock screen version, a foreground service](#android-options) | `LayoutStartInput.android` | ignored | ✓ where the device offers them |
 | [Images](#images) | `write_image`, an `image` node | ✓ needs an App Group | ✓ as the large icon |
 | [Pushes](#pushes) | `LayoutStartInput.push`, `push_tokens` | ✓ | none |
-| [Pushes from a server](#pushes-from-a-server) | `push::Message`, `push::Target`, `push::Sender` (feature `server`) | ✓ APNs | not yet: waits for liveupdate's push path |
+| [Pushes from a server](#pushes-from-a-server) | `push::Message`, `push::Target`, `push::Sender` (feature `server`) | ✓ APNs | liveupdate's own payload with the feature `android-push`, reported as `Event::Pushed`; a layout activity not yet |
 | [Events](#events) | the event sink, `sync_events` | ✓ as they come | ✓ on `sync_events` |
 | [Capabilities and permissions](#capabilities-and-permissions) | `capabilities`, `permissions`, `request_permissions`, `open_promotion_settings` | ✓; no settings of promotion | ✓ the dialog is the host's; the settings of Live Updates open from a tap |
 | [Blocking calls](#blocking-calls) | `wait` | ✓ off the main thread | ✓ |
@@ -560,7 +560,8 @@ match sender.send(&message, &target).await {
 `Message::start` goes to the push-to-start token, `update` and `end` to an
 activity's token or a channel. Without `server`, `message.request(&target,
 &application)` gives the path, the headers and the body for another HTTP
-client. Android's pushes wait for liveupdate. The steps, from the key to what
+client. On Android a layout activity is not pushed yet: liveupdate 0.10 runs its own payload
+([docs/android-setup.md](docs/android-setup.md#pushes-from-the-server)). The steps, from the key to what
 came back, are in [docs/server-push.md](docs/server-push.md); the example
 `push_server` is a server with axum.
 
@@ -574,6 +575,7 @@ came back, are in [docs/server-push.md](docs/server-push.md); the example
 | `Event::Updated` | a push changed the content of a layout activity | ✓ | |
 | `Event::PushToken` | an activity got a push token, or a new one | ✓ | |
 | `Event::PushToStartToken` | the app's push-to-start token, at launch and when it changes | ✓ | |
+| `Event::Pushed` | a push from the server was taken or refused | | ✓ with the feature `android-push` |
 | `Event::Permissions` | the person changed what the app may do | ✓ | |
 | `Event::Opened` | the person opened the application from a notification | the application gets the URL itself | ✓ when the host reports the opening intent |
 | `Event::Unknown` | something this version has no event for | | ✓ when the AAR is of a later liveupdate than the crate |

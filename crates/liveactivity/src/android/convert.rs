@@ -117,6 +117,41 @@ pub(crate) fn error(value: liveupdate::Error) -> Error {
     }
 }
 
+/// What a push did, from liveupdate's stored event: the activity's id, empty when the push named no live activity,
+/// and the contract's code of a refusal. A command that this version does not know is an event of an unknown kind.
+pub(crate) fn pushed(
+    activity_id: String,
+    command: &str,
+    activity_key: String,
+    revision: Option<u64>,
+    code: Option<liveupdate::ErrorCode>,
+) -> crate::Event {
+    let command = match command {
+        "start" => crate::PushCommand::Start,
+        "update" => crate::PushCommand::Update,
+        "end" => crate::PushCommand::End,
+        _ => {
+            return crate::Event::Unknown(crate::UnknownEvent {
+                activity_id,
+                activity_key: Some(activity_key),
+            });
+        }
+    };
+    let code = code.map(|code| {
+        serde_json::to_value(code)
+            .ok()
+            .and_then(|value| value.as_str().map(contract_code))
+            .unwrap_or_else(|| "NATIVE_ERROR".into())
+    });
+    crate::Event::Pushed(crate::PushedEvent {
+        activity_id: (!activity_id.is_empty()).then_some(activity_id),
+        activity_key,
+        command,
+        revision,
+        code,
+    })
+}
+
 /// `code` when the contract has it, else `NATIVE_ERROR`.
 fn contract_code(code: &str) -> String {
     if crate::error::ERROR_CODES.contains(&code) {

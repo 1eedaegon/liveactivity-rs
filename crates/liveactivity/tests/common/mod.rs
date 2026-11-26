@@ -238,6 +238,35 @@ impl MemoryDriver {
         self.lock().events.events.push(event);
     }
 
+    /// Queues what `LiveUpdatePush.handle` stores of a push: `id` is empty when it named no live activity, `code`
+    /// is the refusal's.
+    pub fn pushed(
+        &self,
+        id: &str,
+        sequence: u64,
+        command: &str,
+        key: &str,
+        revision: Option<u64>,
+        code: Option<&str>,
+    ) {
+        let mut kind = json!({"kind": "pushed", "command": command, "activityKey": key});
+        if let Some(revision) = revision {
+            kind["revision"] = json!(revision);
+        }
+        if let Some(code) = code {
+            kind["code"] = json!(code);
+        }
+        let event: ActivityEvent = serde_json::from_value(json!({
+            "sequence": sequence,
+            "activityId": id,
+            "occurredAt": 1_800_000_000_000_u64,
+            "kind": kind,
+        }))
+        .unwrap();
+        assert!(matches!(event.kind, liveupdate::EventKind::Pushed { .. }));
+        self.lock().events.events.push(event);
+    }
+
     /// Queues an event of the kind `kind`, which this liveupdate does not know, as a later AAR stores one.
     pub fn later(&self, id: &str, sequence: u64, kind: &str) {
         let event: ActivityEvent = serde_json::from_value(json!({

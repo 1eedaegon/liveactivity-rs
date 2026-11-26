@@ -617,7 +617,7 @@ and for the rules that follow a device:
   "chronometer": true, "links": true, "styleChange": true, "delayedEnd": true,
   "foregroundPlacement": true, "alert": true, "publicVersion": true, "branding": true,
   "scheduledStart": true, "exactStart": false, "wearOngoingActivity": false, "actionTargets": true,
-  "localOnly": true
+  "localOnly": true, "push": true
 }
 ```
 
@@ -628,7 +628,9 @@ alerts, and `foregroundPlacement` the `placement` of a start. `scheduledStart` i
 when Android chooses. `actionTargets` says whether an action may run a component of the application (a start's
 `targets`, an action's `target`). `wearOngoingActivity` says whether a notification carries
 [a watch's Ongoing Activity](#a-watchs-ongoing-activity), and `localOnly` whether an activity can stay off a
-paired watch (a start's `localOnly`). `links` and `chronometer` also decide what
+paired watch (a start's `localOnly`). `push` says whether the AAR hands a data message from the server to
+liveupdate's lifecycle (liveupdate 0.10); a layout activity of this crate is not pushed that way yet, so the
+feature `push` stays `unsupported` on Android. `links` and `chronometer` also decide what
 [a layout shows](#what-android-shows). A member that the Android side does not report is false.
 Elsewhere `androidPresentation` is absent.
 
@@ -711,6 +713,7 @@ match with a `_` arm.
 | `Event::Action` | `ActionEvent` | iOS, Android: a tap on a `button` or a `toggle` node, or on an action of an Android content. For a toggle it has `on`, the state the person asked for, and `tap` says which tap it is ([A tap](#a-tap)) |
 | `Event::PushToken` | `PushTokenEvent` | iOS: a push token of an activity, new or changed |
 | `Event::PushToStartToken` | `PushToStartTokenEvent` | iOS: the app's push-to-start token, the one it has at launch and then each new one |
+| `Event::Pushed` | `PushedEvent` | Android: what a push from the server did, taken or refused: `{ activityId?, activityKey, command, revision?, code? }`; `activityId` is absent when the push named no live activity, `code` when it did what it asked (liveupdate 0.10) |
 | `Event::Updated` | `UpdatedEvent` | iOS: content that a push delivered to a layout activity |
 | `Event::Started` | `StartedEvent` | iOS: a layout activity began, one the application started or one a push started |
 | `Event::State` | `StateEvent` | A new lifecycle state of an activity. iOS: every change, while the application runs. Android: each state once, `active`, `stale`, `ended` and `dismissed`, when the backend is asked (see below) |

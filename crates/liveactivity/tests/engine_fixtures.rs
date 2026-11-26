@@ -366,6 +366,48 @@ fn req_a_031_the_aar_has_what_the_setup_names() {
     }
 }
 
+#[test]
+fn req_a_035_the_setup_names_the_aars_push_entry() {
+    // REQ-A-035
+    // liveupdate 0.10.0 hands a data message to its lifecycle from the host's messaging service, through a native
+    // entry that its feature `push` exports, in the library that the manifest's meta-data names.
+    let kotlin = package("liveupdate")
+        .0
+        .join("android/src/main/java/io/github/eedaegon/liveupdate/LiveUpdatePush.kt");
+    let push = fs::read_to_string(kotlin).expect("liveupdate ships its push entry");
+    let library = "io.github.eedaegon.liveupdate.LIBRARY";
+    assert!(
+        push.contains(&format!("const val LIBRARY = \"{library}\"")),
+        "the meta-data"
+    );
+    assert!(
+        push.contains("fun handle(context: Context, data: Map<String, String>): Boolean"),
+        "handle"
+    );
+    let (engine, _) = package("liveupdate");
+    let engine_manifest = fs::read_to_string(engine.join("Cargo.toml")).unwrap();
+    assert!(
+        engine_manifest.contains("push = [\"android\"]"),
+        "liveupdate's feature `push`"
+    );
+    // This crate turns it on with its own feature, with the application's side.
+    let manifest = include_str!("../Cargo.toml");
+    assert!(
+        manifest.contains("android-push = [\"app\", \"liveupdate/push\"]"),
+        "the feature `android-push`"
+    );
+    let setup = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/android-setup.md");
+    let setup = fs::read_to_string(setup).expect("the setup document is in the repository");
+    for named in [
+        library,
+        "LiveUpdatePush.handle(this, message.data)",
+        "android-push",
+        "main process",
+    ] {
+        assert!(setup.contains(named), "the setup names {named}");
+    }
+}
+
 fn cases<'a>(fixtures: &'a Value, group: &str) -> &'a Vec<Value> {
     fixtures[group].as_array().unwrap()
 }

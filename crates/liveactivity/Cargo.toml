@@ -20,6 +20,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = ["app"]
 # The application's side: `LiveActivity`, the backends and the events.
 app = []
+# liveupdate's push entry, exported from the host's library: a data message from the server reaches the
+# lifecycle while the application does not run (Android).
+android-push = ["app", "liveupdate/push"]
 # The sender of pushes to APNs, for a server; `liveactivity::push` is there without it.
 server = ["dep:jsonwebtoken", "dep:reqwest"]
 # The conformance suite and a backend without a platform, for tests.

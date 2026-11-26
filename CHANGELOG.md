@@ -4,6 +4,11 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.12.0 - 2026-11-26
+
+- chore: build on liveupdate 0.8.3 (#38) (`1071361`)
+- feat: an activity off a paired watch, the settings of promotion, channels in the application's words and a node of StandBy, with liveupdate 0.9.0 and activitykit 0.9.0 (#39) (`b5801f7`)
+
 Built on liveupdate 0.9.0, with its AAR `liveupdate-android-0.9.0.aar` (by way of 0.8.3, documents only), and on
 activitykit 0.9.0.
 

@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.9.0.aar` from liveupdate's
+Put `liveupdate-android-0.9.1.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too, and in a watch application the library of [its Ongoing Activity](#a-watch):
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.9.0.aar"))
+    implementation(files("libs/liveupdate-android-0.9.1.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
     implementation("androidx.wear:wear-ongoing:1.1.0") // a watch application only
 }
@@ -510,9 +510,12 @@ and `wear_ongoing_activity: false` in the presentation of an Android content
 always carries it.
 
 By liveupdate's account, which ran its library on a Galaxy Watch4 with Wear OS 5: it is for Wear OS 3 to
-6, older watches ignore it, Wear OS 7 shows Live Updates itself, and on that watch a phone's activity stayed
-on the phone. By Android's documentation an ongoing notification is not bridged to a paired watch, and a Live
-Update is bridged to some watches, by the Wear OS version and the maker. This crate ran on no watch.
+6, older watches ignore it, and Wear OS 7 shows Live Updates itself. By Android's documentation an ongoing
+notification is not bridged to a paired watch, and a Live Update is bridged to some watches, by the Wear OS
+version and the maker. liveupdate saw it on a Galaxy Watch4 with Wear OS 6 (0.9.1): Galaxy Wearable did not
+bridge a phone's activity there, as it drops ongoing notifications, though the application was allowed on the
+watch and the phone's screen was off. The last content after an end is not ongoing, so it goes through the bridge
+like any other notification, unless the activity is kept local. This crate ran on no watch.
 
 A phone's activity can stay off a paired watch where it would be bridged there (liveupdate 0.9.0):
 `AndroidOptions::new(visibility).with_local_only(true)` for a layout keeps every snapshot of the activity local,

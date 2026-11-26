@@ -491,3 +491,286 @@ async fn req_p_007_a_slow_answer_and_the_rest_of_the_answers() {
         .unwrap();
     assert_eq!(delivery.id, None);
 }
+
+/// A service account's JSON key for a project, its token endpoint on `server`, and the account's public key.
+fn service_account(server: &MockServer) -> (String, Vec<u8>) {
+    use aws_lc_rs::encoding::{AsDer, Pkcs8V1Der};
+    let pair = aws_lc_rs::rsa::KeyPair::generate(aws_lc_rs::rsa::KeySize::Rsa2048).unwrap();
+    let der: Pkcs8V1Der<'static> = pair.as_der().unwrap();
+    let body = STANDARD.encode(der.as_ref());
+    let lines: Vec<&str> = body
+        .as_bytes()
+        .chunks(64)
+        .map(|line| std::str::from_utf8(line).unwrap())
+        .collect();
+    let pem = format!(
+        "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
+        lines.join("\n")
+    );
+    let account = json!({
+        "type": "service_account",
+        "project_id": "demo-project",
+        "private_key_id": "0123456789abcdef",
+        "private_key": pem,
+        "client_email": "sender@demo-project.iam.gserviceaccount.com",
+        "token_uri": format!("{}/token", server.uri()),
+    });
+    (account.to_string(), pair.public_key().as_ref().to_vec())
+}
+
+fn fcm_target() -> Target {
+    Target::Fcm {
+        token: "dK3x:APA91b".into(),
+    }
+}
+
+fn fcm_sender(server: &MockServer, account: &str) -> Sender {
+    let account = liveactivity::push::FcmAccount::from_json(account).unwrap();
+    Sender::builder()
+        .fcm(liveactivity::push::Fcm::new(account).host(server.uri()))
+        .build()
+        .unwrap()
+}
+
+fn granted(token: &str) -> ResponseTemplate {
+    ResponseTemplate::new(200)
+        .set_body_json(json!({ "access_token": token, "expires_in": 3599, "token_type": "Bearer" }))
+}
+
+#[tokio::test]
+async fn req_p_009_a_sender_for_fcm() {
+    // REQ-P-009
+    let server = MockServer::start().await;
+    let (account, public) = service_account(&server);
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .and(header("content-type", "application/x-www-form-urlencoded"))
+        .respond_with(granted("ya29.first"))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/projects/demo-project/messages:send"))
+        .and(header("authorization", "Bearer ya29.first"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({ "name": "projects/demo-project/messages/0:1790000000" })),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    let sender = fcm_sender(&server, &account);
+    let delivery = sender.send(&update(1), &fcm_target()).await.unwrap();
+    assert_eq!(
+        delivery.id.as_deref(),
+        Some("projects/demo-project/messages/0:1790000000")
+    );
+    // The access token is kept: the second push asks for none.
+    sender
+        .clone()
+        .send(&update(2), &fcm_target())
+        .await
+        .unwrap();
+
+    // The grant: the JWT bearer of the account, RS256, its claims, signed by its key.
+    let requests = server.received_requests().await.unwrap();
+    let grants: Vec<_> = requests
+        .iter()
+        .filter(|request| request.url.path() == "/token")
+        .collect();
+    assert_eq!(grants.len(), 1);
+    let form = String::from_utf8(grants[0].body.clone()).unwrap();
+    let assertion = form
+        .strip_prefix("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=")
+        .unwrap();
+    assert_eq!(part(assertion, 0)["alg"], "RS256");
+    let claims = part(assertion, 1);
+    assert_eq!(claims["iss"], "sender@demo-project.iam.gserviceaccount.com");
+    assert_eq!(
+        claims["scope"],
+        "https://www.googleapis.com/auth/firebase.messaging"
+    );
+    assert_eq!(claims["aud"], format!("{}/token", server.uri()));
+    assert_eq!(
+        claims["exp"].as_u64().unwrap() - claims["iat"].as_u64().unwrap(),
+        3600
+    );
+    let (signed, signature) = assertion.rsplit_once('.').unwrap();
+    UnparsedPublicKey::new(&aws_lc_rs::signature::RSA_PKCS1_2048_8192_SHA256, &public)
+        .verify(
+            signed.as_bytes(),
+            &URL_SAFE_NO_PAD.decode(signature).unwrap(),
+        )
+        .unwrap();
+    // The message, with the layer's member.
+    let sent: serde_json::Value = serde_json::from_slice(
+        &requests
+            .iter()
+            .find(|request| request.url.path().ends_with(":send"))
+            .unwrap()
+            .body,
+    )
+    .unwrap();
+    assert_eq!(sent["message"]["token"], "dK3x:APA91b");
+    assert!(sent["message"]["data"]["liveupdate.layer"].is_string());
+
+    // The account never shows, and one that is none is refused without its text.
+    let shown = format!(
+        "{:?}",
+        liveactivity::push::FcmAccount::from_json(&account).unwrap()
+    );
+    assert!(shown.contains("sender@demo-project.iam.gserviceaccount.com"));
+    assert!(!shown.contains("PRIVATE KEY"), "{shown}");
+    assert!(!format!("{sender:?}").contains("PRIVATE KEY"));
+    let bad = json!({ "type": "service_account", "project_id": "demo-project", "private_key": "c2VjcmV0",
+        "client_email": "sender@demo-project.iam.gserviceaccount.com", "token_uri": "https://oauth2.googleapis.com/token" });
+    let error = liveactivity::push::FcmAccount::from_json(bad.to_string()).unwrap_err();
+    assert_eq!(error.code, "INVALID_INPUT");
+    assert!(!error.message.contains("c2VjcmV0"));
+    assert_eq!(
+        liveactivity::push::FcmAccount::from_json("{}")
+            .unwrap_err()
+            .code,
+        "INVALID_INPUT"
+    );
+    // A sender without APNs refuses an APNs target, and one with both platforms builds.
+    match sender.send(&update(3), &activity()).await {
+        Err(SendError::Invalid(error)) => assert_eq!(error.code, "UNSUPPORTED_FEATURE"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn req_p_009_an_unauthenticated_answer_takes_a_new_token_once() {
+    // REQ-P-009
+    let server = MockServer::start().await;
+    let (account, _) = service_account(&server);
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(granted("ya29.first"))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(granted("ya29.second"))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/projects/demo-project/messages:send"))
+        .and(header("authorization", "Bearer ya29.first"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(
+            json!({ "error": { "code": 401, "status": "UNAUTHENTICATED", "message": "expired" } }),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/projects/demo-project/messages:send"))
+        .and(header("authorization", "Bearer ya29.second"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({ "name": "projects/demo-project/messages/1" })),
+        )
+        .mount(&server)
+        .await;
+    let delivery = fcm_sender(&server, &account)
+        .send(&update(1), &fcm_target())
+        .await
+        .unwrap();
+    assert_eq!(
+        delivery.id.as_deref(),
+        Some("projects/demo-project/messages/1")
+    );
+}
+
+#[tokio::test]
+async fn req_p_009_each_answer_of_fcm() {
+    // REQ-P-009
+    let fcm_error = |status: u16, code: &str| {
+        ResponseTemplate::new(status).set_body_json(json!({ "error": { "code": status, "status": "X",
+            "message": "m", "details": [{ "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", "errorCode": code }] } }))
+    };
+    let answers: Vec<(ResponseTemplate, Expected)> = vec![
+        (fcm_error(404, "UNREGISTERED"), |error| {
+            matches!(error, SendError::Unregistered)
+        }),
+        (
+            fcm_error(403, "SENDER_ID_MISMATCH"),
+            |error| matches!(error, SendError::BadTarget { reason } if reason == "SENDER_ID_MISMATCH"),
+        ),
+        (
+            fcm_error(429, "QUOTA_EXCEEDED").insert_header("retry-after", "12"),
+            |error| matches!(error, SendError::TooManyRequests { retry_after: Some(after) } if *after == Duration::from_secs(12)),
+        ),
+        (
+            fcm_error(503, "UNAVAILABLE"),
+            |error| matches!(error, SendError::Unavailable { status: Some(503), reason } if reason == "UNAVAILABLE"),
+        ),
+        (fcm_error(500, "INTERNAL"), |error| {
+            matches!(
+                error,
+                SendError::Unavailable {
+                    status: Some(500),
+                    ..
+                }
+            )
+        }),
+        (
+            fcm_error(400, "INVALID_ARGUMENT"),
+            |error| matches!(error, SendError::Rejected { status: 400, reason } if reason == "INVALID_ARGUMENT"),
+        ),
+        (
+            ResponseTemplate::new(403).set_body_json(
+                json!({ "error": { "code": 403, "status": "PERMISSION_DENIED", "message": "m" } }),
+            ),
+            |error| matches!(error, SendError::Rejected { status: 403, reason } if reason == "PERMISSION_DENIED"),
+        ),
+    ];
+    for (answer, expected) in answers {
+        let server = MockServer::start().await;
+        let (account, _) = service_account(&server);
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(granted("ya29.t"))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/projects/demo-project/messages:send"))
+            .respond_with(answer)
+            .mount(&server)
+            .await;
+        let error = fcm_sender(&server, &account)
+            .send(&update(1), &fcm_target())
+            .await
+            .unwrap_err();
+        assert!(expected(&error), "{error:?}");
+    }
+    // A grant that is refused says so, and sends nothing.
+    let server = MockServer::start().await;
+    let (account, _) = service_account(&server);
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(400).set_body_json(
+                json!({ "error": "invalid_grant", "error_description": "Invalid JWT" }),
+            ),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/projects/demo-project/messages:send"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    match fcm_sender(&server, &account)
+        .send(&update(1), &fcm_target())
+        .await
+    {
+        Err(SendError::Rejected {
+            status: 400,
+            reason,
+        }) => assert_eq!(reason, "invalid_grant"),
+        other => panic!("{other:?}"),
+    }
+}

@@ -397,19 +397,151 @@ fn req_p_004_the_apns_request() {
     assert_eq!(error.code, "INVALID_INPUT");
 }
 
-#[test]
-fn req_p_005_an_fcm_target_waits_for_the_engine() {
-    // REQ-P-005
-    let fcm = Target::Fcm {
-        token: "dK3x:APA91b".into(),
-    };
-    for message in [
-        Message::update("delivery:7", snapshot(2)),
-        Message::end("delivery:7"),
-    ] {
-        let error = message.request(&fcm, &application()).unwrap_err();
-        assert_eq!(error.code, "UNSUPPORTED_FEATURE");
+const FCM_TOKEN: &str = "dK3x:APA91bHPRgkF3JUikC4ENAHEeMrd41Zxv3hVZjC9KtT8OvPVGJ-hQMRKRrZuJAEcl7B338qju59zJMjw2DELjzEvxwYv7hH5Ynpc1ODQ0aT4U4OFEeBHWsHO";
+
+fn fcm() -> Target {
+    Target::Fcm {
+        token: FCM_TOKEN.into(),
     }
+}
+
+fn android() -> Application {
+    Application::new().fcm_project("demo-project")
+}
+
+/// The data member that the device's layer takes, read back from the request.
+fn layer(request: &liveactivity::push::Request) -> Json {
+    let body = body(request);
+    let member = body["message"]["data"]["liveupdate.layer"]
+        .as_str()
+        .unwrap();
+    serde_json::from_str(member).unwrap()
+}
+
+#[test]
+fn req_a_036_the_fcm_request() {
+    // REQ-A-036, REQ-P-005
+    let update =
+        Message::update("delivery:7", snapshot(3)).alert(Alert::new("Delivery", "2 minutes"));
+    let request = update.request(&fcm(), &android()).unwrap();
+    assert_eq!(request.platform, Platform::Fcm);
+    assert_eq!(request.path, "/v1/projects/demo-project/messages:send");
+    assert_eq!(
+        header(&request.headers, "content-type"),
+        Some("application/json")
+    );
+    let message = &body(&request)["message"];
+    assert_eq!(message["token"], FCM_TOKEN);
+    assert_eq!(message["android"]["priority"], "high");
+    assert_eq!(
+        message["data"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        ["liveupdate.layer"]
+    );
+    assert_eq!(
+        layer(&request),
+        json!({ "v": 1, "command": "update", "activityKey": "delivery:7",
+            "snapshot": { "revision": 3, "values": { "eta": "2 min", "progress": 0.5 } },
+            "alert": { "title": "Delivery", "body": "2 minutes" } })
+    );
+    let low = Message::update("delivery:7", snapshot(4))
+        .priority(Priority::Low)
+        .request(&fcm(), &android())
+        .unwrap();
+    assert_eq!(body(&low)["message"]["android"]["priority"], "normal");
+
+    // An end with its last content and its policy; a start with its whole request, which needs no alert here.
+    let end = Message::end("delivery:7")
+        .snapshot(snapshot(5))
+        .policy(EndPolicy::After { at: SENT_AT })
+        .request(&fcm(), &android())
+        .unwrap();
+    assert_eq!(
+        layer(&end),
+        json!({ "v": 1, "command": "end", "activityKey": "delivery:7",
+            "snapshot": { "revision": 5, "values": { "eta": "2 min", "progress": 0.5 } },
+            "policy": { "kind": "after", "at": SENT_AT } })
+    );
+    let input = LayoutStartInput::new("delivery:7", layout(), snapshot(0));
+    let start = Message::start("ignored-on-android", input.clone())
+        .request(&fcm(), &android())
+        .unwrap();
+    let wire = layer(&start);
+    assert_eq!(wire["command"], "start");
+    assert_eq!(wire["activityKey"], "delivery:7");
+    assert_eq!(wire["start"], serde_json::to_value(&input).unwrap());
+
+    // Checked as the call: a scheduled start, a marked value, a key that is none.
+    let scheduled = LayoutStartInput {
+        scheduled: Some(liveactivity::ScheduledStart::new(
+            SENT_AT,
+            Alert::new("Delivery", "Soon"),
+        )),
+        ..input
+    };
+    assert_eq!(
+        Message::start("x", scheduled)
+            .request(&fcm(), &android())
+            .unwrap_err()
+            .code,
+        "INVALID_INPUT"
+    );
+    let marked = LayoutSnapshot::new(1, values(json!({ "liveActivityTemplate": true })));
+    assert_eq!(
+        Message::update("delivery:7", marked)
+            .request(&fcm(), &android())
+            .unwrap_err()
+            .code,
+        "INVALID_INPUT"
+    );
+    assert_eq!(
+        Message::update("", snapshot(1))
+            .request(&fcm(), &android())
+            .unwrap_err()
+            .code,
+        "INVALID_INPUT"
+    );
+    // The project and the token.
+    for application in [
+        Application::new(),
+        Application::new().fcm_project("Demo Project"),
+    ] {
+        assert_eq!(
+            update.request(&fcm(), &application).unwrap_err().code,
+            "INVALID_INPUT"
+        );
+    }
+    for token in ["", "a b", "line\nbreak", &"t".repeat(4097)] {
+        let target = Target::Fcm {
+            token: token.into(),
+        };
+        assert_eq!(
+            update.request(&target, &android()).unwrap_err().code,
+            "INVALID_INPUT",
+            "{token:?}"
+        );
+    }
+    // More than a data message carries.
+    let many = (0..30)
+        .map(|index| (format!("line{index}"), Json::from("x".repeat(200))))
+        .collect::<serde_json::Map<_, _>>();
+    let large = Message::update(
+        "delivery:7",
+        LayoutSnapshot::new(2, values(Json::Object(many))),
+    );
+    assert_eq!(
+        large.request(&fcm(), &android()).unwrap_err().code,
+        "PAYLOAD_TOO_LARGE"
+    );
+    // One application names both platforms.
+    let both = Application::new()
+        .bundle_id(BUNDLE)
+        .fcm_project("demo-project");
+    assert!(update.request(&fcm(), &both).is_ok());
+    assert!(update.request(&activity(), &both).is_ok());
 }
 
 /// The Rust files under `folder`.

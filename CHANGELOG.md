@@ -4,6 +4,22 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on liveupdate 0.12.0, with its AAR `liveupdate-android-0.12.0.aar`.
+
+- **A layout activity pushed on Android.** A server sends the same `push::Message` to an FCM target as to APNs.
+  `Message::request` makes FCM HTTP v1's request, with this crate's message in the data member `liveupdate.layer`,
+  and `Application::fcm_project` names the project. On the device, liveupdate 0.12 hands that member to this crate's
+  native entry (the feature `android-push`), which runs it as the application's `start_layout`, `update_layout` or
+  `end_layout` of the key, with the device's projection and the layout store. `LiveUpdateBackend::push_layer(member)`
+  does the same from Rust. A start or an update that was taken comes as `Event::Started` or `Event::Updated` beside
+  its `Event::Pushed`. The contract's `push` is `supported` on Android where the AAR says `pushLayer`.
+- **The sender sends to FCM** (feature `server`): `Sender::builder().fcm(Fcm::new(FcmAccount::from_json(..)?))`, a
+  service account's access token by an RS256 grant, kept until five minutes before it runs out, and FCM's answers in
+  `SendError`.
+
+When updating: take `liveupdate-android-0.12.0.aar`. With `android-push`, the backend's `AndroidFiles` folder is
+`Context.getFilesDir()`, as the setup says, and the backend remembers its files there for a push.
+
 ## 0.15.0 - 2026-11-26
 
 - feat: an activity mirrored to a paired watch, with liveupdate 0.11.0 (#44) (`e239cce`)

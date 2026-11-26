@@ -69,9 +69,11 @@ With liveupdate 0.10.0, now:
 | REQ-A-035 | liveupdate 0.10.0's interfaces are reachable: the feature `android-push` turns on liveupdate's `push`; `liveactivity::liveupdate::push::Payload` comes with the crate; `android_presentation.push` is in the contract and the capabilities; the contract's feature `push` stays `unsupported` on Android. |
 | REQ-A-038 | What a push did reaches the sink as `Event::Pushed`. |
 
-With liveupdate's layer hook (0.12.0, agreed with liveupdate's session: the member `liveupdate.layer`, the native
-method `LiveUpdatePush.nativeLayer(context, member): String`, the helper `liveupdate::push::outcome`, the capability
-`presentation.pushLayer`):
+With liveupdate's layer hook (0.12.0, agreed with liveupdate's session and built so: the member `liveupdate.layer`,
+the native method `LiveUpdatePush.nativeLayer(context, member): String`, the helper `liveupdate::push::outcome`, the
+capability `presentation.pushLayer`). The backend remembers its files in `liveactivity/push.json` under
+`Context.getFilesDir()`, from which the entry builds its own in a process that a message started, and the layout
+store's lock is the process's:
 
 | Id | Requirement |
 | --- | --- |

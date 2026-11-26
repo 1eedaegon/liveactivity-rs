@@ -97,11 +97,13 @@ pub(crate) struct Settings {
     pub(crate) image_folder: String,
 }
 
+/// The store's entries change only under this lock, around the liveupdate call they follow. It is the process's:
+/// a push that liveupdate hands over builds a backend of its own beside the application's, on the same files.
+static LOCK: Mutex<()> = Mutex::new(());
+
 pub(crate) struct Layouts<D: liveupdate::Driver, S: Store> {
     settings: Settings,
     store: S,
-    /// The store's entries change only under this lock, around the liveupdate call they follow.
-    lock: Mutex<()>,
     _driver: std::marker::PhantomData<D>,
 }
 
@@ -110,15 +112,55 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         Self {
             settings,
             store,
-            lock: Mutex::new(()),
             _driver: std::marker::PhantomData,
         }
     }
 
     /// The lock, also after a thread panicked under it (REQ-A-022). It holds no value, and what changes under
     /// it is a file that is replaced whole, which every call but the drain reconciles with liveupdate.
-    fn guard(&self) -> MutexGuard<'_, ()> {
-        self.lock.lock().unwrap_or_else(PoisonError::into_inner)
+    fn guard(&self) -> MutexGuard<'static, ()> {
+        LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The id of an activity that is over and began with the same request as `input`: a start that a push delivers
+    /// again after its end answers it, and begins nothing.
+    pub(crate) fn ended_start(
+        &self,
+        updates: &liveupdate::LiveUpdate<D>,
+        input: &LayoutStartInput,
+    ) -> Result<Option<String>> {
+        let input = kept_start(input.clone());
+        let _guard = self.guard();
+        let (entries, records) = self.reconciled(updates)?;
+        Ok(records
+            .iter()
+            .filter(|record| !running(record))
+            .find(|record| {
+                entries.get(&record.id).is_some_and(|entry| {
+                    entry.origin.activity_key == input.activity_key
+                        && same_start(&entry.origin, &input)
+                })
+            })
+            .map(|record| record.id.clone()))
+    }
+
+    /// The id of the live activity of `key`, which runs or waits for its start.
+    pub(crate) fn live_id(
+        &self,
+        updates: &liveupdate::LiveUpdate<D>,
+        key: &str,
+    ) -> Result<Option<String>> {
+        let _guard = self.guard();
+        let (entries, records) = self.reconciled(updates)?;
+        Ok(records
+            .iter()
+            .filter(|record| running(record))
+            .find(|record| {
+                entries
+                    .get(&record.id)
+                    .is_some_and(|entry| entry.origin.activity_key == key)
+            })
+            .map(|record| record.id.clone()))
     }
 
     pub(crate) fn start(
@@ -126,16 +168,7 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         updates: &liveupdate::LiveUpdate<D>,
         input: LayoutStartInput,
     ) -> Result<LayoutActivityRecord> {
-        // Android has no pushes, no relevance and none of the iOS options: what the start says of them is dropped
-        // here, so that it is no part of the request the activity keeps and a repeated start is compared without
-        // it.
-        let input = LayoutStartInput {
-            push: None,
-            ios: None,
-            snapshot: for_android(input.snapshot),
-            android: input.android.map(by_default),
-            ..input
-        };
+        let input = kept_start(input);
         let _guard = self.guard();
         let (mut entries, records) = self.reconciled(updates)?;
         // The activity that runs or waits under the key, with the request it keeps.
@@ -313,65 +346,82 @@ impl<D: liveupdate::Driver, S: Store> Layouts<D, S> {
         let _guard = self.guard();
         let entries = self.store.load().unwrap_or_default();
         let batch = updates.events().map_err(android_liveupdate::error)?;
+        // The records of the activities, for a push that the store took: asked once, and only for one.
+        let pushed = batch.events.iter().any(|event| {
+            matches!(
+                &event.kind,
+                liveupdate::EventKind::Pushed { code: None, .. }
+            )
+        });
+        // The drain has taken the events: a list that fails after it costs the events as on iOS, not the drain.
+        let records = if pushed {
+            updates.list().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         Ok(batch
             .events
             .into_iter()
-            .filter_map(|event| {
-                let entry = entries.get(&event.activity_id);
-                let activity_key = entry.map(|entry| entry.origin.activity_key.clone());
-                match event.kind {
-                    liveupdate::EventKind::Action { action_id } => {
-                        if entry.is_some_and(|entry| !declares(entry, &action_id)) {
-                            return None;
+            .flat_map(|event| {
+                let as_on_ios = taken(&event, &entries, &records);
+                let event = (|| {
+                    let entry = entries.get(&event.activity_id);
+                    let activity_key = entry.map(|entry| entry.origin.activity_key.clone());
+                    match event.kind {
+                        liveupdate::EventKind::Action { action_id } => {
+                            if entry.is_some_and(|entry| !declares(entry, &action_id)) {
+                                return None;
+                            }
+                            let on = entry.and_then(|entry| asked_for(entry, &action_id));
+                            Some(Event::Action(ActionEvent {
+                                activity_key,
+                                on,
+                                tap: stored_tap(event.sequence, event.occurred_at),
+                                ..ActionEvent::new(action_id, event.activity_id)
+                            }))
                         }
-                        let on = entry.and_then(|entry| asked_for(entry, &action_id));
-                        Some(Event::Action(ActionEvent {
+                        // An opening is the host's report of an intent that liveupdate made and checked: its
+                        // action is passed on as it is, declared by the activity's present content or not.
+                        liveupdate::EventKind::Opened { action_id } => {
+                            Some(Event::Opened(OpenedEvent {
+                                activity_id: event.activity_id,
+                                activity_key,
+                                action_id,
+                            }))
+                        }
+                        // A tap that the application's own component took: reported, and no tap to act on.
+                        liveupdate::EventKind::Handled { action_id } => {
+                            Some(Event::Handled(HandledEvent {
+                                activity_id: event.activity_id,
+                                activity_key,
+                                action_id,
+                                tap: stored_tap(event.sequence, event.occurred_at),
+                            }))
+                        }
+                        // A dismissal is reported with the other states, by the backend: its stored event is the
+                        // prompt to ask.
+                        liveupdate::EventKind::Dismissed => None,
+                        // What a push did names its own key, also when it named no live activity.
+                        liveupdate::EventKind::Pushed {
+                            command,
                             activity_key,
-                            on,
-                            tap: stored_tap(event.sequence, event.occurred_at),
-                            ..ActionEvent::new(action_id, event.activity_id)
-                        }))
-                    }
-                    // An opening is the host's report of an intent that liveupdate made and checked: its
-                    // action is passed on as it is, declared by the activity's present content or not.
-                    liveupdate::EventKind::Opened { action_id } => {
-                        Some(Event::Opened(OpenedEvent {
+                            revision,
+                            code,
+                        } => Some(android_liveupdate::pushed(
+                            event.activity_id,
+                            &command,
+                            activity_key,
+                            revision,
+                            code,
+                        )),
+                        // A kind that liveupdate does not know, or one that it has and this crate does not.
+                        _ => Some(Event::Unknown(UnknownEvent {
                             activity_id: event.activity_id,
                             activity_key,
-                            action_id,
-                        }))
+                        })),
                     }
-                    // A tap that the application's own component took: reported, and no tap to act on.
-                    liveupdate::EventKind::Handled { action_id } => {
-                        Some(Event::Handled(HandledEvent {
-                            activity_id: event.activity_id,
-                            activity_key,
-                            action_id,
-                            tap: stored_tap(event.sequence, event.occurred_at),
-                        }))
-                    }
-                    // A dismissal is reported with the other states, by the backend: its stored event is the
-                    // prompt to ask.
-                    liveupdate::EventKind::Dismissed => None,
-                    // What a push did names its own key, also when it named no live activity.
-                    liveupdate::EventKind::Pushed {
-                        command,
-                        activity_key,
-                        revision,
-                        code,
-                    } => Some(android_liveupdate::pushed(
-                        event.activity_id,
-                        &command,
-                        activity_key,
-                        revision,
-                        code,
-                    )),
-                    // A kind that liveupdate does not know, or one that it has and this crate does not.
-                    _ => Some(Event::Unknown(UnknownEvent {
-                        activity_id: event.activity_id,
-                        activity_key,
-                    })),
-                }
+                })();
+                event.into_iter().chain(as_on_ios)
             })
             .collect())
     }
@@ -867,6 +917,18 @@ fn targeted(snapshot: liveupdate::Snapshot, input: &LayoutStartInput) -> liveupd
 
 /// Whether two starts are the same request. When and how the activity begins is no part of it, as on iOS: the
 /// same request under a key answers the activity that waits or runs, whatever its time, and with or without one.
+/// A start as the store keeps it: Android has no pushes, no relevance and none of the iOS options, so what it says
+/// of them is no part of the request the activity keeps, and a repeated start is compared without it.
+fn kept_start(input: LayoutStartInput) -> LayoutStartInput {
+    LayoutStartInput {
+        push: None,
+        ios: None,
+        snapshot: for_android(input.snapshot),
+        android: input.android.map(by_default),
+        ..input
+    }
+}
+
 fn same_start(kept: &LayoutStartInput, asked: &LayoutStartInput) -> bool {
     let asked = LayoutStartInput {
         scheduled: kept.scheduled.clone(),
@@ -947,5 +1009,33 @@ pub(crate) fn stored_tap(sequence: u64, occurred_at: u64) -> crate::Tap {
         id: Some(sequence.to_string()),
         at: Some(occurred_at),
         ..crate::Tap::default()
+    }
+}
+
+/// What a push that the store took is beside its `pushed` event, as on iOS: a start as `Event::Started`, an update
+/// as `Event::Updated`, with the record the store holds. A refusal, an end, and a push of an activity that the store
+/// does not hold are the pushed event alone.
+fn taken(
+    event: &liveupdate::ActivityEvent,
+    entries: &Entries,
+    records: &[liveupdate::ActivityRecord],
+) -> Option<Event> {
+    let liveupdate::EventKind::Pushed {
+        command,
+        code: None,
+        ..
+    } = &event.kind
+    else {
+        return None;
+    };
+    let entry = entries.get(&event.activity_id)?;
+    let record = records
+        .iter()
+        .find(|record| record.id == event.activity_id)?;
+    let record = layout_record(record, entry);
+    match command.as_str() {
+        "start" => Some(Event::Started(crate::StartedEvent { record })),
+        "update" => Some(Event::Updated(crate::UpdatedEvent { record })),
+        _ => None,
     }
 }

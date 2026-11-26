@@ -19,14 +19,14 @@ A tap -> the AAR's receiver stores it -> sync_events() -> the event sink
 
 ## 1. Add the AAR
 
-Put `liveupdate-android-0.11.0.aar` from liveupdate's
+Put `liveupdate-android-0.12.0.aar` from liveupdate's
 [release](https://github.com/1eedaegon/liveupdate-rs/releases) into `app/libs/`. The AAR is written
 in Kotlin, and a file dependency brings no dependencies of its own, so add the Kotlin standard
 library too, and in a watch application the library of [its Ongoing Activity](#a-watch):
 
 ```kotlin
 dependencies {
-    implementation(files("libs/liveupdate-android-0.11.0.aar"))
+    implementation(files("libs/liveupdate-android-0.12.0.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.10") // or newer
     implementation("androidx.wear:wear-ongoing:1.1.0") // a watch application only
 }
@@ -747,15 +747,26 @@ map of strings works. What a push did comes with the other events at the next `s
 ([docs/contract.md](contract.md#events)). `capabilities().android_presentation.push` says whether the
 AAR has the entry; whether the library was built with the feature is the application's to know.
 
+A layout activity of this crate is pushed by the member `liveupdate.layer`, which a server builds with
+`liveactivity::push::Message` for an FCM target ([docs/server-push.md](server-push.md)). liveupdate 0.12
+hands it to this crate's native entry, which the feature exports: it builds the backend from the
+message's process with the files of the application's last run, and runs the message as the
+application would, a `start_layout`, or an `update_layout` or `end_layout` of the live activity of the
+key, with the device's projection; the layout store keeps it. So the folder of `AndroidFiles` must be
+`Context.getFilesDir()`, and the application must have built its backend with files once since it was
+installed: the backend remembers them in `liveactivity/push.json` there. A push before that answers
+`NATIVE_ERROR`. `LiveUpdateBackend::push_layer(member)` runs a member the same way from Rust.
+
 An update or an end acts on the live activity of the key the push names, and `NOT_FOUND` when there
-is none; a stale revision is `STALE_REVISION`, a repeat changes nothing, and a start delivered again
-after its end begins nothing. The server builds the data with liveupdate's own types:
-`liveactivity::liveupdate::push::Payload::{start, update, end}` and `to_data()`, which refuses more
-than FCM's 4096 bytes. That payload is for an activity of liveupdate's types. A layout activity of
-this crate is not pushed by it yet: its layout is projected on the device and its store kept by this
-crate's backend, which a coming liveupdate hands the message to
-([docs/design/android-push](design/android-push/PRD.md)). Until then the contract's `push` is
-`unsupported` on Android.
+is none; a stale revision is `STALE_REVISION`, a repeat changes nothing, and the same start delivered
+again after its end answers the ended activity and begins nothing, as FCM delivers a message at least
+once. The application learns of it
+at the next `sync_events`: `Event::Pushed`, and for a start or an update that was taken
+`Event::Started` or `Event::Updated` with the record the store holds, as on iOS.
+`capabilities().android_presentation.push_layer` says whether the AAR hands the member over; where it
+does, the backend has files and the crate has the feature, the contract's `push` is `supported`.
+`liveactivity::liveupdate::push::Payload` is liveupdate's own payload, for an activity of liveupdate's
+types.
 
 ## 7. Samsung Now Bar
 
@@ -799,6 +810,7 @@ are not always of one version. They are tested as a pair of one version. Apart, 
 | Later | Before 0.9.0 | `local_only` reads `false` and an activity kept off the watch is `UNSUPPORTED_FEATURE`; `open_promotion_settings` is `UNSUPPORTED_FEATURE`; the channels keep the AAR's English names |
 | Later | Before 0.10.0 | `push` reads `false`: the AAR has no `LiveUpdatePush`, so a messaging service has nothing to hand a message to |
 | Later | Before 0.11.0 | `watch_mirror` reads `false`, and a mirrored activity is `UNSUPPORTED_FEATURE` |
+| Later | Before 0.12.0 | `push_layer` reads `false` and the contract's `push` is `unsupported`: the AAR does not hand the member `liveupdate.layer` over, so a layout activity is not pushed |
 | Earlier | Later | It works: liveupdate reads what it knows of a reply. An event of a kind it does not know reaches the sink as `Event::Unknown`; before liveupdate 0.7.0 the events taken with it were lost |
 
 A member that an activity depends on, a start time, the foreground placement, an action's target or an

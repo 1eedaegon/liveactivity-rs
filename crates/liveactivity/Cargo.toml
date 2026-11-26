@@ -22,7 +22,7 @@ default = ["app"]
 app = []
 # liveupdate's push entry, exported from the host's library: a data message from the server reaches the
 # lifecycle while the application does not run (Android).
-android-push = ["app", "liveupdate/push"]
+android-push = ["app", "liveupdate/push", "dep:jni"]
 # The sender of pushes to APNs, for a server; `liveactivity::push` is there without it.
 server = ["dep:jsonwebtoken", "dep:reqwest"]
 # The conformance suite and a backend without a platform, for tests.
@@ -52,6 +52,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 jsonwebtoken = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
+
+# The native entry of a push, which takes JNI's own types (the feature `android-push`, on Android).
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.22.4", optional = true, default-features = false }
 
 [dev-dependencies]
 aws-lc-rs.workspace = true

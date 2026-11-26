@@ -1,6 +1,10 @@
 //! The sender of the feature `server`: it signs in to APNs with the team's key, sends a message's request over
 //! HTTP/2, and says in one vocabulary what came back.
 
+mod fcm;
+
+pub use fcm::{Fcm, FcmAccount};
+
 use super::{Application, Message, Platform, Request, Target, apns::valid_bundle_id};
 use crate::{Error, Result};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, crypto::CryptoProvider};
@@ -198,6 +202,7 @@ struct Shared {
     client: reqwest::Client,
     timeout: Duration,
     apns: Option<ApnsSender>,
+    fcm: Option<fcm::FcmSender>,
 }
 
 struct ApnsSender {
@@ -211,6 +216,7 @@ impl fmt::Debug for Sender {
         formatter
             .debug_struct("Sender")
             .field("apns", &self.shared.apns.as_ref().map(|apns| &apns.apns))
+            .field("fcm", &self.shared.fcm.as_ref().map(fcm::FcmSender::fcm))
             .field("timeout", &self.shared.timeout)
             .finish_non_exhaustive()
     }
@@ -221,6 +227,7 @@ impl fmt::Debug for Sender {
 #[derive(Debug, Default)]
 pub struct SenderBuilder {
     apns: Option<Apns>,
+    fcm: Option<Fcm>,
     client: Option<reqwest::Client>,
     timeout: Option<Duration>,
 }
@@ -230,6 +237,14 @@ impl SenderBuilder {
     pub fn apns(self, apns: Apns) -> Self {
         Self {
             apns: Some(apns),
+            ..self
+        }
+    }
+
+    /// Sends to FCM with this service account.
+    pub fn fcm(self, fcm: Fcm) -> Self {
+        Self {
+            fcm: Some(fcm),
             ..self
         }
     }
@@ -253,26 +268,32 @@ impl SenderBuilder {
     /// The sender, or `INVALID_INPUT` without a platform, with a bundle id that is none, or with a host that is
     /// not an `https` or `http` URL.
     pub fn build(self) -> Result<Sender> {
-        let Some(apns) = self.apns else {
+        if self.apns.is_none() && self.fcm.is_none() {
             return Err(Error::new(
                 "INVALID_INPUT",
-                "A sender needs a platform to send to: give it APNs.",
-            ));
-        };
-        if !valid_bundle_id(&apns.bundle_id) {
-            return Err(Error::new(
-                "INVALID_INPUT",
-                "The bundle id is letters, digits, `.` and `-`.",
+                "A sender needs a platform to send to: give it APNs or FCM.",
             ));
         }
-        let host = reqwest::Url::parse(&apns.host).ok();
-        let web = host.as_ref().is_some_and(|url| {
-            matches!(url.scheme(), "https" | "http") && url.has_host() && url.path() == "/"
-        });
-        if !web {
+        if let Some(apns) = &self.apns {
+            if !valid_bundle_id(&apns.bundle_id) {
+                return Err(Error::new(
+                    "INVALID_INPUT",
+                    "The bundle id is letters, digits, `.` and `-`.",
+                ));
+            }
+            if !web_host(&apns.host) {
+                return Err(Error::new(
+                    "INVALID_INPUT",
+                    "The APNs host is an https URL without a path.",
+                ));
+            }
+        }
+        if let Some(fcm) = &self.fcm
+            && !web_host(fcm.host_url())
+        {
             return Err(Error::new(
                 "INVALID_INPUT",
-                "The APNs host is an https URL without a path.",
+                "The FCM host is an https URL without a path.",
             ));
         }
         let client = match self.client {
@@ -286,10 +307,11 @@ impl SenderBuilder {
             shared: Arc::new(Shared {
                 client,
                 timeout: self.timeout.unwrap_or(DEFAULT_TIMEOUT),
-                apns: Some(ApnsSender {
+                apns: self.apns.map(|apns| ApnsSender {
                     apns,
                     token: Mutex::new(None),
                 }),
+                fcm: self.fcm.map(fcm::FcmSender::new),
             }),
         })
     }
@@ -321,9 +343,19 @@ impl Sender {
                     .map_err(SendError::Invalid)?;
                 self.send_apns(apns, &request).await
             }
-            Platform::Fcm => Err(SendError::Invalid(Error::unsupported_feature(
-                "This sender sends to APNs; a push to Android waits for liveupdate's push path.",
-            ))),
+            Platform::Fcm => {
+                let Some(fcm) = &self.shared.fcm else {
+                    return Err(SendError::Invalid(Error::unsupported_feature(
+                        "This sender was not given FCM.",
+                    )));
+                };
+                let application = Application::new().fcm_project(fcm.project());
+                let request = message
+                    .request(target, &application)
+                    .map_err(SendError::Invalid)?;
+                fcm.send(&self.shared.client, self.shared.timeout, &request)
+                    .await
+            }
         }
     }
 
@@ -352,37 +384,17 @@ impl Sender {
         expired: Option<&str>,
     ) -> std::result::Result<(Answer, String), SendError> {
         let token = apns.token(expired)?;
-        // Marked sensitive, so that a dump of the request at trace level does not show it.
-        let mut bearer = reqwest::header::HeaderValue::from_str(&format!("bearer {token}"))
-            .map_err(|_| SendError::Invalid(Error::native()))?;
-        bearer.set_sensitive(true);
         let mut post = self
             .shared
             .client
             .post(format!("{}{}", apns.apns.host, request.path))
-            .header(reqwest::header::AUTHORIZATION, bearer)
+            .header(reqwest::header::AUTHORIZATION, bearer("bearer", &token)?)
             .timeout(self.shared.timeout)
             .body(request.body.clone());
         for (name, value) in &request.headers {
             post = post.header(*name, value);
         }
-        let response = post.send().await.map_err(|error| {
-            if error.is_builder() {
-                SendError::Invalid(Error::new(
-                    "INVALID_INPUT",
-                    "The request could not be made: check the host.",
-                ))
-            } else {
-                SendError::Unavailable {
-                    status: None,
-                    reason: if error.is_timeout() {
-                        "the request timed out".into()
-                    } else {
-                        "the host could not be reached".into()
-                    },
-                }
-            }
-        })?;
+        let response = post.send().await.map_err(unreachable)?;
         let status = response.status().as_u16();
         let header = |name: &str| {
             response
@@ -487,4 +499,47 @@ fn crypto_provider() {
 /// A key id or a team id: letters and digits.
 fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= MAX_ID && id.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
+/// Whether `url` is a host the sender can send to: an `https` or `http` URL without a path.
+fn web_host(url: &str) -> bool {
+    reqwest::Url::parse(url).is_ok_and(|url| {
+        matches!(url.scheme(), "https" | "http") && url.has_host() && url.path() == "/"
+    })
+}
+
+/// What a request that got no answer says.
+fn unreachable(error: reqwest::Error) -> SendError {
+    if error.is_builder() {
+        SendError::Invalid(Error::new(
+            "INVALID_INPUT",
+            "The request could not be made: check the host.",
+        ))
+    } else {
+        SendError::Unavailable {
+            status: None,
+            reason: if error.is_timeout() {
+                "the request timed out".into()
+            } else {
+                "the host could not be reached".into()
+            },
+        }
+    }
+}
+
+/// A bearer token as a header value that a dump of the request at trace level does not show.
+fn bearer(
+    scheme: &str,
+    token: &str,
+) -> std::result::Result<reqwest::header::HeaderValue, SendError> {
+    let mut value = reqwest::header::HeaderValue::from_str(&format!("{scheme} {token}"))
+        .map_err(|_| SendError::Invalid(Error::native()))?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+
+/// Whether `url` is an `https` or `http` URL with a host, such as a service account's `token_uri`.
+fn web_host_or_path(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .is_ok_and(|url| matches!(url.scheme(), "https" | "http") && url.has_host())
 }

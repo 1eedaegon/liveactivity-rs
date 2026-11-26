@@ -76,7 +76,9 @@ pub(crate) fn capabilities(value: liveupdate::Capabilities, layouts: bool) -> Ca
         },
         max_payload_bytes: 4096,
         layout: support(layouts),
-        push: FeatureSupport::Unsupported,
+        // A layout activity is pushed where the AAR hands the layer's member to this crate (liveupdate 0.12.0).
+        // ... and where this crate's entry for it is built in, with the feature `android-push`.
+        push: support(cfg!(feature = "android-push") && layouts && value.presentation.push_layer),
         // An Android content and the options of a start go through the layout commands.
         android_presentation: layouts.then_some(value.presentation),
         ios: None,

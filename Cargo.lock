@@ -893,6 +893,7 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "futures-executor",
+ "jni",
  "jsonwebtoken",
  "liveactivity",
  "liveupdate",
@@ -906,9 +907,9 @@ dependencies = [
 
 [[package]]
 name = "liveupdate"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87061b4773111df7038a4ae114e6a0d9bdd14faa25e2beb4578f424a2babce1e"
+checksum = "7481a0ff260d83391af511035b96c1f9ace741788a63b2ceba97cc5309a4f20c"
 dependencies = [
  "jni",
  "ndk-context",

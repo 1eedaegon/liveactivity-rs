@@ -322,6 +322,11 @@ impl LiveActivityBackend for HostBackend {
             }
         })
     }
+
+    // A backend that wraps another forwards what it does not answer itself.
+    fn open_promotion_settings(&self) -> BackendFuture<'_, ()> {
+        self.templates.open_promotion_settings()
+    }
 }
 
 #[test]
@@ -338,6 +343,8 @@ fn req_x_005_a_host_backend_composes_a_default_one_and_stays_exchangeable() {
     );
     block_on(live.write_image("cover", &one_pixel())).unwrap();
     block_on(live.request_permissions(PermissionKind::Notifications)).unwrap();
+    // REQ-A-033: the settings of promotion reach the default backend that it wraps.
+    assert_eq!(block_on(live.open_promotion_settings()), Ok(()));
 }
 
 /// The smallest PNG: one transparent pixel.
@@ -2737,6 +2744,152 @@ fn req_a_024_the_capabilities_say_whether_a_watch_shows_an_ongoing_activity() {
     let (phone, _events, _driver) = android_with_files("wear-capability-phone");
     let offered = block_on(phone.capabilities()).unwrap();
     assert!(!offered.android_presentation.unwrap().wear_ongoing_activity);
+}
+
+#[test]
+fn req_a_032_a_start_keeps_every_snapshot_of_its_activity_off_a_paired_watch() {
+    // REQ-A-032
+    // A device that keeps an activity off a paired watch, and the last content of an end.
+    let local_device = MemoryDriver::offering(|offered| {
+        offered.local_only = true;
+        offered.delayed_end = true;
+    });
+    let (live, _events, driver) = android_on(local_device, "local-only");
+    let with_option = |key: &str, local: Option<bool>| {
+        let mut request = serde_json::to_value(ride(key, None)).unwrap();
+        request["android"] = serde_json::json!({ "visibility": "private" });
+        if let Some(local) = local {
+            request["android"]["localOnly"] = serde_json::json!(local);
+        }
+        liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", request)
+            .unwrap()
+    };
+    let local = |id: &str| driver.posted(id).presentation.unwrap().local_only;
+
+    // A start that says nothing sends its activity to a paired watch; a content keeps its own snapshot off it.
+    let plain = block_on(live.start_layout(with_option("ride:1", None))).unwrap();
+    assert!(!local(&plain.id));
+    let mut kept = driving(70, "2 min");
+    kept["presentation"]["localOnly"] = serde_json::json!(true);
+    block_on(live.update_layout(layout_update(ride_update(&plain.id, 1, Some(kept))))).unwrap();
+    assert!(local(&plain.id));
+    block_on(live.update_layout(layout_update(ride_update(&plain.id, 2, None)))).unwrap();
+    assert!(!local(&plain.id));
+    // A start that says `false` is the same activity as one that says nothing.
+    let again = block_on(live.start_layout(with_option("ride:1", Some(false)))).unwrap();
+    assert_eq!(again.id, plain.id);
+
+    // A start kept local keeps every snapshot local: the projected ones, and a content, whatever it says.
+    let off = block_on(live.start_layout(with_option("ride:2", Some(true)))).unwrap();
+    assert!(local(&off.id));
+    block_on(live.update_layout(layout_update(ride_update(&off.id, 1, None)))).unwrap();
+    assert!(local(&off.id));
+    let mut sent = driving(80, "1 min");
+    sent["presentation"]["localOnly"] = serde_json::json!(false);
+    block_on(live.update_layout(layout_update(ride_update(&off.id, 2, Some(sent))))).unwrap();
+    assert!(local(&off.id));
+    // The same start again is the same activity, and the start of the same key that sends it is another one,
+    // which posts nothing.
+    let again = block_on(live.start_layout(with_option("ride:2", Some(true)))).unwrap();
+    assert_eq!(again.id, off.id);
+    let posts = driver.lock().posts;
+    let other = block_on(live.start_layout(with_option("ride:2", None)));
+    assert_eq!(other.unwrap_err().code, "CONFLICT");
+    assert_eq!(driver.lock().posts, posts);
+    // The last content of an end stays local too.
+    let mut end = serde_json::json!({ "id": off.id, "policy": { "kind": "after", "at": 500_000 },
+        "snapshot": { "revision": 3, "values": { "eta": "here", "done": 1.0 } } });
+    end["snapshot"]["android"] = driving(100, "here");
+    let end =
+        liveactivity::parse_request::<liveactivity::LayoutEndInput>("end_layout", end).unwrap();
+    block_on(live.end_layout(end)).unwrap();
+    let last = driver.lock().finals[&off.id].snapshot.clone();
+    assert!(last.presentation.unwrap().local_only);
+
+    // A member that is no Boolean is refused on every platform, in the options and in a content.
+    for wrong in [
+        serde_json::json!(null),
+        serde_json::json!("yes"),
+        serde_json::json!(1),
+    ] {
+        let mut request = serde_json::to_value(ride("ride:5", None)).unwrap();
+        request["android"] = serde_json::json!({ "visibility": "private", "localOnly": wrong });
+        let read =
+            liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", request);
+        assert_eq!(read.unwrap_err().code, "INVALID_INPUT", "{wrong}");
+        let mut content = driving(70, "2 min");
+        content["presentation"]["localOnly"] = wrong.clone();
+        let update = ride_update(&plain.id, 9, Some(content));
+        let read =
+            liveactivity::parse_request::<liveactivity::LayoutUpdateInput>("update_layout", update);
+        assert_eq!(read.unwrap_err().code, "INVALID_INPUT", "{wrong}");
+    }
+}
+
+#[test]
+fn req_a_032_an_activity_kept_off_the_watch_needs_the_devices_capability() {
+    // REQ-A-032
+    let local_device = MemoryDriver::offering(|offered| offered.local_only = true);
+    let (live, _events, _driver) = android_on(local_device, "local-capability");
+    let offered = block_on(live.capabilities()).unwrap();
+    assert!(offered.android_presentation.unwrap().local_only);
+    assert_eq!(
+        serde_json::to_value(block_on(live.capabilities()).unwrap()).unwrap()["androidPresentation"]
+            ["localOnly"],
+        true
+    );
+
+    // An adapter before liveupdate 0.9 would send it to the watch: such a start or update is refused and posts
+    // nothing.
+    let (earlier, _events, driver) = android_with_files("local-capability-earlier");
+    assert!(
+        !block_on(earlier.capabilities())
+            .unwrap()
+            .android_presentation
+            .unwrap()
+            .local_only
+    );
+    let mut request = serde_json::to_value(ride("ride:3", None)).unwrap();
+    request["android"] = serde_json::json!({ "visibility": "private", "localOnly": true });
+    let start =
+        liveactivity::parse_request::<liveactivity::LayoutStartInput>("start_layout", request)
+            .unwrap();
+    let posts = driver.lock().posts;
+    let refused = block_on(earlier.start_layout(start)).unwrap_err();
+    assert_eq!(refused.code, "UNSUPPORTED_FEATURE");
+    assert_eq!(driver.lock().posts, posts);
+    let plain = block_on(earlier.start_layout(ride("ride:4", None))).unwrap();
+    let mut kept = driving(70, "2 min");
+    kept["presentation"]["localOnly"] = serde_json::json!(true);
+    let refused =
+        block_on(earlier.update_layout(layout_update(ride_update(&plain.id, 1, Some(kept)))));
+    assert_eq!(refused.unwrap_err().code, "UNSUPPORTED_FEATURE");
+}
+
+#[test]
+fn req_a_033_the_settings_of_promotion_open_through_the_android_backend() {
+    // REQ-A-033
+    let (live, _events, driver) = android_with_files("promotion-settings");
+    assert_eq!(block_on(live.open_promotion_settings()), Ok(()));
+    assert_eq!(driver.lock().settings_opened, 1);
+    // A device with no such screen, and an adapter before liveupdate 0.9, say so.
+    driver.lock().settings_screen = false;
+    let refused = block_on(live.open_promotion_settings()).unwrap_err();
+    assert_eq!(refused.code, "UNSUPPORTED_FEATURE");
+    assert_eq!(driver.lock().settings_opened, 1);
+
+    // A backend of an application's own that does not have the command says that it cannot, and a platform
+    // without Live Activities that it has none.
+    let (own, _taps) = connect(liveactivity::testkit::MemoryBackend::new());
+    assert_eq!(
+        block_on(own.open_promotion_settings()).unwrap_err().code,
+        "UNSUPPORTED_FEATURE"
+    );
+    let host = LiveActivity::builder().build().unwrap();
+    assert_eq!(
+        block_on(host.open_promotion_settings()).unwrap_err().code,
+        "UNSUPPORTED_PLATFORM"
+    );
 }
 
 #[test]

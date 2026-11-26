@@ -161,4 +161,14 @@ impl LiveActivity {
     pub async fn sync_events(&self) -> Result<()> {
         self.backend.sync_events().await
     }
+
+    /// Asks Android for the screen where a person allows or stops the application's Live Updates
+    /// (Android 16 and later), or its notification settings before that: for an application whose
+    /// `permissions().promotion` is `denied`. Android starts it only while the application is in
+    /// the foreground and drops it otherwise without a word, so call it from a person's tap: `Ok`
+    /// says that it was asked, not that it shows. iOS, a backend without it and a device without
+    /// such a screen answer `UNSUPPORTED_FEATURE`.
+    pub async fn open_promotion_settings(&self) -> Result<()> {
+        self.backend.open_promotion_settings().await
+    }
 }

@@ -4,8 +4,30 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
-Built on liveupdate 0.8.3, with its AAR `liveupdate-android-0.8.3.aar`: a release of liveupdate's documents and
-crate metadata, whose Rust code, JSON and Android sources are 0.8.2's. Nothing of this crate changes.
+Built on liveupdate 0.9.0, with its AAR `liveupdate-android-0.9.0.aar` (by way of 0.8.3, documents only), and on
+activitykit 0.9.0.
+
+- **A node drawn only in StandBy** (iOS 17): `Node::when_fullscreen()` and `unless_fullscreen()`, the member
+  `ifFullscreen`, draw a node only while the Lock Screen presentation fills the screen of an iPhone that charges on
+  its side, or only while it does not. A notification is never full screen: Android leaves a node of StandBy out and
+  shows its counterpart.
+
+- **An activity off a paired watch** (Android): `AndroidOptions::with_local_only(true)`, JSON `android.localOnly`,
+  keeps every snapshot of a layout's activity on the phone, and an Android content's `localOnly` its own snapshot;
+  `capabilities().android_presentation.local_only` says whether the device can, and where it cannot such a start
+  or update is `UNSUPPORTED_FEATURE` and posts nothing.
+- **`LiveActivity::open_promotion_settings()`** (Android): the system's screen where a person allows or stops the
+  application's Live Updates, or its notification settings before Android 16, for an application that reads
+  `promotion: denied`. Call it from a person's tap: `Ok` says that Android was asked. iOS and a backend without it
+  answer `UNSUPPORTED_FEATURE`; a backend's default method answers so, and a backend that wraps another forwards
+  it.
+- **Channels in the application's words** (Android): the AAR names its two channels by the strings
+  `liveupdate_channel_name`, `liveupdate_channel_description`, `liveupdate_alert_channel_name` and
+  `liveupdate_alert_channel_description`, which the application overrides in its `res/values*/strings.xml`.
+
+When updating: take `liveupdate-android-0.9.0.aar`, and point the widget extension's package reference at
+activitykit 0.9.0 for `ifFullscreen` (a widget up to 0.8.1 draws such a node always). A backend of the host's own that wraps the default one forwards
+`open_promotion_settings`.
 
 ## 0.11.0 - 2026-11-20
 

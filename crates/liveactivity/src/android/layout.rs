@@ -6,6 +6,10 @@
 //! projected as it is while fresh: a node that is drawn only while the content is stale never shows, and counts
 //! for nothing. The record names `layout.ifStale`, and the sink is told when the activity became stale.
 //!
+//! A notification never fills the screen as the Lock Screen of an iPhone in StandBy does: a node that is drawn only
+//! then never shows, and one that is drawn only outside it always does. Nothing is left out of what Android has, so
+//! nothing is named.
+//!
 //! A notification has no label per node: Android reads its title and text. So what a node says to a screen reader
 //! is used where the notification would otherwise show nothing of the node: as the text of a node Android cannot
 //! draw, and as the title of a button or a link without a text.
@@ -576,7 +580,7 @@ fn millis(value: f64) -> u64 {
 
 /// Whether the node shows with these values, in a notification, which is drawn as the content is while fresh.
 fn visible(node: &Node, values: &BTreeMap<String, Value>) -> bool {
-    !only_when_stale(node)
+    !never_shown(node)
         && node.r#if.as_ref().is_none_or(|key| truthy(values.get(key)))
         && node
             .unless
@@ -584,9 +588,9 @@ fn visible(node: &Node, values: &BTreeMap<String, Value>) -> bool {
             .is_none_or(|key| !truthy(values.get(key)))
 }
 
-/// A node that is drawn only while the content is stale: a notification never shows it.
-fn only_when_stale(node: &Node) -> bool {
-    node.if_stale == Some(true)
+/// A node that a notification never shows: one drawn only while the content is stale, or only in StandBy.
+fn never_shown(node: &Node) -> bool {
+    node.if_stale == Some(true) || node.if_fullscreen == Some(true)
 }
 
 /// Whether a node of the tree says when it is drawn by the staleness of the content.
@@ -721,7 +725,7 @@ fn kind(element: &Element) -> &'static str {
 /// Every node that a notification can show, in document order, whatever the values; `in_button` says whether a
 /// button or a toggle holds it.
 fn visit_all(node: &Node, in_button: bool, visit: &mut impl FnMut(&Node, bool)) {
-    if only_when_stale(node) {
+    if never_shown(node) {
         return;
     }
     visit(node, in_button);

@@ -77,8 +77,9 @@ cargo run -p liveactivity --example features --features testkit
 | [Buttons and taps](#buttons-and-taps) | a `button` node, `Event::Action` | ✓ from iOS 17.2; the label alone before | ✓ up to three |
 | [Toggles](#toggles-and-staleness) | a `toggle` node, `ActionEvent.on` | ✓ a switch, from iOS 17.2 | ✓ an action, with a check mark while on |
 | [Staleness](#toggles-and-staleness) | `when_stale()` and `unless_stale()` on a node | ✓ drawn by the system when the time has passed | drawn as while fresh, reported as `layout.ifStale`; the sink is told `stale` |
+| [StandBy](#standby) | `when_fullscreen()` and `unless_fullscreen()` on a node | ✓ iOS 17, while the Lock Screen fills the screen of a charging iPhone on its side | never full screen: a node of StandBy is left out, its counterpart shown |
 | [A tap that runs your own code](#android-options) | `AndroidOptions::with_target`, `NotificationAction.target`, `Event::Handled` | ignored | ✓ a service or a receiver of the application, where the device offers `action_targets` |
-| [A watch](docs/contract.md#a-watchs-ongoing-activity) | `Layout.small`; `AndroidOptions::with_wear_ongoing_activity`, `AndroidPresentation.wear_ongoing_activity` | ✓ a paired Apple Watch, in its Smart Stack from iOS 18: `small` where the widget extension sets `ActivityKitSmallFamily`, else the compact parts, reported as `layout.small`. The Ongoing Activity is ignored | ✓ an application on the watch, Wear OS 3 to 6, with `androidx.wear:wear-ongoing`: the activity's icon on the watch face, its Ongoing Activity, which one activity can do without. A phone's ongoing notification is not bridged to a paired watch, and a Live Update only to some. `small` is not drawn, reported as `layout.small` |
+| [A watch](docs/contract.md#a-watchs-ongoing-activity) | `Layout.small`; `AndroidOptions::with_wear_ongoing_activity`, `AndroidPresentation.wear_ongoing_activity`, `AndroidOptions::with_local_only` | ✓ a paired Apple Watch, in its Smart Stack from iOS 18: `small` where the widget extension sets `ActivityKitSmallFamily`, else the compact parts, reported as `layout.small`. The Ongoing Activity is ignored | ✓ an application on the watch, Wear OS 3 to 6, with `androidx.wear:wear-ongoing`: the activity's icon on the watch face, its Ongoing Activity, which one activity can do without. A phone's ongoing notification is not bridged to a paired watch, and a Live Update only to some; `with_local_only(true)` keeps one off it. `small` is not drawn, reported as `layout.small` |
 | [A car](docs/contract.md#layout) | `Layout.small` | ✓ CarPlay, from iOS 26: `small` as on a watch, else the compact parts | none: Android Auto shows the notifications of messaging applications built for it, and Android's documents name no place there for a Live Update. `small` is reported as `layout.small` |
 | [Links](#links-accessibility-and-motion) | a `link` node, `Layout.url` | ✓ | ✓ the notification and its actions open them, where the device opens URLs |
 | [Accessibility, motion, privacy](#links-accessibility-and-motion) | members of a node and of a style | ✓ | a label is the text of what a notification cannot draw; motion and privacy are named as left out |
@@ -92,7 +93,7 @@ cargo run -p liveactivity --example features --features testkit
 | [Images](#images) | `write_image`, an `image` node | ✓ needs an App Group | ✓ as the large icon |
 | [Pushes](#pushes) | `LayoutStartInput.push`, `push_tokens` | ✓ | none |
 | [Events](#events) | the event sink, `sync_events` | ✓ as they come | ✓ on `sync_events` |
-| [Capabilities and permissions](#capabilities-and-permissions) | `capabilities`, `permissions`, `request_permissions` | ✓ | ✓ the dialog is the host's |
+| [Capabilities and permissions](#capabilities-and-permissions) | `capabilities`, `permissions`, `request_permissions`, `open_promotion_settings` | ✓; no settings of promotion | ✓ the dialog is the host's; the settings of Live Updates open from a tap |
 | [Blocking calls](#blocking-calls) | `wait` | ✓ off the main thread | ✓ |
 
 ### Connect
@@ -222,6 +223,21 @@ match event {
   notification when a time passes. The sink is told `stale`
   ([Events](#events)), and an application that wants the notification to say
   so sends an update then.
+
+### StandBy
+
+An iPhone that charges on its side shows the activity full screen, in StandBy
+(iOS 17), with room for more. A node can be drawn only there, or only outside
+it:
+
+```rust
+let layout = Layout::new(vstack([
+    text(Bound::key("eta")).unless_fullscreen(),
+    text(Bound::key("route")).when_fullscreen(),
+]));
+```
+
+A notification is never full screen: Android leaves the StandBy node out.
 
 ### Links, accessibility and motion
 
@@ -439,6 +455,13 @@ start.android = Some(
 );
 ```
 
+A phone's activity can stay off a paired watch, where the device says
+`android_presentation.local_only`:
+
+```rust
+start.android = Some(AndroidOptions::new(AndroidVisibility::Private).with_local_only(true));
+```
+
 A button can run the application's own service or receiver at once, with no
 screen, as a Live Activity runs an App Intent: name its target by the action
 id. The component takes the tap with `LiveUpdateActions.take`, and the sink
@@ -604,6 +627,18 @@ header clock, a style that changes, a last content that stays, an update that
 alerts, a public version and branding. On iOS Live Activities are a switch in
 Settings and there is no dialog. On Android the system's dialog needs an Activity, which the host
 shows: see [Supporting it](#supporting-it).
+
+When Android says `promotion: denied`, a person's tap can open the settings of
+the application's Live Updates. The two channels take the names that the
+application gives the strings `liveupdate_channel_name` and
+`liveupdate_alert_channel_name` (and their `_description`)
+([docs/android-setup.md](docs/android-setup.md#the-names-of-the-channels)):
+
+```rust
+if permissions.promotion == PermissionState::Denied {
+    live.open_promotion_settings().await?; // Ok: Android was asked
+}
+```
 
 ### Blocking calls
 

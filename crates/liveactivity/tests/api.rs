@@ -152,6 +152,40 @@ fn req_c_012_a_constructor_builds_what_the_literal_was() {
 }
 
 #[test]
+fn req_a_032_the_options_of_a_start_kept_off_the_watch() {
+    // REQ-A-032
+    let kept = AndroidOptions::new(AndroidVisibility::Private).with_local_only(true);
+    assert_eq!(kept.local_only, Some(true));
+    assert_eq!(
+        serde_json::to_value(&kept).unwrap(),
+        json!({"visibility":"private","localOnly":true})
+    );
+    // A start that says nothing of it sends the activity to a paired watch, and its JSON is what it was.
+    let plain = AndroidOptions::new(AndroidVisibility::Private);
+    assert_eq!(plain.local_only, None);
+    assert_eq!(
+        serde_json::to_value(&plain).unwrap(),
+        json!({"visibility":"private"})
+    );
+    // An Android content keeps its own snapshot off the watch: liveupdate's member, left out when false.
+    let presentation = AndroidPresentation {
+        local_only: true,
+        ..AndroidPresentation::new(PresentationStyle::Standard)
+    };
+    assert_eq!(
+        serde_json::to_value(&presentation).unwrap()["localOnly"],
+        true
+    );
+    let plain = AndroidPresentation::new(PresentationStyle::Standard);
+    assert!(
+        serde_json::to_value(&plain)
+            .unwrap()
+            .get("localOnly")
+            .is_none()
+    );
+}
+
+#[test]
 fn req_c_012_a_layout_is_built_on_activitykits_constructors() {
     // REQ-C-012
     // Since activitykit 0.8.0 its types are `#[non_exhaustive]`: a layout is built on their constructors, and is the

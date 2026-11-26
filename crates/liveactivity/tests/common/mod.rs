@@ -51,6 +51,9 @@ pub struct MemoryState {
     pub failing_schedules: usize,
     /// The ids the lifecycle asked to take away: a notification, or the alarm of a scheduled receipt.
     pub cancelled: Vec<String>,
+    /// Whether the device has the settings of promotion, and how often they were asked for.
+    pub settings_screen: bool,
+    pub settings_opened: usize,
 }
 
 impl MemoryState {
@@ -158,6 +161,8 @@ impl Default for MemoryDriver {
                 schedules: 0,
                 failing_schedules: 0,
                 cancelled: Vec::new(),
+                settings_screen: true,
+                settings_opened: 0,
             })),
         }
     }
@@ -266,6 +271,18 @@ impl MemoryDriver {
 }
 
 impl Driver for MemoryDriver {
+    fn open_promotion_settings(&self) -> liveupdate::Result<()> {
+        let mut state = self.lock();
+        if !state.settings_screen {
+            return Err(liveupdate::Error::new(
+                liveupdate::ErrorCode::UnsupportedFeature,
+                "The device has no settings of promotion.",
+            ));
+        }
+        state.settings_opened += 1;
+        Ok(())
+    }
+
     fn capabilities(&self) -> liveupdate::Result<Capabilities> {
         let mut state = self.lock();
         state.capability_calls += 1;

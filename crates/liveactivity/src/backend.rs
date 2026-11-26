@@ -15,7 +15,8 @@ fn unsupported<'a, T: 'a>(message: &'static str) -> BackendFuture<'a, T> {
 /// What a platform implements to show Live Activities: one method per command of the contract.
 ///
 /// The five template commands and the two queries are required. Layouts, permission requests,
-/// images and queued events have defaults, so a backend that draws templates only is complete.
+/// images, queued events and the settings of promotion have defaults, so a backend that draws
+/// templates only is complete.
 /// The requests are validated before they reach a backend.
 pub trait LiveActivityBackend: Send + Sync + 'static {
     /// Takes where to send taps. The builder calls this once, before any command. The default has no taps to send.
@@ -87,6 +88,12 @@ pub trait LiveActivityBackend: Send + Sync + 'static {
     fn sync_events(&self) -> BackendFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
+
+    /// Asks the system for the screen where a person allows or stops the application's Live
+    /// Updates. The default has none; a backend that wraps another forwards it.
+    fn open_promotion_settings(&self) -> BackendFuture<'_, ()> {
+        unsupported("This backend has no settings of promotion.")
+    }
 }
 
 impl<T: LiveActivityBackend + ?Sized> LiveActivityBackend for Arc<T> {
@@ -148,5 +155,9 @@ impl<T: LiveActivityBackend + ?Sized> LiveActivityBackend for Arc<T> {
 
     fn sync_events(&self) -> BackendFuture<'_, ()> {
         (**self).sync_events()
+    }
+
+    fn open_promotion_settings(&self) -> BackendFuture<'_, ()> {
+        (**self).open_promotion_settings()
     }
 }

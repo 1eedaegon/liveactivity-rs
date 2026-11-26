@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.15.0 - 2026-11-26
+
+- feat: an activity mirrored to a paired watch, with liveupdate 0.11.0 (#44) (`e239cce`)
+
 Built on liveupdate 0.11.0, with its AAR `liveupdate-android-0.11.0.aar`.
 
 - **An activity mirrored to a paired watch** (Android): `AndroidOptions::with_watch_mirror(true)`, JSON

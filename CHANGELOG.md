@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.14.0 - 2026-11-26
+
+- feat: liveupdate 0.10.0's push path reachable with the feature android-push, and what a push did as Event::Pushed (#43) (`855cdcf`)
+
 Built on liveupdate 0.10.0, with its AAR `liveupdate-android-0.10.0.aar`.
 
 - **liveupdate's push path** (Android): the feature `android-push` turns on liveupdate's `push`, whose native

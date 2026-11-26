@@ -20,7 +20,7 @@ live.end(EndInput::new(&order.id)).await?;
 
 ```toml
 [dependencies]
-liveactivity = "0.13"
+liveactivity = "0.14"
 ```
 
 A server that sends pushes takes the same version with `default-features = false`

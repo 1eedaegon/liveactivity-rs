@@ -710,7 +710,7 @@ match with a `_` arm.
 | --- | --- | --- |
 | `Event::Action` | `ActionEvent` | iOS, Android: a tap on a `button` or a `toggle` node, or on an action of an Android content. For a toggle it has `on`, the state the person asked for, and `tap` says which tap it is ([A tap](#a-tap)) |
 | `Event::PushToken` | `PushTokenEvent` | iOS: a push token of an activity, new or changed |
-| `Event::PushToStartToken` | `PushToStartTokenEvent` | iOS: the app's push-to-start token, new or changed |
+| `Event::PushToStartToken` | `PushToStartTokenEvent` | iOS: the app's push-to-start token, the one it has at launch and then each new one |
 | `Event::Updated` | `UpdatedEvent` | iOS: content that a push delivered to a layout activity |
 | `Event::Started` | `StartedEvent` | iOS: a layout activity began, one the application started or one a push started |
 | `Event::State` | `StateEvent` | A new lifecycle state of an activity. iOS: every change, while the application runs. Android: each state once, `active`, `stale`, `ended` and `dismissed`, when the backend is asked (see below) |

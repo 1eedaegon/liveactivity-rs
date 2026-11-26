@@ -4,6 +4,16 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+Built on activitykit 0.9.1.
+
+- **The app learns its push-to-start token** (iOS): with `push_to_start(true)`, `Event::PushToStartToken` brings the
+  token the app has at each launch, then each new one, never the same one twice. Before, only a change came, and on
+  an iPhone XS with iOS 18.7 an app whose token did not change got no event in five minutes, so its server never
+  learned it.
+
+When updating: the fix is in the Swift layer that activitykit's `build.rs` builds into the Rust library. Point the
+widget extension's package reference at activitykit 0.9.1 as well, so both come from one version.
+
 ## 0.12.0 - 2026-11-26
 
 - chore: build on liveupdate 0.8.3 (#38) (`1071361`)

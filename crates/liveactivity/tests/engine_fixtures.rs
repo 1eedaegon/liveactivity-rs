@@ -233,6 +233,33 @@ fn req_i_015_the_engines_widget_keeps_the_expanded_islands_corners_clear() {
 }
 
 #[test]
+fn req_i_019_the_engine_reports_the_push_to_start_token_the_app_has() {
+    // REQ-I-019
+    // Since activitykit 0.9.1 the Swift layer reports the token the app has, then each change: before, it watched the
+    // changes alone, and an app whose token did not change never learned it.
+    let system = engine().join("swift/Sources/ActivityKitBridge/ActivityKitSystem.swift");
+    let system = fs::read_to_string(system).expect("activitykit ships its system");
+    // The members of `Activity`, not the event's case `.pushToStartToken(token:)`.
+    let property = "Activity<LiveActivityLayoutAttributes>.pushToStartToken";
+    let updates = system
+        .find(&format!("{property}Updates"))
+        .expect("the Swift layer watches the token's changes");
+    let current = system
+        .match_indices(property)
+        .map(|(at, _)| at)
+        .find(|at| !system[at + property.len()..].starts_with("Updates"))
+        .expect("and reads the token the app has");
+    assert!(
+        updates < current,
+        "it watches the changes before it reads the token, so that no change between the two is lost"
+    );
+    assert!(
+        system.contains("token != reported"),
+        "and reports no token twice"
+    );
+}
+
+#[test]
 fn req_i_016_the_engines_iphones_begin_with_ios_16_1() {
     // REQ-I-016
     // Since activitykit 0.8.0 an iPhone runs Live Activities from iOS 16.1, ActivityKit's first release, and the

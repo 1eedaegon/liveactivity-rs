@@ -23,6 +23,8 @@
 //! ```
 
 mod apns;
+mod fcm;
+pub(crate) mod layer;
 #[cfg(feature = "server")]
 mod send;
 
@@ -33,7 +35,7 @@ mod send;
 pub use ::reqwest;
 #[cfg(feature = "server")]
 #[cfg_attr(docsrs, doc(cfg(feature = "server")))]
-pub use send::{Apns, ApnsKey, Delivery, SendError, Sender, SenderBuilder};
+pub use send::{Apns, ApnsKey, Delivery, Fcm, FcmAccount, SendError, Sender, SenderBuilder};
 
 use crate::{Alert, EndPolicy, Error, LayoutSnapshot, LayoutStartInput, Result};
 use serde::{Deserialize, Serialize};
@@ -160,9 +162,7 @@ impl Message {
             Target::ApnsActivity { .. }
             | Target::ApnsPushToStart { .. }
             | Target::ApnsChannel { .. } => apns::request(self, target, application),
-            Target::Fcm { .. } => Err(Error::unsupported_feature(
-                "A push to Android waits for liveupdate's push path.",
-            )),
+            Target::Fcm { token } => fcm::request(self, token, application),
         }
     }
 }
@@ -201,8 +201,8 @@ pub enum Target {
         /// The channel's id, base64.
         channel: String,
     },
-    /// The installation's FCM registration token, the activity named by its key in the data. Android's push path
-    /// comes with liveupdate; until then a request to it is `UNSUPPORTED_FEATURE`.
+    /// The installation's FCM registration token, the activity named by its key in the data member that
+    /// liveupdate's push entry hands to this crate's backend on the device (liveupdate 0.12.0 or later).
     Fcm {
         /// The registration token.
         token: String,
@@ -231,10 +231,12 @@ pub enum Platform {
     Fcm,
 }
 
-/// What a platform needs to address the application: the bundle id for APNs's topic and broadcasts.
+/// What a platform needs to address the application: the bundle id for APNs's topic and broadcasts, and the
+/// Firebase project for FCM's path.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Application {
     bundle_id: Option<String>,
+    fcm_project: Option<String>,
 }
 
 impl Application {
@@ -247,6 +249,15 @@ impl Application {
     pub fn bundle_id(self, bundle_id: impl Into<String>) -> Self {
         Self {
             bundle_id: Some(bundle_id.into()),
+            ..self
+        }
+    }
+
+    /// The Firebase project of the Android application, such as `demo-project`.
+    pub fn fcm_project(self, project: impl Into<String>) -> Self {
+        Self {
+            fcm_project: Some(project.into()),
+            ..self
         }
     }
 }

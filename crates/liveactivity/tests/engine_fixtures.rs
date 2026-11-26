@@ -395,7 +395,7 @@ fn req_a_035_the_setup_names_the_aars_push_entry() {
     // This crate turns it on with its own feature, with the application's side.
     let manifest = include_str!("../Cargo.toml");
     assert!(
-        manifest.contains("android-push = [\"app\", \"liveupdate/push\"]"),
+        manifest.contains("android-push = [\"app\", \"liveupdate/push\", \"dep:jni\"]"),
         "the feature `android-push`"
     );
     let setup = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/android-setup.md");

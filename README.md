@@ -97,7 +97,7 @@ cargo run -p liveactivity --example features --features testkit
 | [A lock screen version, a foreground service](#android-options) | `LayoutStartInput.android` | ignored | ✓ where the device offers them |
 | [Images](#images) | `write_image`, an `image` node | ✓ needs an App Group | ✓ as the large icon |
 | [Pushes](#pushes) | `LayoutStartInput.push`, `push_tokens` | ✓ | none |
-| [Pushes from a server](#pushes-from-a-server) | `push::Message`, `push::Target`, `push::Sender` (feature `server`) | ✓ APNs | liveupdate's own payload with the feature `android-push`, reported as `Event::Pushed`; a layout activity not yet |
+| [Pushes from a server](#pushes-from-a-server) | `push::Message`, `push::Target`, `push::Sender` (feature `server`) | ✓ APNs | ✓ FCM, with the feature `android-push` and liveupdate's library 0.12: the device runs the push as the application's call, reported as `Event::Pushed` |
 | [Events](#events) | the event sink, `sync_events` | ✓ as they come | ✓ on `sync_events` |
 | [Capabilities and permissions](#capabilities-and-permissions) | `capabilities`, `permissions`, `request_permissions`, `open_promotion_settings` | ✓; no settings of promotion | ✓ the dialog is the host's; the settings of Live Updates open from a tap |
 | [Blocking calls](#blocking-calls) | `wait` | ✓ off the main thread | ✓ |
@@ -542,17 +542,20 @@ The application sends its server what the device reported, as a `Target`:
 
 ```json
 { "activityKey": "delivery:7", "target": { "type": "apnsActivity", "token": "0a1b…" } }
+{ "target": { "type": "fcm", "token": "dK3x:APA91b…" } }
 ```
 
 The server makes one `Message` from the contract's own types and sends it with
 the feature `server`. The key comes in as text; the crate reads no environment.
 
 ```rust
-use liveactivity::push::{Apns, ApnsKey, Message, SendError, Sender};
+use liveactivity::push::{Apns, ApnsKey, Fcm, FcmAccount, Message, SendError, Sender};
 
-let key = ApnsKey::from_pem(std::fs::read(path)?, "ABC123DEFG", "TEAM456789")?;
+let key = ApnsKey::from_pem(std::fs::read(p8_path)?, "ABC123DEFG", "TEAM456789")?;
+let account = FcmAccount::from_json(std::fs::read(service_account_path)?)?;
 let sender = Sender::builder()
     .apns(Apns::new(key, "dev.example.app").sandbox())
+    .fcm(Fcm::new(account))
     .build()?;
 
 let message = Message::update("delivery:7", LayoutSnapshot::new(revision, values))
@@ -565,10 +568,11 @@ match sender.send(&message, &target).await {
 ```
 
 `Message::start` goes to the push-to-start token, `update` and `end` to an
-activity's token or a channel. Without `server`, `message.request(&target,
-&application)` gives the path, the headers and the body for another HTTP
-client. On Android a layout activity is not pushed yet: liveupdate 0.10 runs its own payload
-([docs/android-setup.md](docs/android-setup.md#pushes-from-the-server)). The steps, from the key to what
+activity's token or a channel; on Android all three go to the installation's FCM
+token, and the device runs them as the application's own calls
+([docs/android-setup.md](docs/android-setup.md#pushes-from-the-server)). Without
+`server`, `message.request(&target, &application)` gives the path, the headers
+and the body for another HTTP client. The steps, from the key to what
 came back, are in [docs/server-push.md](docs/server-push.md); the example
 `push_server` is a server with axum.
 

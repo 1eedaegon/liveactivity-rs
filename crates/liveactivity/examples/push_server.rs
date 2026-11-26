@@ -5,9 +5,12 @@
 //! ```sh
 //! APNS_KEY=/path/to/AuthKey_ABC123DEFG.p8 APNS_KEY_ID=ABC123DEFG APNS_TEAM_ID=TEAM456789 \
 //! APNS_BUNDLE_ID=dev.example.app APNS_SANDBOX=1 \
+//! FCM_SERVICE_ACCOUNT=/path/to/service-account.json \
 //!   cargo run -p liveactivity --features server --example push_server
 //!
-//! # What the application sends when its device reports a token:
+//! # Either platform alone works: leave out the other's variables.
+//! # What the application sends when its device reports a token, an activity's on iOS, the installation's on
+//! # Android (`{"target":{"type":"fcm","token":"dK3x:APA91b…"}}`, under no key):
 //! curl -X POST localhost:8080/v1/push-targets -H 'content-type: application/json' \
 //!   -d '{"activityKey":"delivery:7","target":{"type":"apnsActivity","token":"0a1b…"}}'
 //! # A change on the server's side:
@@ -22,7 +25,7 @@ use axum::{
     routing::post,
 };
 use liveactivity::activitykit::layout::{text, vstack};
-use liveactivity::push::{Apns, ApnsKey, Message, SendError, Sender, Target};
+use liveactivity::push::{Apns, ApnsKey, Fcm, FcmAccount, Message, SendError, Sender, Target};
 use liveactivity::{
     Alert, Bound, EndPolicy, Island, IslandExpanded, Layout, LayoutSnapshot, LayoutStartInput,
     Value,
@@ -55,7 +58,7 @@ struct Change {
 
 #[derive(Default)]
 struct Store {
-    /// The targets of each activity key; those of push-to-start under no key.
+    /// The targets of each activity key; those of an installation, push-to-start and FCM, under no key.
     targets: HashMap<Option<String>, Vec<Target>>,
     /// The last revision the server sent of each activity: the server owns them.
     revisions: HashMap<String, u64>,
@@ -72,13 +75,22 @@ impl App {
         self.store.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Sends `message` to every target under `key`, and forgets those that are gone.
+    /// Sends `message` to every target under `key`, and to the installations on Android, whose one FCM token is
+    /// for all their activities; forgets those that are gone.
     async fn push(
         &self,
         key: Option<String>,
         message: Message,
     ) -> (StatusCode, Json<serde_json::Value>) {
-        let targets = self.store().targets.get(&key).cloned().unwrap_or_default();
+        let targets: Vec<Target> = {
+            let store = self.store();
+            let own = store.targets.get(&key).cloned().unwrap_or_default();
+            let installations = store.targets.get(&None).cloned().unwrap_or_default();
+            let android = installations
+                .into_iter()
+                .filter(|target| key.is_some() && matches!(target, Target::Fcm { .. }));
+            own.into_iter().chain(android).collect()
+        };
         let (mut sent, mut failed, mut gone) = (0, Vec::new(), Vec::new());
         for target in targets {
             match self.sender.send(&message, &target).await {
@@ -88,7 +100,7 @@ impl App {
                 Err(error) => failed.push(error.to_string()),
             }
         }
-        if let Some(kept) = self.store().targets.get_mut(&key) {
+        for kept in self.store().targets.values_mut() {
             kept.retain(|target| !gone.contains(target));
         }
         let status = if failed.is_empty() {
@@ -174,17 +186,23 @@ fn variable(name: &str) -> Result<String, Box<dyn Error>> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // The key's text stays in this process: it is read from its file and never printed.
-    let pem = std::fs::read(variable("APNS_KEY")?)?;
-    let key = ApnsKey::from_pem(pem, variable("APNS_KEY_ID")?, variable("APNS_TEAM_ID")?)?;
-    let apns = Apns::new(key, variable("APNS_BUNDLE_ID")?);
-    let apns = if std::env::var("APNS_SANDBOX").is_ok_and(|value| value == "1") {
-        apns.sandbox()
-    } else {
-        apns
-    };
+    // The keys' text stays in this process: each is read from its file and never printed.
+    let mut sender = Sender::builder();
+    if let Ok(path) = std::env::var("APNS_KEY") {
+        let key = ApnsKey::from_pem(
+            std::fs::read(path)?,
+            variable("APNS_KEY_ID")?,
+            variable("APNS_TEAM_ID")?,
+        )?;
+        let apns = Apns::new(key, variable("APNS_BUNDLE_ID")?);
+        let sandbox = std::env::var("APNS_SANDBOX").is_ok_and(|value| value == "1");
+        sender = sender.apns(if sandbox { apns.sandbox() } else { apns });
+    }
+    if let Ok(path) = std::env::var("FCM_SERVICE_ACCOUNT") {
+        sender = sender.fcm(Fcm::new(FcmAccount::from_json(std::fs::read(path)?)?));
+    }
     let app = App {
-        sender: Sender::builder().apns(apns).build()?,
+        sender: sender.build()?,
         store: Arc::default(),
     };
     let router = Router::new()

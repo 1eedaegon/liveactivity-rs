@@ -799,7 +799,7 @@ Evidence: `exchange::req_a_026_a_start_without_room_in_the_store_is_a_system_lim
 
 ## REQ-A-027 The AAR this crate is built with
 
-The crate is built and tested with liveupdate 0.11.0, whose AAR is `liveupdate-android-0.11.0.aar`. The setup
+The crate is built and tested with liveupdate 0.12.0, whose AAR is `liveupdate-android-0.12.0.aar`. The setup
 document names it, what a watch application adds, and what a crate and an AAR of two versions do together: an
 AAR from 0.7.0 posts a record with a member it does not know without it, and an earlier one refuses such a
 request with `INVALID_INPUT`.
@@ -919,12 +919,45 @@ native entry from the host's library; the host names the library in the manifest
 `io.github.eedaegon.liveupdate.LIBRARY` and hands a data message over with
 `LiveUpdatePush.handle(this, message.data)` in its messaging service, which runs in the application's main process.
 `liveactivity::liveupdate::push::Payload` is liveupdate's own, for an activity of liveupdate's types.
-`capabilities().android_presentation.push` says whether the AAR has the entry. The contract's feature `push` stays
-`unsupported` on Android: a layout activity of this crate is not pushed by liveupdate's payload, which neither
-projects its layout nor keeps its store ([docs/design/android-push](design/android-push/PRD.md)).
+`capabilities().android_presentation.push` says whether the AAR has the entry. A layout activity of this crate is
+not pushed by liveupdate's payload, which neither projects its layout nor keeps its store, but by the layer's member
+(REQ-A-037, [docs/design/android-push](design/android-push/PRD.md)).
 
 Evidence: `engine_fixtures::req_a_035_the_setup_names_the_aars_push_entry` and
 `exchange::req_a_035_the_capabilities_say_whether_the_aar_takes_a_push`.
+
+## REQ-A-036 A message to an Android target
+
+`Message::request(&Target::Fcm { token }, &application)` is FCM HTTP v1's request: `POST
+/v1/projects/<project>/messages:send`, the project named by `Application::fcm_project`, with
+`{"message":{"token":…,"android":{"priority":"high"|"normal"},"data":{"liveupdate.layer":"<json>"}}}`. The member is
+this crate's own message of the activity's key, version 1: the command, the key, and the start's request, the
+snapshot, the alert or the policy. It is checked as the backend checks the call it stands for, and the data, its key
+and value together, against FCM's 4096 bytes (`PAYLOAD_TOO_LARGE`). A start that the application schedules, or a
+transient one, is the application's own and is refused. A token is 1 to 4096 characters without a space or a
+control character.
+
+Evidence: `push::req_a_036_the_fcm_request`.
+
+## REQ-A-037 A layout activity's push on the device
+
+liveupdate 0.12.0 hands the data member `liveupdate.layer` to `LiveUpdatePush.nativeLayer`, which the feature
+`android-push` exports from the host's library. In a process that the message started it builds the Android
+backend from the process's VM and the context, with the files of the application's last run, and runs the message
+as the application would: `start_layout`, or `update_layout` or `end_layout` of the live activity of the key, with
+the device's projection; the store holds what it did. A key without a live activity is `NOT_FOUND`, a stale revision
+`STALE_REVISION`, a repeat changes nothing, and the same start delivered again after its end answers the ended
+activity and begins nothing. The request is checked before its activity is looked for. It answers liveupdate's
+outcome, which the AAR stores as a `pushed` event with liveupdate's id; a member that is no message of this version,
+or whose key or revision the AAR's event store does not take, answers one without a command, which stores nothing. `LiveUpdateBackend::push_layer(member)` runs a member the same way from Rust. The backend
+remembers its files (`liveactivity/push.json` under them) when the feature is on, and its store's lock is the
+process's.
+
+Evidence: `exchange::req_a_037_a_layer_member_runs_the_layout_path`,
+`exchange::req_a_037_a_layer_member_that_cannot_run_is_refused`,
+`exchange::req_a_037_a_start_delivered_again_after_its_end_begins_nothing`,
+`exchange::req_a_037_an_outcome_that_the_aar_cannot_store_names_nothing`,
+`exchange::req_a_037_a_backend_with_files_remembers_them_for_a_push` and the unit test of the remembered files.
 
 ## REQ-A-038 What a push did reaches the sink
 
@@ -935,6 +968,17 @@ for an end; and the contract's code of a refusal, none when it did what it asked
 `{ activityId?, activityKey, command, revision?, code? }`. It was `Event::Unknown` before liveupdate 0.10.0.
 
 Evidence: `exchange::req_a_038_what_a_push_did_reaches_the_sink`.
+
+## REQ-A-039 A layout activity's push, as on iOS
+
+A push of a layout activity that the backend's store holds reaches the sink beside its `Event::Pushed` as on iOS:
+an update or a start that was taken as `Event::Updated` or `Event::Started`, with the record the store holds. The
+contract's feature `push` is `supported` on Android where the backend has the application's files, the AAR hands
+the layer's member over (`android_presentation.push_layer`, liveupdate 0.12.0), and the crate is built with
+`android-push`. A list of the activities that fails after the drain costs those two events, not the drained ones.
+
+Evidence: `exchange::req_a_039_a_layout_activitys_push_comes_as_on_ios` and
+`exchange::req_a_039_a_list_that_fails_after_the_drain_costs_no_drained_event`.
 
 ## REQ-P-001 An application without the server
 
@@ -977,10 +1021,10 @@ Evidence: `push::req_p_004_the_apns_request`.
 
 ## REQ-P-005 The FCM request
 
-A message to an FCM target is FCM HTTP v1's message with the token, `android.priority` `high` or `normal`, and the
-data member that liveupdate's push path reads. Until liveupdate publishes that path, it is `UNSUPPORTED_FEATURE`.
+A message to an FCM target is the request of REQ-A-036, which the application's backend runs on the device with
+liveupdate 0.12.0 or later.
 
-Evidence: `push::req_p_005_an_fcm_target_waits_for_the_engine`.
+Evidence: `push::req_a_036_the_fcm_request`.
 
 ## REQ-P-006 A sender for the platforms it is given
 
@@ -1001,6 +1045,19 @@ Evidence: `push_send::req_p_006_a_sender_signs_in_for_what_it_is_given` and
 message's own error. A key never appears in `Debug`, `Display` or an error.
 
 Evidence: `push_send::req_p_007_each_answer_of_each_platform`.
+
+## REQ-P-009 A sender for FCM
+
+With `server`, `Sender::builder().fcm(Fcm::new(FcmAccount::from_json(service_account)?))` sends to FCM. The account
+is a service account's JSON key (`client_email`, `private_key`, `token_uri`, `project_id`), signed with once to know
+that it signs; `Debug` names the email and the project alone. The sender exchanges an RS256 JWT at the account's
+`token_uri` for an access token, keeps it until five minutes before it runs out, and makes a new one once when FCM
+answers `UNAUTHENTICATED`. FCM's answers come in `SendError`: `UNREGISTERED` as `Unregistered`, `SENDER_ID_MISMATCH`
+as `BadTarget`, `QUOTA_EXCEEDED` as `TooManyRequests`, `UNAVAILABLE` and `INTERNAL` as `Unavailable`, the rest as
+`Rejected` with FCM's code; a delivery's id is the message's name. A target of FCM to a sender without it is
+`UNSUPPORTED_FEATURE`.
+
+Evidence: `push_send::req_p_009_a_sender_for_fcm` and `push_send::req_p_009_each_answer_of_fcm`.
 
 ## REQ-P-008 No web handler, no environment
 

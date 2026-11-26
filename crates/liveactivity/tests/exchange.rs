@@ -3359,3 +3359,322 @@ fn req_a_040_a_mirror_needs_the_devices_capability() {
     assert_eq!(refused.code, "UNSUPPORTED_FEATURE");
     assert_eq!(driver.lock().posts, posts);
 }
+
+/// The member `liveupdate.layer` of the FCM request that a server makes of `message`.
+fn layer_member(message: &liveactivity::push::Message) -> String {
+    let target = liveactivity::push::Target::Fcm {
+        token: "dK3x:APA91b".into(),
+    };
+    let application = liveactivity::push::Application::new().fcm_project("demo-project");
+    let request = message.request(&target, &application).unwrap();
+    let body: serde_json::Value = serde_json::from_str(&request.body).unwrap();
+    body["message"]["data"]["liveupdate.layer"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+fn ride_snapshot(revision: u64, eta: &str, done: f64) -> liveactivity::LayoutSnapshot {
+    serde_json::from_value(
+        serde_json::json!({ "revision": revision, "values": { "eta": eta, "done": done } }),
+    )
+    .unwrap()
+}
+
+/// A device whose AAR hands the layer's member over, with the app's files.
+fn layer_device(test: &str) -> (LiveUpdateBackend<MemoryDriver>, MemoryDriver) {
+    let driver = MemoryDriver::offering(|offered| {
+        offered.push = true;
+        offered.push_layer = true;
+    });
+    let backend = LiveUpdateBackend::new(driver.clone()).with_files(
+        liveactivity::android::AndroidFiles::new("Mochi", app_files(test)),
+    );
+    (backend, driver)
+}
+
+#[test]
+fn req_a_037_a_layer_member_runs_the_layout_path() {
+    // REQ-A-037
+    use liveactivity::push::Message;
+    let (backend, driver) = layer_device("layer-push");
+    let backend = std::sync::Arc::new(backend);
+    // A start by push, as the application's own start: the device projects the layout, the store keeps it.
+    let started = backend.push_layer(&layer_member(&Message::start(
+        "ignored",
+        ride("ride:7", None),
+    )));
+    let started: serde_json::Value = serde_json::from_str(&started).unwrap();
+    assert_eq!(started["command"], "start");
+    assert_eq!(started["activityKey"], "ride:7");
+    assert_eq!(started["revision"], 0);
+    let id = started["id"].as_str().unwrap().to_owned();
+    assert!(started.get("code").is_none(), "{started}");
+    let shown = driver.posted(&id);
+
+    // An update by the key: what the device shows and what the store holds.
+    let updated = backend.push_layer(&layer_member(&Message::update(
+        "ride:7",
+        ride_snapshot(1, "2 min", 0.7),
+    )));
+    let updated: serde_json::Value = serde_json::from_str(&updated).unwrap();
+    assert_eq!(
+        (updated["command"].as_str(), updated["id"].as_str()),
+        (Some("update"), Some(id.as_str()))
+    );
+    assert_ne!(driver.posted(&id), shown);
+    let (live, _events) = connect(backend.clone());
+    let listed = block_on(live.list_layout()).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, id);
+    assert_eq!(listed[0].snapshot.revision, 1);
+    assert_eq!(
+        listed[0].snapshot.values["eta"],
+        liveactivity::Value::from("2 min")
+    );
+
+    // A repeat changes nothing, a stale revision is refused, and a key without a live activity is not found.
+    let posts = driver.lock().posts;
+    let again: serde_json::Value = serde_json::from_str(&backend.push_layer(&layer_member(
+        &Message::update("ride:7", ride_snapshot(1, "2 min", 0.7)),
+    )))
+    .unwrap();
+    assert!(again.get("code").is_none(), "{again}");
+    assert_eq!(driver.lock().posts, posts);
+    let stale: serde_json::Value = serde_json::from_str(&backend.push_layer(&layer_member(
+        &Message::update("ride:7", ride_snapshot(0, "9 min", 0.1)),
+    )))
+    .unwrap();
+    assert_eq!(stale["code"], "STALE_REVISION");
+    let missing: serde_json::Value = serde_json::from_str(&backend.push_layer(&layer_member(
+        &Message::update("ride:9", ride_snapshot(1, "1 min", 0.9)),
+    )))
+    .unwrap();
+    assert_eq!(
+        (missing["code"].as_str(), missing["id"].as_str()),
+        (Some("NOT_FOUND"), None)
+    );
+
+    // An end by the key, with its last content.
+    let ended: serde_json::Value = serde_json::from_str(&backend.push_layer(&layer_member(
+        &Message::end("ride:7").snapshot(ride_snapshot(2, "here", 1.0)),
+    )))
+    .unwrap();
+    assert_eq!(
+        (ended["command"].as_str(), ended["id"].as_str()),
+        (Some("end"), Some(id.as_str()))
+    );
+    assert!(ended.get("code").is_none(), "{ended}");
+    let after: serde_json::Value = serde_json::from_str(&backend.push_layer(&layer_member(
+        &Message::update("ride:7", ride_snapshot(3, "gone", 1.0)),
+    )))
+    .unwrap();
+    assert_eq!(
+        after["code"], "NOT_FOUND",
+        "an ended activity is live no more"
+    );
+}
+
+#[test]
+fn req_a_037_a_layer_member_that_cannot_run_is_refused() {
+    // REQ-A-037
+    use liveactivity::push::Message;
+    let (backend, _driver) = layer_device("layer-refused");
+    // What is no message of this crate's names no command: the AAR stores nothing of it.
+    for member in [
+        "",
+        "not json",
+        r#"{"v":2,"command":"update","activityKey":"ride:7"}"#,
+        r#"{"v":1,"command":"snooze","activityKey":"ride:7"}"#,
+    ] {
+        let outcome: serde_json::Value = serde_json::from_str(&backend.push_layer(member)).unwrap();
+        assert!(outcome.get("command").is_none(), "{member}: {outcome}");
+    }
+    // A message that the contract refuses names its command and its key.
+    let refused = r#"{"v":1,"command":"update","activityKey":"ride:7","snapshot":{"revision":1,"values":{"liveActivityTemplate":true}}}"#;
+    let outcome: serde_json::Value = serde_json::from_str(&backend.push_layer(refused)).unwrap();
+    assert_eq!(
+        (outcome["command"].as_str(), outcome["code"].as_str()),
+        (Some("update"), Some("INVALID_INPUT"))
+    );
+    // Without the app's files no layout runs.
+    let templates = LiveUpdateBackend::new(MemoryDriver::default());
+    let member = layer_member(&Message::start("x", ride("ride:7", None)));
+    let outcome: serde_json::Value = serde_json::from_str(&templates.push_layer(&member)).unwrap();
+    assert_eq!(outcome["code"], "UNSUPPORTED_FEATURE");
+}
+
+#[test]
+fn req_a_039_a_layout_activitys_push_comes_as_on_ios() {
+    // REQ-A-039
+    use liveactivity::push::Message;
+    let (backend, driver) = layer_device("layer-events");
+    let started: serde_json::Value = serde_json::from_str(
+        &backend.push_layer(&layer_member(&Message::start("x", ride("ride:7", None)))),
+    )
+    .unwrap();
+    let id = started["id"].as_str().unwrap().to_owned();
+    backend.push_layer(&layer_member(&Message::update(
+        "ride:7",
+        ride_snapshot(1, "2 min", 0.7),
+    )));
+    // What the AAR stored of the two outcomes.
+    driver.pushed(&id, 0, "start", "ride:7", Some(0), None);
+    driver.pushed(&id, 1, "update", "ride:7", Some(1), None);
+    driver.pushed(&id, 2, "update", "ride:7", Some(0), Some("STALE_REVISION"));
+    let (live, events) = connect(backend);
+    block_on(live.sync_events()).unwrap();
+    let kinds: Vec<Event> = events
+        .try_iter()
+        .filter(|event| {
+            matches!(
+                event,
+                Event::Pushed(_) | Event::Started(_) | Event::Updated(_)
+            )
+        })
+        .collect();
+    assert!(matches!(&kinds[0], Event::Pushed(pushed) if pushed.revision == Some(0)));
+    assert!(
+        matches!(&kinds[1], Event::Started(started) if started.record.id == id && started.record.activity_key == "ride:7")
+    );
+    assert!(matches!(&kinds[2], Event::Pushed(pushed) if pushed.revision == Some(1)));
+    assert!(matches!(&kinds[3], Event::Updated(updated) if updated.record.snapshot.revision == 1));
+    // A refusal is the push's event alone.
+    assert!(
+        matches!(&kinds[4], Event::Pushed(pushed) if pushed.code.as_deref() == Some("STALE_REVISION"))
+    );
+    assert_eq!(kinds.len(), 5);
+
+    // The contract's `push` follows the AAR's layer, where this crate's entry is built in.
+    let capabilities = serde_json::to_value(block_on(live.capabilities()).unwrap()).unwrap();
+    let built_in = if cfg!(feature = "android-push") {
+        "supported"
+    } else {
+        "unsupported"
+    };
+    assert_eq!(capabilities["push"], built_in);
+    assert_eq!(capabilities["androidPresentation"]["pushLayer"], true);
+    let (earlier, _events, _driver) = android_on(
+        MemoryDriver::offering(|offered| offered.push = true),
+        "layer-earlier",
+    );
+    let capabilities = serde_json::to_value(block_on(earlier.capabilities()).unwrap()).unwrap();
+    assert_eq!(capabilities["push"], "unsupported");
+}
+
+#[test]
+fn req_a_037_a_start_delivered_again_after_its_end_begins_nothing() {
+    // REQ-A-037
+    use liveactivity::push::Message;
+    let (backend, driver) = layer_device("layer-again");
+    let start = layer_member(&Message::start("x", ride("ride:7", None)));
+    let first: serde_json::Value = serde_json::from_str(&backend.push_layer(&start)).unwrap();
+    let id = first["id"].as_str().unwrap().to_owned();
+    backend.push_layer(&layer_member(&Message::end("ride:7")));
+    let posts = driver.lock().posts;
+    // FCM delivers at least once, and may reorder: the start again answers the ended activity.
+    let again: serde_json::Value = serde_json::from_str(&backend.push_layer(&start)).unwrap();
+    assert_eq!(again["id"].as_str(), Some(id.as_str()), "{again}");
+    assert_eq!(driver.lock().posts, posts, "nothing new is posted");
+    let update: serde_json::Value = serde_json::from_str(&backend.push_layer(&layer_member(
+        &Message::update("ride:7", ride_snapshot(1, "2 min", 0.7)),
+    )))
+    .unwrap();
+    assert_eq!(update["code"], "NOT_FOUND");
+    // Another request under the key is another activity.
+    let other = layer_member(&Message::start(
+        "y",
+        ride("ride:7", Some(driving(10, "9 min"))),
+    ));
+    let other: serde_json::Value = serde_json::from_str(&backend.push_layer(&other)).unwrap();
+    assert_ne!(other["id"].as_str(), Some(id.as_str()), "{other}");
+}
+
+#[test]
+fn req_a_037_an_outcome_that_the_aar_cannot_store_names_nothing() {
+    // REQ-A-037
+    let (backend, _driver) = layer_device("layer-unstorable");
+    let member = |key: &str, revision: u64| {
+        serde_json::json!({ "v": 1, "command": "update", "activityKey": key,
+            "snapshot": { "revision": revision, "values": { "eta": "1 min", "done": 0.5 } } })
+        .to_string()
+    };
+    for (key, revision) in [
+        ("", 1),
+        ("bad key", 1),
+        (&*"k".repeat(129), 1),
+        ("ride:7", 9_007_199_254_740_992),
+    ] {
+        let outcome: serde_json::Value =
+            serde_json::from_str(&backend.push_layer(&member(key, revision))).unwrap();
+        assert!(
+            outcome.get("command").is_none(),
+            "{key:?} {revision}: {outcome}"
+        );
+    }
+    // The largest key and revision the store takes are answered.
+    let outcome: serde_json::Value =
+        serde_json::from_str(&backend.push_layer(&member(&"k".repeat(128), 9_007_199_254_740_991)))
+            .unwrap();
+    assert_eq!(outcome["code"], "NOT_FOUND");
+}
+
+#[cfg(feature = "android-push")]
+#[test]
+fn req_a_037_a_backend_with_files_remembers_them_for_a_push() {
+    // REQ-A-037
+    let folder = app_files("layer-remembered");
+    let remembered = folder.join("liveactivity/push.json");
+    let _ = std::fs::remove_file(&remembered);
+    let mut files = liveactivity::android::AndroidFiles::new("Mochi", &folder);
+    files.samsung_now_bar = true;
+    let _backend = LiveUpdateBackend::new(MemoryDriver::default()).with_files(files);
+    let kept: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&remembered).unwrap()).unwrap();
+    assert_eq!(kept["appName"], "Mochi");
+    assert_eq!(kept["samsungNowBar"], true);
+    assert_eq!(kept["layoutStore"], "liveactivity/layouts.json");
+    // No file is left beside it.
+    let others: Vec<_> = std::fs::read_dir(remembered.parent().unwrap())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".push.json")
+        })
+        .collect();
+    assert!(others.is_empty());
+}
+
+#[test]
+fn req_a_039_a_list_that_fails_after_the_drain_costs_no_drained_event() {
+    // REQ-A-039
+    use liveactivity::push::Message;
+    let (backend, driver) = layer_device("layer-list-fails");
+    let started: serde_json::Value = serde_json::from_str(
+        &backend.push_layer(&layer_member(&Message::start("x", ride("ride:7", None)))),
+    )
+    .unwrap();
+    let id = started["id"].as_str().unwrap().to_owned();
+    driver.pushed(&id, 0, "start", "ride:7", Some(0), None);
+    driver.tap(&id, 1, "pet");
+    let (live, events) = connect(backend);
+    // The question of what Android shows, which the records take, fails once after the drain took the events.
+    driver.lock().failing_observations = 1;
+    let _ = block_on(live.sync_events());
+    let delivered: Vec<Event> = events.try_iter().collect();
+    assert!(
+        delivered
+            .iter()
+            .any(|event| matches!(event, Event::Pushed(_))),
+        "{delivered:?}"
+    );
+    assert!(
+        delivered
+            .iter()
+            .any(|event| matches!(event, Event::Action(tap) if tap.action_id == "pet")),
+        "{delivered:?}"
+    );
+}

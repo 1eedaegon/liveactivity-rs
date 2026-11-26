@@ -15,6 +15,7 @@
 //! host that shows it implements `request_permissions` in a backend of its own around this one.
 
 mod convert;
+mod layer;
 mod layout;
 mod layouts;
 
@@ -36,7 +37,9 @@ use std::{
 pub struct AndroidFiles {
     /// The title of a layout without a text.
     pub app_name: String,
-    /// The folder of the app's files.
+    /// The folder of the app's files, `Context.getFilesDir()`. With the feature `android-push` it must be that
+    /// folder: a push in a process that a message started finds the backend's files there, and answers
+    /// `NATIVE_ERROR` where it does not.
     pub files: PathBuf,
     /// The file of the layout activities, relative to `files`.
     pub layout_store: PathBuf,
@@ -114,6 +117,10 @@ impl<D: Driver + 'static> LiveUpdateBackend<D> {
     /// The same backend with the app's files, which lets it run layouts, store images and report taps on buttons.
     #[must_use]
     pub fn with_files(self, files: AndroidFiles) -> Self {
+        // A push in a process that a message started builds its backend with the same files. A file that cannot be
+        // written leaves that push to answer `NATIVE_ERROR`, which its `pushed` event says.
+        #[cfg(feature = "android-push")]
+        let _ = layer::remember(&files);
         let images = files.files.join(&files.image_folder);
         let store = FileStore {
             path: files.files.join(&files.layout_store),

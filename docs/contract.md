@@ -619,7 +619,7 @@ and for the rules that follow a device:
   "chronometer": true, "links": true, "styleChange": true, "delayedEnd": true,
   "foregroundPlacement": true, "alert": true, "publicVersion": true, "branding": true,
   "scheduledStart": true, "exactStart": false, "wearOngoingActivity": false, "actionTargets": true,
-  "localOnly": true, "push": true, "watchMirror": true
+  "localOnly": true, "push": true, "watchMirror": true, "pushLayer": true
 }
 ```
 
@@ -632,15 +632,16 @@ when Android chooses. `actionTargets` says whether an action may run a component
 [a watch's Ongoing Activity](#a-watchs-ongoing-activity), and `localOnly` whether an activity can stay off a
 paired watch (a start's `localOnly`), `watchMirror` whether it can be mirrored to one (a start's `watchMirror`).
 `push` says whether the AAR hands a data message from the server to
-liveupdate's lifecycle (liveupdate 0.10); a layout activity of this crate is not pushed that way yet, so the
-feature `push` stays `unsupported` on Android. `links` and `chronometer` also decide what
+liveupdate's lifecycle (liveupdate 0.10), and `pushLayer` whether it hands the member `liveupdate.layer` to this
+crate, which runs a layout activity's push (liveupdate 0.12). `links` and `chronometer` also decide what
 [a layout shows](#what-android-shows). A member that the Android side does not report is false.
 Elsewhere `androidPresentation` is absent.
 
 A feature is `supported`, `unsupported` or `unknown`, and unknown never counts as supported. On iOS
 `actions` follows the device's support for buttons. On Android `layout` and `actions` are supported
 when the backend has the app's files, `nativeLiveActivity` when the device can promote a
-notification, and `push` is unsupported. Where there is no platform every feature is `unsupported`
+notification, and `push` when the backend has the app's files and `androidPresentation.pushLayer` is true: a
+server pushes a layout activity with `liveactivity::push` ([docs/server-push.md](server-push.md)). Where there is no platform every feature is `unsupported`
 and `backend` is `unsupported`.
 
 `live.permissions()`:
@@ -716,7 +717,7 @@ match with a `_` arm.
 | `Event::Action` | `ActionEvent` | iOS, Android: a tap on a `button` or a `toggle` node, or on an action of an Android content. For a toggle it has `on`, the state the person asked for, and `tap` says which tap it is ([A tap](#a-tap)) |
 | `Event::PushToken` | `PushTokenEvent` | iOS: a push token of an activity, new or changed |
 | `Event::PushToStartToken` | `PushToStartTokenEvent` | iOS: the app's push-to-start token, the one it has at launch and then each new one |
-| `Event::Pushed` | `PushedEvent` | Android: what a push from the server did, taken or refused: `{ activityId?, activityKey, command, revision?, code? }`; `activityId` is absent when the push named no live activity, `code` when it did what it asked (liveupdate 0.10) |
+| `Event::Pushed` | `PushedEvent` | Android: what a push from the server did, taken or refused: `{ activityId?, activityKey, command, revision?, code? }`; `activityId` is absent when the push named no live activity, `code` when it did what it asked (liveupdate 0.10). A layout activity's start or update that was taken comes again as `Event::Started` or `Event::Updated`, as on iOS |
 | `Event::Updated` | `UpdatedEvent` | iOS: content that a push delivered to a layout activity |
 | `Event::Started` | `StartedEvent` | iOS: a layout activity began, one the application started or one a push started |
 | `Event::State` | `StateEvent` | A new lifecycle state of an activity. iOS: every change, while the application runs. Android: each state once, `active`, `stale`, `ended` and `dismissed`, when the backend is asked (see below) |

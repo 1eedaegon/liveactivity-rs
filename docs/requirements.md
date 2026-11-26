@@ -416,6 +416,18 @@ Evidence: `contract::req_i_018_a_node_says_whether_it_is_drawn_in_standby` and
 `android::layout::tests::req_i_018_a_notification_never_fills_the_screen_as_standby_does`. The drawing in StandBy
 is run by activitykit's tests.
 
+## REQ-I-019 The push-to-start token the app has
+
+With `push_to_start(true)`, `Event::PushToStartToken` brings the push-to-start token that the app has when the
+Swift layer begins to watch it, at each launch, and then each new one, never the same one twice; `push_tokens()`
+holds it from then on. activitykit does so since 0.9.1, which this crate builds on. Before, only a change of the
+token came: on an iPhone XS with iOS 18.7 the app's token did not change and no event came in five minutes, so a
+server never learned it. This crate hands each token on as it comes.
+
+Evidence: `engine_fixtures::req_i_019_the_engine_reports_the_push_to_start_token_the_app_has`, and
+`ios::backend::tests::a_tap_keeps_its_intent_until_the_sink_returns_and_pushes_wait_for_nothing` for a token handed
+on and held. The token on a phone is run by activitykit's tests; a simulator has no APNs.
+
 ## REQ-E-002 Started, state and permission events
 
 The sink receives a layout activity that began, a new lifecycle state of any activity, and the permissions after

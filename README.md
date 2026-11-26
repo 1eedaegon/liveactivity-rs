@@ -532,7 +532,7 @@ started as `Event::Started`. The steps are in
 | `Event::Started` | a layout activity began, also one a push started | ✓ | |
 | `Event::Updated` | a push changed the content of a layout activity | ✓ | |
 | `Event::PushToken` | an activity got a push token, or a new one | ✓ | |
-| `Event::PushToStartToken` | the app got its push-to-start token | ✓ | |
+| `Event::PushToStartToken` | the app's push-to-start token, at launch and when it changes | ✓ | |
 | `Event::Permissions` | the person changed what the app may do | ✓ | |
 | `Event::Opened` | the person opened the application from a notification | the application gets the URL itself | ✓ when the host reports the opening intent |
 | `Event::Unknown` | something this version has no event for | | ✓ when the AAR is of a later liveupdate than the crate |

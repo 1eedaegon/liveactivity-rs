@@ -233,6 +233,9 @@ let live = LiveActivity::builder()
 A token that came before the application listened is kept. `live.push_tokens().await?` answers the
 newest token of each of the last 32 activities that got one, and the push-to-start token.
 
+The push-to-start token comes at each launch, the one the app already has, and again when it
+changes; within a launch the same token never comes twice. Send it to the server when it comes.
+
 Push-to-start (iOS 17.2) is off by default. Turn it on when the kit is built (below). An activity
 that a push starts is in `list_layout()`.
 
@@ -329,7 +332,7 @@ fn connect() -> Result<LiveActivity> {
 | --- | --- |
 | `receipts(Receipts::Full)` | the default: the Swift layer keeps the accepted values of each activity, in plain text, in a file of the app's Application Support |
 | `receipts(Receipts::Redacted)` | keeps a SHA-256 digest of the accepted content instead of the values |
-| `push_to_start(true)` | watches the app's push-to-start token and reports it as `Event::PushToStartToken` |
+| `push_to_start(true)` | reports the app's push-to-start token as `Event::PushToStartToken`: the one it has at launch, then each new one |
 
 A receipt that cannot be read costs that receipt and not the list: `list()` answers `NATIVE_ERROR`
 only for a file that cannot be opened or written. The Swift layer keeps the newest 256 receipts.

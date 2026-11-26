@@ -10,9 +10,16 @@ liveupdate 0.9.0 adds three things to Android that a caller of this crate cannot
 | `LiveUpdate::open_promotion_settings()` (the bridge's `settings`) | The system's screen where a person allows or stops the application's Live Updates (Android 16 and later), or its notification settings before that; Android starts it only while the application is in the foreground, and `Ok` says that it was asked | `LiveActivity::open_promotion_settings()`, one backend method with a default that answers `UNSUPPORTED_FEATURE` (REQ-A-033) |
 | The AAR names its two channels with the string resources `liveupdate_channel_name`, `liveupdate_channel_description`, `liveupdate_alert_channel_name` and `liveupdate_alert_channel_description` | An application names the channels in its own words and languages, also for a channel that exists | The Android setup says how (REQ-A-034) |
 
+activitykit 0.9.0, published the same day, adds one member of a node that this release takes too.
+
+| activitykit 0.9.0 | What it offers | Where it is here |
+| --- | --- | --- |
+| `ifFullscreen` on any node (`Node::when_fullscreen()`, `unless_fullscreen()`) | A node drawn only while the Lock Screen presentation fills the screen, in StandBy (iOS 17), or only while it does not | The contract's node members; the Android projection, which is never full screen (REQ-I-018) |
+
 ## Goal
 
-The crate builds on liveupdate 0.9.0, and each part of the list is in the contract, the Rust API and the documents.
+The crate builds on liveupdate 0.9.0 and activitykit 0.9.0, and each part of the lists is in the contract, the Rust
+API and the documents.
 
 ## Requirements of this change
 
@@ -21,6 +28,7 @@ The crate builds on liveupdate 0.9.0, and each part of the list is in the contra
 | REQ-A-032 | `AndroidOptions::local_only` (JSON `android.localOnly`, false when absent): every snapshot of the activity stays off a paired device, the projected ones and an Android content; an Android content's `localOnly` keeps its own snapshot off. `capabilities().android_presentation.local_only` says whether the device can; where it cannot, such a start or update is `UNSUPPORTED_FEATURE` and posts nothing. |
 | REQ-A-033 | `LiveActivity::open_promotion_settings()` asks Android for the settings of the application's Live Updates. A backend without the command, iOS and the default of a platform without Live Activities answer `UNSUPPORTED_FEATURE`, or `UNSUPPORTED_PLATFORM` there. |
 | REQ-A-034 | The Android setup names the AAR's four channel strings, which the application overrides in its own `res/values*/strings.xml`. |
+| REQ-I-018 | `ifFullscreen` on any node, a Boolean on every platform; Android, never full screen, leaves a node with `true` out and names nothing. |
 
 ## Decisions
 

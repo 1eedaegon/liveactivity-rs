@@ -356,6 +356,39 @@ fn req_i_017_a_request_that_this_version_cannot_read_in_full_is_refused() {
 }
 
 #[test]
+fn req_i_018_a_node_says_whether_it_is_drawn_in_standby() {
+    // REQ-I-018
+    use liveactivity::activitykit::layout::text;
+    assert_eq!(
+        serde_json::to_value(text("Gate 4").when_fullscreen()).unwrap(),
+        json!({"type":"text","value":"Gate 4","ifFullscreen":true})
+    );
+    assert_eq!(
+        serde_json::to_value(text("Gate 4").unless_fullscreen()).unwrap(),
+        json!({"type":"text","value":"Gate 4","ifFullscreen":false})
+    );
+    // A Boolean on any node is taken on every platform; anything else is not.
+    let layout = |member: serde_json::Value| {
+        json!({"layout":{"lockScreen":{"type":"vstack","children":[
+            {"type":"text","bind":"eta","ifFullscreen":member}]}}})
+    };
+    for right in [json!(true), json!(false)] {
+        assert_eq!(
+            answer_to_a_start(layout(right.clone())),
+            "UNSUPPORTED_PLATFORM",
+            "{right}"
+        );
+    }
+    for wrong in [json!(null), json!("yes"), json!(1), json!({"bind":"eta"})] {
+        assert_eq!(
+            answer_to_a_start(layout(wrong.clone())),
+            "INVALID_INPUT",
+            "{wrong}"
+        );
+    }
+}
+
+#[test]
 fn req_i_004_a_wrong_toggle_reaches_no_backend() {
     // REQ-I-004
     let toggle = |members: serde_json::Value| {

@@ -403,6 +403,19 @@ opened or written, and a load keeps the newest 256.
 Evidence: `contract::req_i_017_a_request_that_this_version_cannot_read_in_full_is_refused`. The widget's reading
 and the receipts are run by activitykit's tests.
 
+## REQ-I-018 A node drawn only in StandBy
+
+Any node of a layout may carry `ifFullscreen`, a Boolean (`Node::when_fullscreen()`, `unless_fullscreen()`), as
+activitykit has it since 0.9.0: with `true` iOS draws the node only while the Lock Screen presentation fills the
+screen, in StandBy (iOS 17), with `false` only while it does not, beside the other conditions. Anything but a
+Boolean is `INVALID_INPUT` on every platform. A notification is never full screen: the Android projection never
+shows a node with `true`, always one with `false`, does not count the first for its style, and names nothing in
+`degraded_features`, since nothing that Android has is left out.
+
+Evidence: `contract::req_i_018_a_node_says_whether_it_is_drawn_in_standby` and
+`android::layout::tests::req_i_018_a_notification_never_fills_the_screen_as_standby_does`. The drawing in StandBy
+is run by activitykit's tests.
+
 ## REQ-E-002 Started, state and permission events
 
 The sink receives a layout activity that began, a new lifecycle state of any activity, and the permissions after

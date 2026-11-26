@@ -4,7 +4,13 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
-Built on liveupdate 0.9.0, with its AAR `liveupdate-android-0.9.0.aar` (by way of 0.8.3, documents only).
+Built on liveupdate 0.9.0, with its AAR `liveupdate-android-0.9.0.aar` (by way of 0.8.3, documents only), and on
+activitykit 0.9.0.
+
+- **A node drawn only in StandBy** (iOS 17): `Node::when_fullscreen()` and `unless_fullscreen()`, the member
+  `ifFullscreen`, draw a node only while the Lock Screen presentation fills the screen of an iPhone that charges on
+  its side, or only while it does not. A notification is never full screen: Android leaves a node of StandBy out and
+  shows its counterpart.
 
 - **An activity off a paired watch** (Android): `AndroidOptions::with_local_only(true)`, JSON `android.localOnly`,
   keeps every snapshot of a layout's activity on the phone, and an Android content's `localOnly` its own snapshot;
@@ -19,7 +25,8 @@ Built on liveupdate 0.9.0, with its AAR `liveupdate-android-0.9.0.aar` (by way o
   `liveupdate_channel_name`, `liveupdate_channel_description`, `liveupdate_alert_channel_name` and
   `liveupdate_alert_channel_description`, which the application overrides in its `res/values*/strings.xml`.
 
-When updating: take `liveupdate-android-0.9.0.aar`. A backend of the host's own that wraps the default one forwards
+When updating: take `liveupdate-android-0.9.0.aar`, and point the widget extension's package reference at
+activitykit 0.9.0 for `ifFullscreen` (a widget up to 0.8.1 draws such a node always). A backend of the host's own that wraps the default one forwards
 `open_promotion_settings`.
 
 ## 0.11.0 - 2026-11-20

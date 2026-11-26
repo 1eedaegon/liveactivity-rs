@@ -898,6 +898,29 @@ fn req_a_023_a_layouts_bar_is_filled_up_to_its_value() {
 }
 
 #[test]
+fn req_i_018_a_notification_never_fills_the_screen_as_standby_does() {
+    // REQ-I-018
+    // A node drawn only in StandBy never shows, one drawn only outside it always does, and nothing is named.
+    let tree = layout(json!({ "type": "vstack", "children": [
+        { "type": "text", "value": "Gate 4 in big letters", "ifFullscreen": true },
+        { "type": "text", "bind": "status", "ifFullscreen": false },
+        { "type": "button", "actionId": "big", "ifFullscreen": true, "child": text("Only in StandBy") },
+        text("Gate 4"),
+    ] }));
+    let projection = projected(&tree, json!({ "status": "On the way" }));
+    assert_eq!(projection.snapshot.title, "On the way");
+    assert_eq!(projection.snapshot.status, "Gate 4");
+    assert!(presentation(&projection).actions.is_empty());
+    assert!(projection.degraded.is_empty(), "{:?}", projection.degraded);
+    // The style of the generation counts what can show: the node of StandBy cannot.
+    let only_in_standby = layout(json!({ "type": "vstack", "children": [
+        text("Ride"),
+        { "type": "progress", "bind": "p", "ifFullscreen": true },
+    ] }));
+    assert_eq!(template(&only_in_standby), liveupdate::Template::Standard);
+}
+
+#[test]
 fn req_a_014_a_layout_is_drawn_as_while_fresh_and_its_staleness_is_named() {
     // REQ-A-014
     let tree = layout(json!({ "type": "vstack", "children": [

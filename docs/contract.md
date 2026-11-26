@@ -864,8 +864,9 @@ question whether the application may go on showing Live Activities, then have th
 (iOS 18) and CarPlay (iOS 26). It is drawn only when the widget extension's Info.plist sets
 `ActivityKitSmallFamily` to true ([iOS setup](ios-setup.md)); the extension then also draws the compact parts of
 a layout without the region in a row. Without the key iOS shows the compact parts itself, and the record of a
-layout with `small` names `layout.small`. A notification has no place for the region: Android draws nothing of it
-and names `layout.small`. What an Android watch and an Android car show of an activity is in
+layout with `small` names `layout.small`. On an Apple Watch a tap on the tile shows it larger, and the system's
+"Open on iPhone" there opens the application on the phone (activitykit's account). A notification has no place
+for the region: Android draws nothing of it and names `layout.small`. What an Android watch and an Android car show of an activity is in
 [A watch's Ongoing Activity](#a-watchs-ongoing-activity).
 
 On iOS an island part that the layout leaves out is drawn with a default: `expanded` is the lock
@@ -916,6 +917,12 @@ Every node is an object with a `type`. Any node may also carry:
   stale, with `false` only while it is not. Content is stale once its `staleAt` has passed and no
   newer content has come. Beside `if` or `unless` the node is drawn while both hold. See
   [Staleness](#staleness);
+- `ifFullscreen`, a boolean: with `true` the node and its subtree are drawn only while the Lock Screen
+  presentation fills the screen, in StandBy, where an iPhone that charges on its side shows the activity
+  scaled up (iOS 17, activitykit 0.9.0); with `false` only while it does not. Beside the other conditions the
+  node is drawn while all hold. The island's parts and the small family are never full screen, and neither is a
+  notification: Android never shows a node with `true` and always one with `false`, and names nothing. A widget
+  built from activitykit up to 0.8.1 passes over the member and draws the node always;
 - `accessibility`: what assistive technologies read of the node, see [Accessibility](#accessibility);
 - `transition`: how the node comes and goes when its `if` or `unless` shows or hides it: `opacity`,
   `slide`, `moveTop`, `moveBottom`, `moveLeading`, `moveTrailing`, `pushTop`, `pushBottom`,
@@ -1210,8 +1217,8 @@ A notification cannot draw a layout. For a snapshot without [an Android content]
 the Android backend projects the `lockScreen` tree onto one of Android's notification styles and
 reports what it left out. It reads only the lock screen tree, in
 document order, depth first, with the current values and the `if` and `unless` conditions applied.
-The content is drawn as it is while fresh: a node with `ifStale: true` is never shown and counts
-for nothing below.
+The content is drawn as it is while fresh, and as outside StandBy: a node with `ifStale: true` or
+`ifFullscreen: true` is never shown and counts for nothing below.
 
 The style of the projection is the layout's, the same with every snapshot. It is chosen from the
 tree, conditions aside: a `progress` anywhere gives the progress style; else a `timerText` the

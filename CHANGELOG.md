@@ -4,6 +4,10 @@ Releases are prepared by `tools/release.sh` from the subjects of the commits sin
 
 ## Unreleased
 
+## 0.16.1 - 2026-11-27
+
+- docs: the platforms, the engines and server pushes at the top of the README, and the crate's search terms (#46) (`0a92547`)
+
 ## 0.16.0 - 2026-11-26
 
 - feat: a layout activity pushed on Android through liveupdate 0.12.0's layer, and a sender for FCM (#45) (`41ce53a`)

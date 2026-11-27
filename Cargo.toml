@@ -20,7 +20,7 @@ base64 = "0.23.1"
 futures-executor = "0.3"
 # The sender's: one crypto provider, aws-lc-rs, for TLS and for the signatures.
 jsonwebtoken = { version = "12.0.0", default-features = false, features = ["aws_lc_rs", "use_pem"] }
-liveupdate = "0.12.0"
+liveupdate = "0.12.1"
 reqwest = { version = "0.13.5", default-features = false, features = ["http2", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }

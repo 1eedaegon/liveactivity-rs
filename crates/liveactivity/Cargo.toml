@@ -8,9 +8,9 @@ license.workspace = true
 repository.workspace = true
 readme = "../../README.md"
 documentation = "https://docs.rs/liveactivity"
-description = "Framework-neutral Live Activities: one interface over ActivityKit, Android Live Updates and other backends"
-keywords = ["live-activity", "activitykit", "dynamic-island", "android", "ios"]
-categories = ["api-bindings", "os"]
+description = "Live Activities from Rust on iOS and Android: one interface over ActivityKit (Lock Screen, Dynamic Island) and Android Live Updates, with server pushes through APNs and FCM"
+keywords = ["live-activity", "dynamic-island", "live-updates", "ios", "android"]
+categories = ["api-bindings", "gui", "os", "os::android-apis"]
 
 [package.metadata.docs.rs]
 all-features = true

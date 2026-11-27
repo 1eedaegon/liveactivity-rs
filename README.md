@@ -16,6 +16,29 @@ live.update(UpdateInput::progress(&order.id, 1, "Order 42", "On the way", 0.6))
 live.end(EndInput::new(&order.id)).await?;
 ```
 
+## Platforms
+
+| Platform | Engine | Shows | From |
+| --- | --- | --- | --- |
+| iOS, iPadOS | [activitykit](https://crates.io/crates/activitykit) (ActivityKit, WidgetKit) | the Lock Screen, the Dynamic Island, StandBy, a paired Apple Watch, CarPlay | iOS 16.1, iPadOS 17 |
+| Android | [liveupdate](https://crates.io/crates/liveupdate) (an AAR) | an ongoing notification, promoted to a Live Update; a Wear OS watch | Android 8 (API 26); Live Updates from Android 16 |
+| A server | `features = ["server"]` | pushes through APNs and FCM | any target |
+| Anything else | your `LiveActivityBackend` | what it draws | any target |
+
+```text
+                 your application
+                        │
+       LiveActivity: one contract, one JSON
+             ┌──────────┴──────────┐
+    ActivityKitBackend      LiveUpdateBackend
+       activitykit              liveupdate
+       ActivityKit         Android notifications
+             ▲                     ▲
+         APNs push          FCM data message
+             └──────────┬──────────┘
+             push::Sender (feature "server")
+```
+
 ## Install
 
 ```toml

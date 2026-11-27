@@ -741,11 +741,14 @@ class AppMessagingService : FirebaseMessagingService() {
 ```
 
 The service runs in the application's main process, where the application's own client runs: one
-lock of the process serves both. The AAR has no Firebase dependency; any provider that hands over a
+lock of the process serves both, so a push and a call of the application on the same key run one after
+the other, and the revision decides between them (`STALE_REVISION` in the call, or in the push's code).
+Give the service no `android:process`, and let the meta-data name the application's library that links
+this crate: a second process, or a second copy of the crate, has a lock of its own. The AAR has no Firebase dependency; any provider that hands over a
 map of strings works. What a push did comes with the other events at the next `sync_events`, as
 `Event::Pushed` with the key, the command, the revision and a refusal's code
-([docs/contract.md](contract.md#events)). `capabilities().android_presentation.push` says whether the
-AAR has the entry; whether the library was built with the feature is the application's to know.
+([docs/contract.md](contract.md#events)). `capabilities().android_presentation.push` is supported where the
+AAR has the entry, the backend has its files and the library was built with the feature `android-push`.
 
 A layout activity of this crate is pushed by the member `liveupdate.layer`, which a server builds with
 `liveactivity::push::Message` for an FCM target ([docs/server-push.md](server-push.md)). liveupdate 0.12

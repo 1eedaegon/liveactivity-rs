@@ -747,8 +747,9 @@ Give the service no `android:process`, and let the meta-data name the applicatio
 this crate: a second process, or a second copy of the crate, has a lock of its own. The AAR has no Firebase dependency; any provider that hands over a
 map of strings works. What a push did comes with the other events at the next `sync_events`, as
 `Event::Pushed` with the key, the command, the revision and a refusal's code
-([docs/contract.md](contract.md#events)). `capabilities().android_presentation.push` is supported where the
-AAR has the entry, the backend has its files and the library was built with the feature `android-push`.
+([docs/contract.md](contract.md#events)). `capabilities().android_presentation.push_layer` says whether the
+AAR has the entry; `capabilities().push` is supported where it has, the backend has its files and the
+library was built with the feature `android-push`.
 
 A layout activity of this crate is pushed by the member `liveupdate.layer`, which a server builds with
 `liveactivity::push::Message` for an FCM target ([docs/server-push.md](server-push.md)). liveupdate 0.12
